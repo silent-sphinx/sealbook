@@ -1,0 +1,24 @@
+[package]
+name = "sealbook-android"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+name = "sealbook_android"
+
+[dependencies]
+sealbook-client = { path = "../sealbook-client" }
+sealbook-crypto = { path = "../sealbook-crypto" }
+reqwest = { workspace = true, features = ["blocking"] }
+uniffi = { version = "0.32", features = ["cli"] }
+base64 = { workspace = true }
+uuid = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"

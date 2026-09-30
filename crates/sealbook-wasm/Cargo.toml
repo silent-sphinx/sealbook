@@ -1,0 +1,20 @@
+[package]
+name = "sealbook-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+base64.workspace = true
+console_error_panic_hook.workspace = true
+js-sys.workspace = true
+sealbook-crypto = { path = "../sealbook-crypto" }
+serde.workspace = true
+serde_json.workspace = true
+uuid = { workspace = true, features = ["js"] }
+wasm-bindgen.workspace = true
+getrandom = { version = "0.2", features = ["js"] }
+getrandom_04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }

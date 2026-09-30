@@ -1,0 +1,19 @@
+[package]
+name = "sealbook-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+base64.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
+rustls-pki-types.workspace = true
+sealbook-crypto = { path = "../sealbook-crypto" }
+sealbook-protocol = { path = "../sealbook-protocol" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+webpki-roots.workspace = true
+zeroize.workspace = true

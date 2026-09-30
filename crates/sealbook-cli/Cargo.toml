@@ -1,0 +1,25 @@
+[package]
+name = "sealbook-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "sealbook"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+chacha20poly1305.workspace = true
+clap.workspace = true
+hex.workspace = true
+keyring.workspace = true
+rand.workspace = true
+rustls-pki-types.workspace = true
+sealbook-client = { path = "../sealbook-client" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+rpassword.workspace = true

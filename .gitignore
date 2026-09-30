@@ -1,0 +1,17 @@
+/target
+**/*.rs.bk
+.idea/
+.vscode/
+*.db
+*.db-*
+*.db.*
+*.bak
+*.pre-strip*
+/data
+.sealbook-state.json
+.env
+.DS_Store
+cert.pem
+key.pem
+/tls
+PROTOCOL.md

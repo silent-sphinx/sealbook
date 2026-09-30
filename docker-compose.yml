@@ -1,0 +1,30 @@
+services:
+  sealbook:
+    image: sealbook:local
+    container_name: sealbook
+    restart: always
+    # The server drains in-flight requests for up to 20s on SIGTERM; give Docker
+    # enough patience not to SIGKILL it part way through a key rotation.
+    stop_grace_period: 30s
+    ports:
+      - "8443:8443"
+    environment:
+      SEALBOOK_DATA_DIR: /data
+      SEALBOOK_ENV: production
+      RUST_LOG: sealbook_server=info
+      SEALBOOK_CORS_ORIGINS: https://your-frontend-domain.example
+      # Where the certificate clients check comes from:
+      #   self-signed  generated here and pinned by clients (home network, VPN, bare IP)
+      #   provided     you supply /data/tls/cert.pem and key.pem (public domain name)
+      #   proxy        a reverse proxy holds it; set SEALBOOK_TRUSTED_PROXIES too
+      SEALBOOK_TLS_MODE: self-signed
+    volumes:
+      - sealbook-data:/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  sealbook-data:

@@ -1,0 +1,23 @@
+[package]
+name = "sealbook-crypto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+argon2.workspace = true
+chacha20poly1305.workspace = true
+ed25519-dalek.workspace = true
+hkdf.workspace = true
+hpke.workspace = true
+ml-dsa.workspace = true
+opaque-ke.workspace = true
+rand.workspace = true
+sha2.workspace = true
+subtle.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
