@@ -10,6 +10,14 @@ use crate::error::CryptoError;
 pub const COLLECTION_KEY_LEN: usize = 32;
 pub const NONCE_LEN: usize = 24;
 const PAD_LEN_PREFIX: usize = 4;
+/// The table stops at 32 KiB because `pad`'s `next_power_of_two` fallback
+/// continues it exactly, so listing more entries would only add a second place
+/// to keep in step with `MAX_PADDED_OBJECT_SIZE`.
+///
+/// Buckets are deliberately coarse. `padded_size` is stored and served in the
+/// clear, so doubling steps reveal a plaintext length only to within a factor of
+/// two, and an edit usually leaves it unchanged. Finer buckets would pin a large
+/// object's length closely and turn each revision into a size delta.
 const BUCKETS: [usize; 8] = [256, 512, 1024, 2048, 4096, 8192, 16384, 32768];
 
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
@@ -129,5 +137,12 @@ mod tests {
 
         let bad_aad = object_aad(b"obj", b"other");
         assert!(decrypt_object(&key, &enc, &bad_aad).is_err());
+    }
+
+    #[test]
+    fn padding_above_the_bucket_table_is_a_power_of_two() {
+        assert_eq!(pad(b"x").len(), 256);
+        assert_eq!(pad(&vec![0u8; 600 * 1024]).len(), 1024 * 1024);
+        assert_eq!(pad(&vec![0u8; 3 * 1024 * 1024]).len(), 4 * 1024 * 1024);
     }
 }

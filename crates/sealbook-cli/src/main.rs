@@ -14,9 +14,10 @@ use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::CertificateDer;
 use sealbook_client::{
     LocalState, SealbookClient, ADDRESS_BOOK_ID_PROP, DEFAULT_ADDRESS_BOOK_ID,
-    DEFAULT_ADDRESS_BOOK_NAME,
+    DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_NOTEBOOK_NAME,
 };
 use sha2::{Digest, Sha256};
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use uuid::Uuid;
 
 const STATE_VERSION: u8 = 1;
@@ -80,6 +81,14 @@ enum Command {
         #[command(subcommand)]
         command: CalendarCommand,
     },
+    Notes {
+        #[command(subcommand)]
+        command: NotesCommand,
+    },
+    Notebook {
+        #[command(subcommand)]
+        command: NotebookCommand,
+    },
     Devices {
         #[command(subcommand)]
         command: DevicesCommand,
@@ -137,6 +146,62 @@ enum ContactsCommand {
     List {
         #[arg(long)]
         book: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum NotebookCommand {
+    List,
+    Create {
+        #[arg(long)]
+        name: String,
+    },
+    Delete {
+        #[arg(long)]
+        id: Uuid,
+    },
+}
+
+#[derive(Subcommand)]
+enum NotesCommand {
+    /// Store a note. The markdown body comes from --body, --file, or stdin.
+    Add {
+        #[arg(long)]
+        title: String,
+        #[arg(long, conflicts_with = "file")]
+        body: Option<String>,
+        /// Read the body from a file. `-` means stdin.
+        #[arg(long)]
+        file: Option<PathBuf>,
+        #[arg(long)]
+        notebook: Option<Uuid>,
+    },
+    /// Replace a note's title and body, keeping its original creation time.
+    Update {
+        #[arg(long)]
+        id: Uuid,
+        #[arg(long)]
+        title: String,
+        #[arg(long, conflicts_with = "file")]
+        body: Option<String>,
+        #[arg(long)]
+        file: Option<PathBuf>,
+        #[arg(long)]
+        notebook: Option<Uuid>,
+    },
+    /// Titles only. A body can be megabytes, so use `show` for one.
+    List {
+        #[arg(long)]
+        notebook: Option<Uuid>,
+    },
+    /// Print one note's markdown body on stdout, unchanged.
+    Show {
+        #[arg(long)]
+        id: Uuid,
+    },
+    Delete {
+        #[arg(long)]
+        id: Uuid,
     },
 }
 
@@ -432,7 +497,6 @@ async fn main() -> Result<()> {
                     let event = serde_json::json!({
                         "@type": "CalendarEvent", "version": "1.0", "title": title,
                         "start": start, "end": end, "notes": notes, "calendarId": calendar,
-                        "calendarId": calendar,
                     });
                     let id = Uuid::new_v4();
                     let revision = client.put_calendar_event(id, &event.to_string()).await?;
@@ -445,8 +509,202 @@ async fn main() -> Result<()> {
                 }
             }
         }
+        Command::Notebook { command } => {
+            let state = load_state(&cli.state)?;
+            let password = std::env::var("SEALBOOK_PASSWORD")
+                .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+            let mut client =
+                SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
+            client.login(&password).await.context("login")?;
+            client
+                .ensure_default_notebook()
+                .await
+                .context("default notebook")?;
+            match command {
+                NotebookCommand::List => {
+                    for (id, name) in client.list_notebooks().await.context("notebooks")? {
+                        println!("{id} {name}");
+                    }
+                }
+                NotebookCommand::Create { name } => {
+                    let id = Uuid::new_v4();
+                    client
+                        .put_notebook(id, &name)
+                        .await
+                        .context("create notebook")?;
+                    println!("created notebook {id} {name}");
+                }
+                NotebookCommand::Delete { id } => {
+                    let revision = client
+                        .delete_notebook(id)
+                        .await
+                        .context("delete notebook")?;
+                    println!("deleted notebook {id} at revision {revision}");
+                }
+            }
+        }
+        Command::Notes { command } => {
+            let state = load_state(&cli.state)?;
+            let password = std::env::var("SEALBOOK_PASSWORD")
+                .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+            let mut client =
+                SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
+            client.login(&password).await.context("login")?;
+            let default_notebook = client
+                .ensure_default_notebook()
+                .await
+                .context("default notebook")?;
+            match command {
+                NotesCommand::Add {
+                    title,
+                    body,
+                    file,
+                    notebook,
+                } => {
+                    let body = read_note_body(body, file)?;
+                    let id = Uuid::new_v4();
+                    let note = note_json(&title, &body, notebook.unwrap_or(default_notebook), None);
+                    let revision = client.put_note(id, &note).await.context("add note")?;
+                    println!("stored encrypted note {id} at revision {revision}");
+                }
+                NotesCommand::Update {
+                    id,
+                    title,
+                    body,
+                    file,
+                    notebook,
+                } => {
+                    let body = read_note_body(body, file)?;
+                    // Only a client knows when a note was created: the server keeps
+                    // no user timestamps, so an update that does not carry the
+                    // original forward loses it.
+                    let existing = find_note(&client, id).await?;
+                    let created = note_created_at(&existing);
+                    let note = note_json(
+                        &title,
+                        &body,
+                        notebook.unwrap_or_else(|| note_notebook_id(&existing, default_notebook)),
+                        created.as_deref(),
+                    );
+                    let revision = client.put_note(id, &note).await.context("update note")?;
+                    println!("updated encrypted note {id} at revision {revision}");
+                }
+                NotesCommand::List { notebook } => {
+                    let notebooks = client.list_notebooks().await.context("notebooks")?;
+                    let notes = client.list_notes().await.context("notes")?;
+                    let mut shown = 0;
+                    for (id, json) in notes {
+                        let book = note_notebook_id(&json, default_notebook);
+                        if notebook.is_some_and(|want| want != book) {
+                            continue;
+                        }
+                        let name = notebooks
+                            .iter()
+                            .find(|(candidate, _)| *candidate == book)
+                            .map(|(_, name)| name.as_str())
+                            .unwrap_or(DEFAULT_NOTEBOOK_NAME);
+                        println!("{id} [{name}] {}", note_title(&json));
+                        shown += 1;
+                    }
+                    if shown == 0 {
+                        println!("(no notes)");
+                    }
+                }
+                NotesCommand::Show { id } => {
+                    let note = find_note(&client, id).await?;
+                    print!("{}", note_body(&note));
+                }
+                NotesCommand::Delete { id } => {
+                    let revision = client.delete_note(id).await.context("delete note")?;
+                    println!("deleted encrypted note {id} at revision {revision}");
+                }
+            }
+        }
     }
     Ok(())
+}
+
+/// The note body, from whichever of the three doors the caller used.
+///
+/// Reading stdin only when it is not a terminal keeps a forgotten flag from
+/// looking like a hang.
+fn read_note_body(body: Option<String>, file: Option<PathBuf>) -> Result<String> {
+    use std::io::{IsTerminal, Read};
+    if let Some(body) = body {
+        return Ok(body);
+    }
+    if let Some(path) = file {
+        if path.as_os_str() != "-" {
+            return std::fs::read_to_string(&path)
+                .with_context(|| format!("read note body from {}", path.display()));
+        }
+    } else if std::io::stdin().is_terminal() {
+        anyhow::bail!("pass --body, --file <path>, or pipe the note body on stdin");
+    }
+    let mut buf = String::new();
+    std::io::stdin()
+        .read_to_string(&mut buf)
+        .context("read note body from stdin")?;
+    Ok(buf)
+}
+
+async fn find_note(client: &SealbookClient, id: Uuid) -> Result<String> {
+    client
+        .list_notes()
+        .await
+        .context("notes")?
+        .into_iter()
+        .find(|(candidate, _)| *candidate == id)
+        .map(|(_, json)| json)
+        .with_context(|| format!("no note with id {id}"))
+}
+
+fn note_json(title: &str, body: &str, notebook_id: Uuid, created_at: Option<&str>) -> String {
+    let now = OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_default();
+    serde_json::json!({
+        "@type": "Note",
+        "version": "1.0",
+        "title": title,
+        "body": body,
+        "notebookId": notebook_id.to_string(),
+        "createdAt": created_at.unwrap_or(&now),
+        "updatedAt": now,
+    })
+    .to_string()
+}
+
+fn note_field(json: &str, field: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|value| {
+            value
+                .get(field)
+                .and_then(|found| found.as_str())
+                .map(ToOwned::to_owned)
+        })
+}
+
+fn note_title(json: &str) -> String {
+    note_field(json, "title")
+        .map(|title| title.trim().to_string())
+        .filter(|title| !title.is_empty())
+        .unwrap_or_else(|| "Untitled".to_string())
+}
+
+fn note_body(json: &str) -> String {
+    note_field(json, "body").unwrap_or_default()
+}
+
+fn note_created_at(json: &str) -> Option<String> {
+    note_field(json, "createdAt")
+}
+
+fn note_notebook_id(json: &str, fallback: Uuid) -> Uuid {
+    note_field(json, "notebookId")
+        .and_then(|id| Uuid::parse_str(&id).ok())
+        .unwrap_or(fallback)
 }
 
 fn jscontact(name: &str, email: Option<&str>, book_id: Uuid) -> String {

@@ -12,7 +12,8 @@ use sealbook_crypto::{
 use sealbook_protocol::{
     ErrorBody, KeyWrapBody, PhraseRecoveryBody, PutObjectRequest, RotatedObject,
     ADDRESS_BOOK_CONTENT_TYPE, CALENDAR_CONTENT_TYPE, CALENDAR_EVENT_CONTENT_TYPE,
-    JSCONTACT_CONTENT_TYPE, MAX_PADDED_OBJECT_SIZE, MIN_PADDED_OBJECT_SIZE,
+    JSCONTACT_CONTENT_TYPE, MAX_PADDED_OBJECT_SIZE, MIN_PADDED_OBJECT_SIZE, NOTEBOOK_CONTENT_TYPE,
+    NOTE_CONTENT_TYPE,
 };
 
 use crate::*;
@@ -175,12 +176,18 @@ fn validate_encrypted(
     padded_size: usize,
     tombstone: bool,
 ) -> Result<(), (StatusCode, Json<ErrorBody>)> {
+    // Also gates rotation, via `validate_rotated_object`. A rotation must re-send
+    // the current object set with each content type preserved, so a type missing
+    // here makes every future key rotation fail for any account that holds one,
+    // which means a revoked device keeps a working collection key.
     let valid_content_type = matches!(
         content_type,
         JSCONTACT_CONTENT_TYPE
             | ADDRESS_BOOK_CONTENT_TYPE
             | CALENDAR_EVENT_CONTENT_TYPE
             | CALENDAR_CONTENT_TYPE
+            | NOTE_CONTENT_TYPE
+            | NOTEBOOK_CONTENT_TYPE
     );
     if !valid_content_type || content_type.len() > 128 {
         return Err(err(StatusCode::BAD_REQUEST, "invalid content type"));

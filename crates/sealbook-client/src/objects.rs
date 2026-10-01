@@ -10,7 +10,8 @@ use sealbook_crypto::{
 use sealbook_protocol::{ChangesResponse, ManifestEntry, PutObjectRequest};
 use sealbook_protocol::{
     ADDRESS_BOOK_CONTENT_TYPE, CALENDAR_CONTENT_TYPE, CALENDAR_EVENT_CONTENT_TYPE,
-    DEFAULT_ADDRESS_BOOK_ID, DEFAULT_ADDRESS_BOOK_NAME, JSCONTACT_CONTENT_TYPE,
+    DEFAULT_ADDRESS_BOOK_ID, DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_NOTEBOOK_ID, DEFAULT_NOTEBOOK_NAME,
+    JSCONTACT_CONTENT_TYPE, NOTEBOOK_CONTENT_TYPE, NOTE_CONTENT_TYPE,
 };
 
 use crate::{ClientError, ManifestError, SealbookClient};
@@ -82,7 +83,7 @@ impl SealbookClient {
             if obj.content_type != ADDRESS_BOOK_CONTENT_TYPE {
                 continue;
             }
-            out.push((obj.id, address_book_name(&obj.plaintext)));
+            out.push((obj.id, container_name(&obj.plaintext)));
         }
         out.sort_by(|a, b| {
             if a.0 == DEFAULT_ADDRESS_BOOK_ID {
@@ -150,6 +151,110 @@ impl SealbookClient {
         let mut out = Vec::new();
         for obj in self.list_objects().await? {
             if obj.content_type == CALENDAR_EVENT_CONTENT_TYPE {
+                out.push((obj.id, obj.plaintext));
+            }
+        }
+        Ok(out)
+    }
+
+    pub async fn delete_calendar(&self, object_id: Uuid) -> Result<u64, ClientError> {
+        self.write_object(
+            object_id,
+            Vec::new(),
+            Vec::new(),
+            0,
+            CALENDAR_CONTENT_TYPE,
+            true,
+        )
+        .await
+    }
+
+    pub async fn delete_calendar_event(&self, object_id: Uuid) -> Result<u64, ClientError> {
+        self.write_object(
+            object_id,
+            Vec::new(),
+            Vec::new(),
+            0,
+            CALENDAR_EVENT_CONTENT_TYPE,
+            true,
+        )
+        .await
+    }
+
+    pub async fn put_note(&self, object_id: Uuid, note: &str) -> Result<u64, ClientError> {
+        self.put_sealed(object_id, note.as_bytes(), NOTE_CONTENT_TYPE)
+            .await
+    }
+
+    pub async fn delete_note(&self, object_id: Uuid) -> Result<u64, ClientError> {
+        self.write_object(
+            object_id,
+            Vec::new(),
+            Vec::new(),
+            0,
+            NOTE_CONTENT_TYPE,
+            true,
+        )
+        .await
+    }
+
+    pub async fn put_notebook(&self, object_id: Uuid, name: &str) -> Result<u64, ClientError> {
+        let plaintext = serde_json::json!({
+            "@type": "Notebook",
+            "version": "1.0",
+            "name": name,
+        })
+        .to_string();
+        self.put_sealed(object_id, plaintext.as_bytes(), NOTEBOOK_CONTENT_TYPE)
+            .await
+    }
+
+    pub async fn delete_notebook(&self, object_id: Uuid) -> Result<u64, ClientError> {
+        self.write_object(
+            object_id,
+            Vec::new(),
+            Vec::new(),
+            0,
+            NOTEBOOK_CONTENT_TYPE,
+            true,
+        )
+        .await
+    }
+
+    pub async fn ensure_default_notebook(&self) -> Result<Uuid, ClientError> {
+        let notebooks = self.list_notebooks().await?;
+        if notebooks.iter().any(|(id, _)| *id == DEFAULT_NOTEBOOK_ID) {
+            return Ok(DEFAULT_NOTEBOOK_ID);
+        }
+        self.put_notebook(DEFAULT_NOTEBOOK_ID, DEFAULT_NOTEBOOK_NAME)
+            .await?;
+        Ok(DEFAULT_NOTEBOOK_ID)
+    }
+
+    pub async fn list_notebooks(&self) -> Result<Vec<(Uuid, String)>, ClientError> {
+        let mut out = Vec::new();
+        for obj in self.list_objects().await? {
+            if obj.content_type != NOTEBOOK_CONTENT_TYPE {
+                continue;
+            }
+            out.push((obj.id, container_name(&obj.plaintext)));
+        }
+        out.sort_by(|a, b| {
+            if a.0 == DEFAULT_NOTEBOOK_ID {
+                return std::cmp::Ordering::Less;
+            }
+            if b.0 == DEFAULT_NOTEBOOK_ID {
+                return std::cmp::Ordering::Greater;
+            }
+            a.1.to_lowercase().cmp(&b.1.to_lowercase())
+        });
+        Ok(out)
+    }
+
+    pub async fn list_notes(&self) -> Result<Vec<(Uuid, String)>, ClientError> {
+        let mut out = Vec::new();
+        for obj in self.list_objects().await? {
+            if obj.content_type == NOTE_CONTENT_TYPE {
                 out.push((obj.id, obj.plaintext));
             }
         }
@@ -401,7 +506,8 @@ impl SealbookClient {
     }
 }
 
-fn address_book_name(plaintext: &str) -> String {
+/// The `name` of any container object: address book or notebook.
+pub(crate) fn container_name(plaintext: &str) -> String {
     serde_json::from_str::<serde_json::Value>(plaintext)
         .ok()
         .and_then(|value| {

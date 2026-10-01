@@ -13,6 +13,8 @@ pub const JSCONTACT_CONTENT_TYPE: &str = "application/jscontact+json";
 pub const ADDRESS_BOOK_CONTENT_TYPE: &str = "application/sealbook.addressbook+json";
 pub const CALENDAR_EVENT_CONTENT_TYPE: &str = "application/sealbook.calendar-event+json";
 pub const CALENDAR_CONTENT_TYPE: &str = "application/sealbook.calendar+json";
+pub const NOTE_CONTENT_TYPE: &str = "application/sealbook.note+json";
+pub const NOTEBOOK_CONTENT_TYPE: &str = "application/sealbook.notebook+json";
 pub const ADDRESS_BOOK_ID_PROP: &str = "sealbook:addressBookId";
 
 /// Smallest and largest padded plaintext an object may carry.
@@ -21,14 +23,23 @@ pub const ADDRESS_BOOK_ID_PROP: &str = "sealbook:addressBookId";
 /// that pads beyond `MAX_PADDED_OBJECT_SIZE` will be rejected, and the padding
 /// buckets in `sealbook-crypto` start at `MIN_PADDED_OBJECT_SIZE`.
 ///
+/// Both must be powers of two. `pad` in `sealbook-crypto` rounds up to a bucket
+/// and every bucket is a power of two, so a ceiling that is not one has a top
+/// slice no client can ever reach.
+///
 /// The maximum is deliberately consistent with the per-route request limits the
-/// server applies (see `MAX_OBJECT_BODY` in `sealbook-server`). Previously it
-/// was 16 MiB while the request limit was 256 KiB, so the larger number was
-/// unreachable and the real ceiling was undocumented.
+/// server applies: `MAX_OBJECT_BODY` in `sealbook-server` has to cover this many
+/// bytes plus an AEAD tag, base64url-expanded, plus a signed manifest. The real
+/// constraint on a vault is not this number but the per-account `max_bytes`:
+/// at this ceiling, 32 objects fill a default account.
 pub const MIN_PADDED_OBJECT_SIZE: usize = 256;
-pub const MAX_PADDED_OBJECT_SIZE: usize = 1024 * 1024;
+pub const MAX_PADDED_OBJECT_SIZE: usize = 4 * 1024 * 1024;
 pub const DEFAULT_ADDRESS_BOOK_NAME: &str = "Default Address Book";
+pub const DEFAULT_NOTEBOOK_NAME: &str = "Default Notebook";
+/// Reserved container ids: 1 is the default address book, 2 the default
+/// notebook. A new feature takes the next free number rather than reusing one.
 pub const DEFAULT_ADDRESS_BOOK_ID: Uuid = Uuid::from_u128(1);
+pub const DEFAULT_NOTEBOOK_ID: Uuid = Uuid::from_u128(2);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ErrorBody {
@@ -529,5 +540,21 @@ mod tests {
             DEFAULT_ADDRESS_BOOK_ID.to_string(),
             "00000000-0000-0000-0000-000000000001"
         );
+    }
+
+    #[test]
+    fn default_notebook_id_is_stable() {
+        assert_eq!(
+            DEFAULT_NOTEBOOK_ID.to_string(),
+            "00000000-0000-0000-0000-000000000002"
+        );
+    }
+
+    #[test]
+    fn the_object_ceiling_is_a_padding_bucket() {
+        // `pad` only ever produces powers of two, so a bound that is not one
+        // declares capacity no client can use.
+        assert!(MIN_PADDED_OBJECT_SIZE.is_power_of_two());
+        assert!(MAX_PADDED_OBJECT_SIZE.is_power_of_two());
     }
 }

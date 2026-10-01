@@ -363,6 +363,196 @@ async fn address_books_are_encrypted_and_hidden_from_contact_list() {
     assert!(!hay.contains("Ada Work"), "contact plaintext leaked");
 }
 
+/// The decrypted `body` of one note, so a test compares what the user typed
+/// rather than its JSON escaping.
+fn note_body(notes: &[(Uuid, String)], id: Uuid) -> String {
+    let json = notes
+        .iter()
+        .find(|(candidate, _)| *candidate == id)
+        .map(|(_, json)| json.as_str())
+        .expect("note stored");
+    serde_json::from_str::<serde_json::Value>(json)
+        .expect("note json")
+        .get("body")
+        .and_then(|body| body.as_str())
+        .expect("note body")
+        .to_string()
+}
+
+fn note_json(title: &str, body: &str, notebook: Uuid) -> String {
+    serde_json::json!({
+        "@type": "Note",
+        "version": "1.0",
+        "title": title,
+        "body": body,
+        "notebookId": notebook.to_string(),
+    })
+    .to_string()
+}
+
+#[tokio::test]
+async fn notes_and_notebooks_are_encrypted_and_hidden_from_the_contact_list() {
+    let dir = std::env::temp_dir().join(format!("sealbook-notes-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "notealice", "correct horse battery")
+        .await
+        .expect("register");
+
+    let default_id = client
+        .ensure_default_notebook()
+        .await
+        .expect("default notebook");
+    assert_eq!(default_id, sealbook_client::DEFAULT_NOTEBOOK_ID);
+
+    let work_id = Uuid::new_v4();
+    client
+        .put_notebook(work_id, "Field Notes")
+        .await
+        .expect("work notebook");
+
+    // Multi-line, so the padding round trip is proven for the shape a note
+    // actually has rather than for a single line.
+    let plan = "# Monday\n\n- ship notes\n- Zanzibar hummingbird\n";
+    let idea = "Tuesday: Quetzalcoatlus sketches\n\n> and a quote\n";
+    let plan_id = Uuid::new_v4();
+    let idea_id = Uuid::new_v4();
+    client
+        .put_note(plan_id, &note_json("Weekly plan", plan, default_id))
+        .await
+        .expect("plan note");
+    client
+        .put_note(idea_id, &note_json("Ideas", idea, work_id))
+        .await
+        .expect("idea note");
+
+    let notebooks = client.list_notebooks().await.expect("notebooks");
+    assert_eq!(notebooks.len(), 2);
+    assert_eq!(notebooks[0].0, default_id);
+    assert_eq!(notebooks[0].1, "Default Notebook");
+    assert!(notebooks
+        .iter()
+        .any(|(id, name)| *id == work_id && name == "Field Notes"));
+
+    let notes = client.list_notes().await.expect("notes");
+    assert_eq!(notes.len(), 2);
+    assert_eq!(
+        note_body(&notes, plan_id),
+        plan,
+        "the note body did not survive the round trip byte for byte"
+    );
+    assert_eq!(note_body(&notes, idea_id), idea);
+    assert!(notes
+        .iter()
+        .all(|(_, json)| !json.contains("\"@type\":\"Notebook\"")));
+
+    // A note is not a contact. The web client's type dispatch has an
+    // "anything else is a contact" fallback, so this is the assertion that
+    // catches a content type going astray.
+    let contacts = client.list_contacts().await.expect("contacts");
+    assert!(contacts.is_empty(), "a note was listed as a contact");
+
+    let raw = std::fs::read(&db).expect("read sqlite");
+    let hay = String::from_utf8_lossy(&raw);
+    assert!(!hay.contains("Field Notes"), "notebook name leaked");
+    assert!(!hay.contains("Weekly plan"), "note title leaked");
+    assert!(!hay.contains("Zanzibar"), "note body leaked");
+    assert!(!hay.contains("Quetzalcoatlus"), "note body leaked");
+}
+
+/// A note is the first content type that can realistically exceed what used to
+/// be the per-object ceiling, which is why the ceiling moved. This is the test
+/// that fails on the old constant.
+#[tokio::test]
+async fn a_note_larger_than_the_old_object_limit_round_trips() {
+    let dir = std::env::temp_dir().join(format!("sealbook-bignote-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "bignote", "correct horse battery")
+        .await
+        .expect("register");
+    let notebook = client
+        .ensure_default_notebook()
+        .await
+        .expect("default notebook");
+
+    // Over the old 1 MiB ceiling once padded, and under the new 4 MiB one.
+    let body = format!("Okapi{}", "m".repeat(1_500_000));
+    let id = Uuid::new_v4();
+    client
+        .put_note(id, &note_json("Long", &body, notebook))
+        .await
+        .expect("a note over the old ceiling must be accepted");
+
+    let notes = client.list_notes().await.expect("notes");
+    assert_eq!(
+        note_body(&notes, id),
+        body,
+        "the long body did not round trip"
+    );
+
+    // Padded sizes are powers of two above the bucket table, so a body of this
+    // size lands on exactly 2 MiB.
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .expect("open db");
+    let padded: i64 = sqlx::query_scalar("SELECT padded_size FROM objects WHERE id = ?")
+        .bind(id.to_string())
+        .fetch_one(&pool)
+        .await
+        .expect("padded size");
+    assert_eq!(padded, 2 * 1024 * 1024);
+    pool.close().await;
+
+    let raw = std::fs::read(&db).expect("read sqlite");
+    assert!(
+        !String::from_utf8_lossy(&raw).contains("Okapi"),
+        "note body leaked"
+    );
+}
+
+/// Deliberately does not assert on the error message. Padded sizes are powers of
+/// two, so an object past the 4 MiB ceiling makes a request body past
+/// `MAX_OBJECT_BODY` and axum rejects it before `validate_object` runs. The
+/// `padded_size` range check is covered by a unit test instead.
+#[tokio::test]
+async fn a_note_past_the_object_size_limit_is_refused() {
+    let dir = std::env::temp_dir().join(format!("sealbook-hugenote-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "hugenote", "correct horse battery")
+        .await
+        .expect("register");
+    let notebook = client
+        .ensure_default_notebook()
+        .await
+        .expect("default notebook");
+
+    let body = format!("Pangolin{}", "m".repeat(5 * 1024 * 1024));
+    let result = client
+        .put_note(Uuid::new_v4(), &note_json("Too long", &body, notebook))
+        .await;
+    assert!(result.is_err(), "a note past the ceiling must be refused");
+
+    let notes = client.list_notes().await.expect("notes");
+    assert!(
+        notes.iter().all(|(_, json)| !json.contains("Pangolin")),
+        "a refused note must not be stored"
+    );
+}
+
 #[tokio::test]
 async fn https_tls13_round_trip() {
     let dir = std::env::temp_dir().join(format!("sealbook-tls-{}", Uuid::new_v4()));

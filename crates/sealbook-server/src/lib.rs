@@ -118,21 +118,22 @@ impl Default for Limits {
     fn default() -> Self {
         Self {
             max_objects: 50_000,
-            // Sized so that a vault at *both* ceilings at once — 50,000 objects
-            // totalling this many padded bytes — still fits in one rotation body,
+            // Sized so that a vault at *both* ceilings at once, 50,000 objects
+            // totalling this many padded bytes, still fits in one rotation body,
             // which `the_default_quota_can_be_rotated` checks.
             //
-            // The previous 1 GiB could not be rotated at all: base64 alone took it
-            // to roughly 1.4 GiB against a 32 MiB route limit, so an account
-            // anywhere near the quota failed every revocation with `413` and the
-            // revoked device kept a working collection key. Real capacity is
-            // unchanged, because that quota was never reachable; the number is now
-            // honest, and a vault that would outgrow it is refused at write time
-            // instead of at revocation time.
-            max_bytes: 32 * 1024 * 1024,
-            // Two of these may be buffered at once (`MAX_CONCURRENT_ROTATIONS`),
-            // so this is the server's peak memory, not a free number to raise.
-            max_rotation_body: 64 * 1024 * 1024,
+            // Raised from 32 MiB for notes, which are the first content type that
+            // is routinely large: at the 4 MiB per-object ceiling the old quota
+            // was 8 objects deep, and hitting it blocks *every* write, contacts
+            // included, not just the oversized one.
+            max_bytes: 128 * 1024 * 1024,
+            // Two of these may be buffered and JSON-parsed whole at once
+            // (`MAX_CONCURRENT_ROTATIONS`), so this is the server's peak memory
+            // and not a free number to raise. It tracks `max_bytes`: the estimate
+            // for a vault at both ceilings is roughly 187 MiB, and
+            // `rotatable_bytes_ceiling` must stay above `max_bytes` or writes are
+            // refused before the quota is reached.
+            max_rotation_body: 256 * 1024 * 1024,
         }
     }
 }
@@ -502,9 +503,12 @@ const MAX_BODY: usize = 256 * 1024;
 /// Largest request body for a single object write.
 ///
 /// One object is at most `MAX_PADDED_OBJECT_SIZE` of padded plaintext plus a
-/// 16-byte tag, which base64url expands by a third, plus a little JSON. Two MiB
-/// covers that with room to spare.
-const MAX_OBJECT_BODY: usize = 2 * 1024 * 1024;
+/// 16-byte tag, which base64url expands by a third: 4 MiB becomes 5,592,428
+/// bytes. The write also carries a signed `ManifestBody`, whose ML-DSA-65
+/// signature is another few KiB once encoded. Six MiB covers both with about a
+/// tenth to spare, and `the_object_body_limit_covers_a_maximum_object` holds the
+/// two constants together.
+const MAX_OBJECT_BODY: usize = 6 * 1024 * 1024;
 
 /// How many rotations may be in flight at once.
 ///
@@ -524,7 +528,7 @@ const MAX_CONCURRENT_ROTATIONS: usize = 2;
 const SMALL_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// An object write is up to `MAX_OBJECT_BODY`, which takes a while on a slow
-/// uplink.
+/// uplink. Still generous at 6 MiB: it only requires 50 KB/s to finish.
 const OBJECT_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// A rotation carries the whole vault and may queue behind another, so it gets
@@ -672,6 +676,19 @@ mod tests {
     fn a_vault_past_the_rotation_budget_does_not_fit() {
         let limits = Limits::default();
         assert!(!limits.rotation_fits(limits.max_objects, limits.max_bytes * 4));
+    }
+
+    /// The pairing `MAX_OBJECT_BODY` claims in prose, checked. Nothing held these
+    /// two together before, which is how the ceiling once sat at 16 MiB behind a
+    /// 256 KiB route limit.
+    #[test]
+    fn the_object_body_limit_covers_a_maximum_object() {
+        let encoded = (sealbook_protocol::MAX_PADDED_OBJECT_SIZE + 16).div_ceil(3) * 4;
+        assert!(
+            MAX_OBJECT_BODY > encoded + 64 * 1024,
+            "a maximum object encodes to {encoded} bytes, which {MAX_OBJECT_BODY} \
+             does not cover with room for a signed manifest"
+        );
     }
 
     /// Base64 is four bytes out for every three in, so the estimate has to be

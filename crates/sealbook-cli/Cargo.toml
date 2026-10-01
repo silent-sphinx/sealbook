@@ -20,6 +20,7 @@ sealbook-client = { path = "../sealbook-client" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+time = { workspace = true, features = ["formatting"] }
 tokio.workspace = true
 uuid.workspace = true
 rpassword.workspace = true

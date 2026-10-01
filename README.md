@@ -2,7 +2,7 @@
 
 <img src="Logo.png" width="200" alt="Sealbook logo">
 
-Sealbook is a fully end-to-end encrypted vault for your contacts and calendars, built to be self-hosted. Your data is encrypted on your device and the server only ever sees ciphertext. It cannot read your contacts, and neither can anyone who takes a copy of its database.
+Sealbook is a fully end-to-end encrypted vault for your contacts, calendars and notes, built to be self-hosted. Your data is encrypted on your device and the server only ever sees ciphertext. It cannot read your contacts, and neither can anyone who takes a copy of its database.
 
 This project exists because the usual options don't offer this. CalDAV and CardDAV servers store your address book in the clear, and hand your provider everyone you know. Sealbook uses its own protocol instead, designed security-first and *resistant* to future quantum attack.
 
@@ -188,9 +188,9 @@ Everything is set through environment variables in `docker-compose.yml`.
 | `SEALBOOK_DB` | `<data dir>/sealbook.db` | Database file, if you want it elsewhere. |
 | `SEALBOOK_CERT_EXPORT` | unset | Write a copy of the certificate here on start, for clients that need to pin it. |
 | `SEALBOOK_TRUSTED_PROXIES` | unset | Proxies whose `X-Forwarded-For` you believe, see [below](#behind-a-reverse-proxy). |
-| `SEALBOOK_MAX_OBJECTS` | `50000` | Most contacts and events one account may store. |
-| `SEALBOOK_MAX_BYTES` | `33554432` | Most stored bytes one account may use (32 MiB of padded ciphertext). |
-| `SEALBOOK_MAX_ROTATION_BODY` | `67108864` | Largest key-rotation request (64 MiB). See [Storage limits](#storage-limits) before changing it. |
+| `SEALBOOK_MAX_OBJECTS` | `50000` | Most objects one account may store: contacts, events, notes, and the address books, calendars and notebooks holding them. |
+| `SEALBOOK_MAX_BYTES` | `134217728` | Most stored bytes one account may use (128 MiB of padded ciphertext). |
+| `SEALBOOK_MAX_ROTATION_BODY` | `268435456` | Largest key-rotation request (256 MiB). See [Storage limits](#storage-limits) before changing it. |
 | `SEALBOOK_REVISION_RETENTION_DAYS` | `30` | How long superseded object revisions are kept so clients can sync incrementally. |
 | `SEALBOOK_FULL_INTEGRITY_CHECK` | unset | Set to `1` for an exhaustive SQLite check at startup instead of the quick one. Worth it after a crash or a restore. |
 | `RUST_LOG` | unset | Log level. `sealbook_server=info` is a good default; `=debug` when something is wrong. |
@@ -212,14 +212,19 @@ time. In practice that, not `SEALBOOK_MAX_BYTES`, is what you hit first. The
 effective ceiling is logged at startup:
 
 ```
-INFO storage limits max_objects=50000 max_bytes=33554432
-     max_rotation_body=67108864 rotatable_bytes=50233328
+INFO storage limits max_objects=50000 max_bytes=134217728
+     max_rotation_body=268435456 rotatable_bytes=201228272
 ```
 
 If you raise `SEALBOOK_MAX_BYTES`, raise `SEALBOOK_MAX_ROTATION_BODY` with it —
 roughly four thirds of the byte quota, plus about 320 bytes per object, since the
 body is base64 JSON. Two rotations may be in flight at once and each is buffered
 and parsed whole, so that setting is the server's peak memory, not a free number.
+
+A single object is capped at 4 MiB of padded plaintext, which is the ceiling a
+long note runs into first. Padding rounds up to a power of two, so the usable
+ceiling for one object's contents is just under 4 MiB, and 32 objects at that
+size would fill a default account.
 
 An account may have 16 devices enrolled at once. Every device gets a wrap of the
 collection key in every rotation, so the list is bounded; revoking a device frees
