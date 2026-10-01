@@ -144,5 +144,6 @@ mod tests {
         assert_eq!(pad(b"x").len(), 256);
         assert_eq!(pad(&vec![0u8; 600 * 1024]).len(), 1024 * 1024);
         assert_eq!(pad(&vec![0u8; 3 * 1024 * 1024]).len(), 4 * 1024 * 1024);
+        assert_eq!(pad(&vec![0u8; 5 * 1024 * 1024]).len(), 8 * 1024 * 1024);
     }
 }

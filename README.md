@@ -221,9 +221,9 @@ roughly four thirds of the byte quota, plus about 320 bytes per object, since th
 body is base64 JSON. Two rotations may be in flight at once and each is buffered
 and parsed whole, so that setting is the server's peak memory, not a free number.
 
-A single object is capped at 4 MiB of padded plaintext, which is the ceiling a
+A single object is capped at 8 MiB of padded plaintext, which is the ceiling a
 long note runs into first. Padding rounds up to a power of two, so the usable
-ceiling for one object's contents is just under 4 MiB, and 32 objects at that
+ceiling for one object's contents is just under 8 MiB, and 16 objects at that
 size would fill a default account.
 
 An account may have 16 devices enrolled at once. Every device gets a wrap of the

@@ -484,8 +484,8 @@ async fn a_note_larger_than_the_old_object_limit_round_trips() {
         .await
         .expect("default notebook");
 
-    // Over the old 1 MiB ceiling once padded, and under the new 4 MiB one.
-    let body = format!("Okapi{}", "m".repeat(1_500_000));
+    // Over the old 1 MiB ceiling once padded, and under the current 8 MiB one.
+    let body = format!("Okapi{}", "m".repeat(5 * 1024 * 1024));
     let id = Uuid::new_v4();
     client
         .put_note(id, &note_json("Long", &body, notebook))
@@ -500,7 +500,7 @@ async fn a_note_larger_than_the_old_object_limit_round_trips() {
     );
 
     // Padded sizes are powers of two above the bucket table, so a body of this
-    // size lands on exactly 2 MiB.
+    // size lands on exactly 8 MiB.
     let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
         .await
         .expect("open db");
@@ -509,7 +509,7 @@ async fn a_note_larger_than_the_old_object_limit_round_trips() {
         .fetch_one(&pool)
         .await
         .expect("padded size");
-    assert_eq!(padded, 2 * 1024 * 1024);
+    assert_eq!(padded, 8 * 1024 * 1024);
     pool.close().await;
 
     let raw = std::fs::read(&db).expect("read sqlite");
@@ -520,7 +520,7 @@ async fn a_note_larger_than_the_old_object_limit_round_trips() {
 }
 
 /// Deliberately does not assert on the error message. Padded sizes are powers of
-/// two, so an object past the 4 MiB ceiling makes a request body past
+/// two, so an object past the 8 MiB ceiling makes a request body past
 /// `MAX_OBJECT_BODY` and axum rejects it before `validate_object` runs. The
 /// `padded_size` range check is covered by a unit test instead.
 #[tokio::test]
@@ -540,7 +540,7 @@ async fn a_note_past_the_object_size_limit_is_refused() {
         .await
         .expect("default notebook");
 
-    let body = format!("Pangolin{}", "m".repeat(5 * 1024 * 1024));
+    let body = format!("Pangolin{}", "m".repeat(9 * 1024 * 1024));
     let result = client
         .put_note(Uuid::new_v4(), &note_json("Too long", &body, notebook))
         .await;

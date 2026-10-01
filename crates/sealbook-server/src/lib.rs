@@ -503,12 +503,15 @@ const MAX_BODY: usize = 256 * 1024;
 /// Largest request body for a single object write.
 ///
 /// One object is at most `MAX_PADDED_OBJECT_SIZE` of padded plaintext plus a
-/// 16-byte tag, which base64url expands by a third: 4 MiB becomes 5,592,428
+/// 16-byte tag, which base64url expands by a third: 8 MiB becomes 11,184,832
 /// bytes. The write also carries a signed `ManifestBody`, whose ML-DSA-65
-/// signature is another few KiB once encoded. Six MiB covers both with about a
-/// tenth to spare, and `the_object_body_limit_covers_a_maximum_object` holds the
-/// two constants together.
-const MAX_OBJECT_BODY: usize = 6 * 1024 * 1024;
+/// signature is another few KiB once encoded. Twelve MiB covers both with about
+/// a tenth to spare, and `the_object_body_limit_covers_a_maximum_object` holds
+/// the two constants together.
+///
+/// Unlike the rotation route this one has no concurrency limit, so this figure
+/// is also the server's memory cost per write in flight.
+const MAX_OBJECT_BODY: usize = 12 * 1024 * 1024;
 
 /// How many rotations may be in flight at once.
 ///
@@ -528,7 +531,7 @@ const MAX_CONCURRENT_ROTATIONS: usize = 2;
 const SMALL_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// An object write is up to `MAX_OBJECT_BODY`, which takes a while on a slow
-/// uplink. Still generous at 6 MiB: it only requires 50 KB/s to finish.
+/// uplink. Still generous at 12 MiB: it only requires 100 KB/s to finish.
 const OBJECT_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// A rotation carries the whole vault and may queue behind another, so it gets
