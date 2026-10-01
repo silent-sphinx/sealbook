@@ -23,6 +23,14 @@ pub(crate) struct StoredObject {
     pub(crate) stored: String,
 }
 
+/// A collection as a rotation needs to see it: what can be re-encrypted, and the
+/// tombstones that cannot but still belong in the manifest.
+#[derive(Default)]
+pub(crate) struct VaultContents {
+    pub(crate) live: Vec<StoredObject>,
+    pub(crate) tombstones: Vec<ManifestEntry>,
+}
+
 struct PlainObject {
     id: Uuid,
     content_type: String,
@@ -291,7 +299,14 @@ impl SealbookClient {
 
     /// Objects exactly as stored, without unwrapping the envelope, so they can
     /// be re-encrypted verbatim under a new key.
-    pub(crate) async fn list_stored_objects(&self) -> Result<Vec<StoredObject>, ClientError> {
+    ///
+    /// Tombstones come back alongside the live objects rather than being dropped.
+    /// A rotation does not re-encrypt them, since there is no plaintext left to
+    /// re-encrypt, but they are still rows in the collection and the manifest
+    /// commits to every row. Leaving them out made the manifest disagree with the
+    /// server's view, and a rotation over a vault with any deletion in it was
+    /// refused.
+    pub(crate) async fn list_stored_objects(&self) -> Result<VaultContents, ClientError> {
         let collection_id = self
             .state
             .as_ref()
@@ -301,9 +316,15 @@ impl SealbookClient {
             .collection_key
             .as_ref()
             .ok_or(ClientError::NoCollectionKey)?;
-        let mut out = Vec::new();
+        let mut contents = VaultContents::default();
         for obj in self.fetch_verified_objects().await? {
             if obj.tombstone {
+                contents.tombstones.push(ManifestEntry {
+                    id: obj.id,
+                    revision: obj.revision,
+                    tombstone: true,
+                    content_digest: content_digest(&obj.nonce, &obj.ciphertext).to_vec(),
+                });
                 continue;
             }
             if obj.nonce.len() != 24 {
@@ -318,13 +339,13 @@ impl SealbookClient {
             };
             let aad = object_aad(obj.id.as_bytes(), collection_id.as_bytes());
             let plain = decrypt_object(key, &encrypted, &aad)?;
-            out.push(StoredObject {
+            contents.live.push(StoredObject {
                 id: obj.id,
                 content_type: obj.content_type,
                 stored: String::from_utf8_lossy(&plain).into_owned(),
             });
         }
-        Ok(out)
+        Ok(contents)
     }
 
     async fn list_objects(&self) -> Result<Vec<PlainObject>, ClientError> {

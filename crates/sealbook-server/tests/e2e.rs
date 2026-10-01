@@ -2491,7 +2491,12 @@ async fn the_quota_counters_never_drift_from_the_objects() {
     owner.put_contact(ids[1], &bulky).await.expect("grow");
     assert_eq!(check("a size change", db_path.clone()).await, 3);
 
-    // A rotation re-pads every object, which moves the byte total. :00
+    // A tombstone stays a row, so the count holds. :)
+    owner.delete_contact(ids[2]).await.expect("delete");
+    assert_eq!(check("a tombstone", db_path.clone()).await, 3);
+
+    // A rotation re-pads every object, which moves the byte total, and now runs
+    // with a tombstone already in the vault.
     let mut joiner = SealbookClient::plaintext_http();
     let (pair_code, confirm) = joiner.pair_join(&base, "usagealice").await.expect("join");
     owner
@@ -2507,9 +2512,63 @@ async fn the_quota_counters_never_drift_from_the_objects() {
         .expect("revoke");
     assert_eq!(check("a key rotation", db_path.clone()).await, 3);
 
-    // A tombstone stays a row, so the count holds.
-    owner.delete_contact(ids[2]).await.expect("delete");
-    assert_eq!(check("a tombstone", db_path.clone()).await, 3);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Revoking a device must work on a vault that has had something deleted.
+///
+/// A rotation cannot re-encrypt a tombstone, there being no plaintext left, but
+/// the manifest commits to every row in the collection. The client used to omit
+/// tombstones from the manifest it signed, so the server found it one entry short
+/// and refused the rotation. Revocation is the operation that most needs to work,
+/// and every path that invalidates a collection key goes through it.
+#[tokio::test]
+async fn a_revocation_succeeds_with_a_tombstone_in_the_vault() {
+    let dir = std::env::temp_dir().join(format!("sealbook-tombrot-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut owner = SealbookClient::plaintext_http();
+    owner
+        .register(&base, "tombalice", "correct horse battery")
+        .await
+        .expect("register");
+    let keep = Uuid::new_v4();
+    let doomed = Uuid::new_v4();
+    owner
+        .put_contact(keep, r#"{"@type":"Card","name":{"full":"Ada Lovelace"}}"#)
+        .await
+        .expect("put keep");
+    owner
+        .put_contact(doomed, r#"{"@type":"Card","name":{"full":"Deleted Soon"}}"#)
+        .await
+        .expect("put doomed");
+    owner.delete_contact(doomed).await.expect("delete");
+
+    let mut joiner = SealbookClient::plaintext_http();
+    let (code, confirm) = joiner.pair_join(&base, "tombalice").await.expect("join");
+    owner.pair_approve(&code, &confirm).await.expect("approve");
+    assert!(joiner.pair_ready(&code).await.expect("ready"));
+    joiner.login("correct horse battery").await.expect("login");
+    let stolen_key = joiner.collection_key().unwrap().as_bytes().to_vec();
+    let joiner_device = joiner.state.as_ref().unwrap().device_id;
+
+    owner
+        .revoke_device(joiner_device, "correct horse battery")
+        .await
+        .expect("a tombstone must not block revocation");
+
+    // The key really rotated, and the surviving object still reads back.
+    assert_ne!(
+        owner.collection_key().unwrap().as_bytes().to_vec(),
+        stolen_key,
+        "the collection key was not rotated"
+    );
+    let contacts = owner.list_contacts().await.expect("list");
+    assert_eq!(contacts.len(), 1, "the live object must survive: {contacts:?}");
+    assert_eq!(contacts[0].0, keep);
+    assert!(contacts[0].1.contains("Ada Lovelace"));
 
     let _ = std::fs::remove_dir_all(dir);
 }

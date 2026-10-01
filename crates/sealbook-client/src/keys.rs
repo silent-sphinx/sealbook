@@ -143,8 +143,8 @@ impl SealbookClient {
         // Rotation assigns consecutive revisions from the collection's next one,
         // and the manifest commits to each of them.
         let first_revision = latest_revision + 1;
-        let mut objects = Vec::with_capacity(plaintexts.len());
-        for (index, stored) in plaintexts.iter().enumerate() {
+        let mut objects = Vec::with_capacity(plaintexts.live.len());
+        for (index, stored) in plaintexts.live.iter().enumerate() {
             let aad = object_aad(stored.id.as_bytes(), collection_id.as_bytes());
             let enc = encrypt_object(&new_ck, stored.stored.as_bytes(), &aad)?;
             objects.push(RotatedObject {
@@ -159,7 +159,11 @@ impl SealbookClient {
         }
 
         let key_epoch = epoch + 1;
-        let manifest_entries: Vec<ManifestEntry> = objects
+        // Tombstones are not re-encrypted, but they are still rows the manifest
+        // commits to, so they carry their stored revision and digest through
+        // unchanged. Omitting them left the manifest short and the rotation
+        // refused on any vault that had ever had a deletion.
+        let mut manifest_entries: Vec<ManifestEntry> = objects
             .iter()
             .map(|object| ManifestEntry {
                 id: object.id,
@@ -168,6 +172,7 @@ impl SealbookClient {
                 content_digest: content_digest(&object.nonce, &object.ciphertext).to_vec(),
             })
             .collect();
+        manifest_entries.extend(plaintexts.tombstones.iter().cloned());
         let manifest = self.sign_manifest(
             manifest_seq + 1,
             key_epoch,
