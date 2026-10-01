@@ -2572,3 +2572,87 @@ async fn a_revocation_succeeds_with_a_tombstone_in_the_vault() {
 
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Deleting an account must leave nothing of it behind, in any table.
+///
+/// The tables are read from the schema rather than listed here, so a table added
+/// later without a cascade back to `accounts` fails this test instead of quietly
+/// retaining rows after someone asks to be forgotten.
+#[tokio::test]
+async fn deleting_an_account_leaves_nothing_in_any_table() {
+    let dir = std::env::temp_dir().join(format!("sealbook-erase-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut owner = SealbookClient::plaintext_http();
+    owner
+        .register(&base, "erasealice", "correct horse battery")
+        .await
+        .expect("register");
+
+    // Something in every table that hangs off the account: objects and their
+    // revisions, a tombstone, a second device, extra sessions and key wraps.
+    let keep = Uuid::new_v4();
+    let doomed = Uuid::new_v4();
+    owner
+        .put_contact(keep, r#"{"@type":"Card","name":{"full":"Ada Lovelace"}}"#)
+        .await
+        .expect("put");
+    owner
+        .put_contact(doomed, r#"{"@type":"Card","name":{"full":"Gone"}}"#)
+        .await
+        .expect("put");
+    owner.delete_contact(doomed).await.expect("delete contact");
+    owner
+        .put_contact(keep, r#"{"@type":"Card","name":{"full":"Ada, edited"}}"#)
+        .await
+        .expect("revise");
+
+    let mut joiner = SealbookClient::plaintext_http();
+    let (code, confirm) = joiner.pair_join(&base, "erasealice").await.expect("join");
+    owner.pair_approve(&code, &confirm).await.expect("approve");
+    assert!(joiner.pair_ready(&code).await.expect("ready"));
+    joiner.login("correct horse battery").await.expect("login");
+
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .expect("open db");
+    let tables: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM sqlite_master
+         WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != 'meta'",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("list tables");
+    assert!(tables.len() >= 9, "schema looks wrong: {tables:?}");
+
+    // Everything is populated before the delete, or the test proves nothing.
+    for table in &tables {
+        let rows: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(&pool)
+            .await
+            .expect("count");
+        assert!(rows > 0, "{table} was empty before the delete, so it proves nothing");
+    }
+
+    owner.delete_account().await.expect("delete account");
+
+    for table in &tables {
+        let rows: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(&pool)
+            .await
+            .expect("count");
+        assert_eq!(rows, 0, "{table} still holds {rows} row(s) after the account was deleted");
+    }
+
+    // The server's own secrets are not account data and must survive.
+    let secrets: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM meta")
+        .fetch_one(&pool)
+        .await
+        .expect("count meta");
+    assert!(secrets > 0, "deleting an account wiped the server keys");
+
+    pool.close().await;
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -144,7 +144,8 @@ async fn migrate_to_v1(db: &Pool<Sqlite>) -> anyhow::Result<()> {
                 ed25519_pk BLOB NOT NULL,
                 xwing_hpke_pk BLOB NOT NULL,
                 created_at INTEGER NOT NULL,
-                revoked_at INTEGER
+                revoked_at INTEGER,
+                FOREIGN KEY (account_id) REFERENCES accounts (id) ON DELETE CASCADE
             )",
         )
         .execute(&mut *db)
@@ -155,7 +156,9 @@ async fn migrate_to_v1(db: &Pool<Sqlite>) -> anyhow::Result<()> {
                 account_id TEXT NOT NULL,
                 device_id TEXT NOT NULL,
                 expires_at INTEGER NOT NULL,
-                created_at INTEGER NOT NULL DEFAULT 0
+                created_at INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (account_id) REFERENCES accounts (id) ON DELETE CASCADE,
+                FOREIGN KEY (device_id) REFERENCES devices (id) ON DELETE CASCADE
             )",
         )
         .execute(&mut *db)
@@ -166,7 +169,8 @@ async fn migrate_to_v1(db: &Pool<Sqlite>) -> anyhow::Result<()> {
                 account_id TEXT NOT NULL UNIQUE,
                 kind TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
-                key_epoch INTEGER NOT NULL DEFAULT 1
+                key_epoch INTEGER NOT NULL DEFAULT 1,
+                FOREIGN KEY (account_id) REFERENCES accounts (id) ON DELETE CASCADE
             )",
         )
         .execute(&mut *db)
@@ -179,7 +183,8 @@ async fn migrate_to_v1(db: &Pool<Sqlite>) -> anyhow::Result<()> {
                 hpke_enc BLOB NOT NULL,
                 wrapped_ck BLOB NOT NULL,
                 ciphersuite TEXT NOT NULL,
-                PRIMARY KEY (collection_id, recipient_kind, recipient_id)
+                PRIMARY KEY (collection_id, recipient_kind, recipient_id),
+                FOREIGN KEY (collection_id) REFERENCES collections (id) ON DELETE CASCADE
             )",
         )
         .execute(&mut *db)
@@ -196,7 +201,9 @@ async fn migrate_to_v1(db: &Pool<Sqlite>) -> anyhow::Result<()> {
                 padded_size INTEGER NOT NULL,
                 content_type TEXT NOT NULL,
                 content_digest BLOB NOT NULL DEFAULT X'',
-                PRIMARY KEY (account_id, collection_id, id)
+                PRIMARY KEY (account_id, collection_id, id),
+                FOREIGN KEY (account_id) REFERENCES accounts (id) ON DELETE CASCADE,
+                FOREIGN KEY (collection_id) REFERENCES collections (id) ON DELETE CASCADE
             )",
         )
         .execute(&mut *db)
@@ -214,7 +221,8 @@ async fn migrate_to_v1(db: &Pool<Sqlite>) -> anyhow::Result<()> {
                 content_type TEXT NOT NULL DEFAULT 'application/jscontact+json',
                 content_digest BLOB NOT NULL DEFAULT X'',
                 created_at INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (account_id, revision)
+                PRIMARY KEY (account_id, revision),
+                FOREIGN KEY (account_id) REFERENCES accounts (id) ON DELETE CASCADE
             )",
         )
         .execute(&mut *db)
@@ -224,7 +232,8 @@ async fn migrate_to_v1(db: &Pool<Sqlite>) -> anyhow::Result<()> {
                 account_id TEXT PRIMARY KEY,
                 next_revision INTEGER NOT NULL,
                 object_count INTEGER NOT NULL DEFAULT 0,
-                byte_total INTEGER NOT NULL DEFAULT 0
+                byte_total INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (account_id) REFERENCES accounts (id) ON DELETE CASCADE
             )",
         )
         .execute(&mut *db)
@@ -240,7 +249,8 @@ async fn migrate_to_v1(db: &Pool<Sqlite>) -> anyhow::Result<()> {
                 device_id TEXT NOT NULL,
                 mldsa_sig BLOB NOT NULL,
                 ed25519_sig BLOB NOT NULL,
-                updated_at INTEGER NOT NULL
+                updated_at INTEGER NOT NULL,
+                FOREIGN KEY (collection_id) REFERENCES collections (id) ON DELETE CASCADE
             )",
         )
         .execute(&mut *db)
@@ -413,6 +423,22 @@ mod tests {
     async fn migrating_an_already_current_database_changes_nothing() {
         let (dir, db) = temp_db().await;
         migrate(&db).await.unwrap();
+        // The object hangs off a real account and collection, because the schema
+        // now enforces that it must.
+        sqlx::query(
+            "INSERT INTO accounts (id, username, opaque_record, kdf_salt, created_at)
+             VALUES ('account', 'account', X'', X'', 0)",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO collections (id, account_id, kind, created_at)
+             VALUES ('collection', 'account', 'vault', 0)",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
         sqlx::query(
             "INSERT INTO objects
              (id, collection_id, account_id, revision, tombstone, ciphertext, nonce,

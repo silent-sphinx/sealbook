@@ -742,10 +742,37 @@ mod tests {
         );
     }
 
-    /// The revision log grew by a full copy of the ciphertext on every write and
-    /// every rotation, nothing ever read the old rows, and the storage quota
-    /// counted only the live `objects` table — so disk use was unbounded and
-    /// invisible.
+
+    #[cfg(test)]
+    async fn seed_account(db: &Pool<Sqlite>, account: &str, device: &str, collection: &str) {
+        sqlx::query(
+            "INSERT INTO accounts (id, username, opaque_record, kdf_salt, created_at)
+             VALUES (?, ?, X'', X'', 0)",
+        )
+        .bind(account)
+        .bind(account)
+        .execute(db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO devices (id, account_id, mldsa_pk, ed25519_pk, xwing_hpke_pk, created_at)
+             VALUES (?, ?, X'', X'', X'', 0)",
+        )
+        .bind(device)
+        .bind(account)
+        .execute(db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO collections (id, account_id, kind, created_at) VALUES (?, ?, 'vault', 0)",
+        )
+        .bind(collection)
+        .bind(account)
+        .execute(db)
+        .await
+        .unwrap();
+    }
+
     #[tokio::test]
     async fn pruning_drops_aged_revisions_but_keeps_the_newest() {
         let dir = std::env::temp_dir().join(format!("sealbook-prune-{}", Uuid::new_v4()));
@@ -757,6 +784,7 @@ mod tests {
             .await
             .unwrap();
 
+        seed_account(&db, "account", "device", "collection").await;
         sqlx::query("INSERT INTO revision_seq (account_id, next_revision) VALUES ('account', 4)")
             .execute(&db)
             .await
@@ -831,6 +859,7 @@ mod tests {
             .await
             .unwrap();
 
+        seed_account(&db, "account", "device", "collection").await;
         for (token, expires) in [
             (b"live".as_slice(), now() + 3600),
             (b"dead".as_slice(), now() - 1),

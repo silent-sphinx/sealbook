@@ -411,69 +411,9 @@ pub(crate) async fn delete_account(
         .await
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
 
-    // Keyed on the account alone. Selecting through `objects` left behind any
-    // revision whose object row had gone, which is exactly what deleting an
-    // account must not do.
-    sqlx::query("DELETE FROM object_revisions WHERE account_id = ?")
-        .bind(&session.account_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-
-    sqlx::query(
-        "DELETE FROM objects WHERE collection_id IN (
-             SELECT id FROM collections WHERE account_id = ?
-         )",
-    )
-    .bind(&session.account_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-
-    sqlx::query(
-        "DELETE FROM key_wraps WHERE collection_id IN (
-             SELECT id FROM collections WHERE account_id = ?
-         )",
-    )
-    .bind(&session.account_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-
-    sqlx::query("DELETE FROM revision_seq WHERE account_id = ?")
-        .bind(&session.account_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-
-    sqlx::query(
-        "DELETE FROM manifests WHERE collection_id IN (
-             SELECT id FROM collections WHERE account_id = ?
-         )",
-    )
-    .bind(&session.account_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-
-    sqlx::query("DELETE FROM collections WHERE account_id = ?")
-        .bind(&session.account_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-
-    sqlx::query("DELETE FROM sessions WHERE account_id = ?")
-        .bind(&session.account_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-
-    sqlx::query("DELETE FROM devices WHERE account_id = ?")
-        .bind(&session.account_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-
+    // Every table that hangs off an account declares ON DELETE CASCADE, so the
+    // one delete below takes the devices, sessions, collection, key wraps,
+    // objects, revisions and manifest with it.
     sqlx::query("DELETE FROM accounts WHERE id = ?")
         .bind(&session.account_id)
         .execute(&mut *tx)
