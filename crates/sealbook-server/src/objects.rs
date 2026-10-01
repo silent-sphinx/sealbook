@@ -77,12 +77,17 @@ pub(crate) async fn put_object(
         max_bytes,
         ..
     } = state.limits;
+
     let usage = sqlx::query(
         "SELECT COUNT(*) AS objects, COALESCE(SUM(padded_size), 0) AS bytes,
                 COALESCE(SUM(CASE WHEN id = ? AND collection_id = ? THEN padded_size ELSE 0 END), 0)
-                    AS replaced
+                    AS replaced,
+                COALESCE(SUM(CASE WHEN id = ? AND collection_id = ? THEN 1 ELSE 0 END), 0)
+                    AS present
          FROM objects WHERE account_id = ?",
     )
+    .bind(body.id.to_string())
+    .bind(collection_id.to_string())
     .bind(body.id.to_string())
     .bind(collection_id.to_string())
     .bind(&session.account_id)
@@ -92,17 +97,7 @@ pub(crate) async fn put_object(
     let existing_objects: i64 = usage.get("objects");
     let existing_bytes: i64 = usage.get("bytes");
     let replaced: i64 = usage.get("replaced");
-    let is_new = replaced == 0
-        && sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM objects WHERE account_id = ? AND collection_id = ? AND id = ?",
-        )
-        .bind(&session.account_id)
-        .bind(collection_id.to_string())
-        .bind(body.id.to_string())
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
-            == 0;
+    let is_new = usage.get::<i64, _>("present") == 0;
     let objects_after = existing_objects + i64::from(is_new);
     let bytes_after = existing_bytes - replaced + body.padded_size as i64;
     if objects_after > max_objects || bytes_after > max_bytes {

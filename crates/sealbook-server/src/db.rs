@@ -492,7 +492,9 @@ mod tests {
 
         let quota = "SELECT COUNT(*), COALESCE(SUM(padded_size), 0),
                  COALESCE(SUM(CASE WHEN id = 'o' AND collection_id = 'c'
-                                   THEN padded_size ELSE 0 END), 0)
+                                   THEN padded_size ELSE 0 END), 0),
+                 COALESCE(SUM(CASE WHEN id = 'o' AND collection_id = 'c'
+                                   THEN 1 ELSE 0 END), 0)
              FROM objects WHERE account_id = 'a'";
         let manifest = "SELECT id, revision, tombstone, content_digest FROM objects
              WHERE account_id = 'a' AND collection_id = 'c'";
