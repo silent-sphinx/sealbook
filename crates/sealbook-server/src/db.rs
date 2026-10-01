@@ -244,12 +244,11 @@ async fn migrate_to_v1(db: &Pool<Sqlite>) -> anyhow::Result<()> {
         .execute(&mut *db)
         .await?;
 
-        // The change feed pages on (account_id, revision); the retention sweep
-        // scans created_at. Without these, both are full scans of the largest
-        // table in the database.
+        // The retention sweep scans created_at, which nothing else indexes.
+        // The change feed pages on (account_id, revision), which is already
+        // `object_revisions`' primary key, so the implicit index serves it and an
+        // explicit copy would only be a second b-tree to maintain.
         for statement in [
-            "CREATE INDEX IF NOT EXISTS object_revisions_account_revision
-                 ON object_revisions (account_id, revision)",
             "CREATE INDEX IF NOT EXISTS object_revisions_created_at
                  ON object_revisions (created_at)",
             // Covers both scans every PUT runs: the account's `padded_size` for the
@@ -469,7 +468,6 @@ mod tests {
                 .await
                 .unwrap();
         for expected in [
-            "object_revisions_account_revision",
             "object_revisions_created_at",
             "objects_account_meta",
             "sessions_expires_at",
@@ -552,6 +550,46 @@ mod tests {
                 .any(|step| step.contains("objects_account_meta") && step.contains("revision>")),
             "the snapshot walk does not seek on revision: {plan:?}"
         );
+
+        db.close().await;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The change feed must still seek, now that no explicit index duplicates
+    /// `object_revisions`' primary key.
+    #[tokio::test]
+    async fn the_change_feed_seeks_on_the_primary_key() {
+        let dir = std::env::temp_dir().join(format!("sealbook-db-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("sealbook.db");
+        let db = open_migrated(path.to_str().unwrap()).await.unwrap();
+
+        let feed = "SELECT r.object_id, r.revision, r.tombstone, r.nonce, r.ciphertext,
+                    r.padded_size, r.content_type
+             FROM object_revisions r
+             WHERE r.account_id = 'a' AND r.collection_id = 'c' AND r.revision > 3
+             ORDER BY r.revision ASC
+             LIMIT 51";
+        let floor = "SELECT MIN(revision) FROM object_revisions WHERE account_id = 'a'";
+
+        for (label, query) in [("change feed", feed), ("resync floor", floor)] {
+            let plan: Vec<String> = sqlx::query(&format!("EXPLAIN QUERY PLAN {query}"))
+                .fetch_all(&db)
+                .await
+                .unwrap()
+                .iter()
+                .map(|row| row.get::<String, _>("detail"))
+                .collect();
+            assert!(
+                plan.iter().any(|step| step.contains("SEARCH")
+                    && step.contains("sqlite_autoindex_object_revisions_1")),
+                "the {label} no longer seeks on the primary key: {plan:?}"
+            );
+            assert!(
+                !plan.iter().any(|step| step.contains("TEMP B-TREE")),
+                "the {label} sorts: {plan:?}"
+            );
+        }
 
         db.close().await;
         let _ = std::fs::remove_dir_all(dir);
