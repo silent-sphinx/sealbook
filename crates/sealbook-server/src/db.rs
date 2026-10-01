@@ -63,6 +63,15 @@ pub(crate) async fn open_db(path: &str) -> anyhow::Result<Pool<Sqlite>> {
         .with_context(|| format!("open sqlite {path}"))
 }
 
+/// Opens `path`, brings it to `SCHEMA_VERSION`, and returns a pool for serving.
+pub(crate) async fn open_migrated(path: &str) -> anyhow::Result<Pool<Sqlite>> {
+    let migrating = open_db(path).await?;
+    let result = migrate(&migrating).await;
+    migrating.close().await;
+    result?;
+    open_db(path).await
+}
+
 /// Schema version this build expects.
 ///
 /// Stored in SQLite's `user_version` header field, which is transactional, so a
@@ -243,8 +252,14 @@ async fn migrate_to_v1(db: &Pool<Sqlite>) -> anyhow::Result<()> {
                  ON object_revisions (account_id, revision)",
             "CREATE INDEX IF NOT EXISTS object_revisions_created_at
                  ON object_revisions (created_at)",
-            "CREATE INDEX IF NOT EXISTS objects_account_collection
-                 ON objects (account_id, collection_id)",
+            // Covers both scans every PUT runs: the account's `padded_size` for the
+            // quota check and the collection's `content_digest` for the manifest.
+            // Both columns are declared after `ciphertext`, so reaching them on a
+            // row whose ciphertext spilled to overflow pages would walk the whole
+            // overflow chain, twice per write.
+            "CREATE INDEX IF NOT EXISTS objects_account_meta
+                 ON objects (account_id, collection_id, id, revision, tombstone,
+                             padded_size, content_digest)",
             "CREATE INDEX IF NOT EXISTS sessions_expires_at ON sessions (expires_at)",
             "CREATE INDEX IF NOT EXISTS devices_account ON devices (account_id)",
         ] {
@@ -454,7 +469,7 @@ mod tests {
         for expected in [
             "object_revisions_account_revision",
             "object_revisions_created_at",
-            "objects_account_collection",
+            "objects_account_meta",
             "sessions_expires_at",
             "devices_account",
         ] {
@@ -463,6 +478,40 @@ mod tests {
                 "missing index {expected}; have {indexes:?}"
             );
         }
+        db.close().await;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The two queries every PUT runs must be answerable from the index alone.
+    #[tokio::test]
+    async fn the_per_write_scans_of_objects_never_touch_a_table_row() {
+        let dir = std::env::temp_dir().join(format!("sealbook-db-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("sealbook.db");
+        let db = open_migrated(path.to_str().unwrap()).await.unwrap();
+
+        let quota = "SELECT COUNT(*), COALESCE(SUM(padded_size), 0),
+                 COALESCE(SUM(CASE WHEN id = 'o' AND collection_id = 'c'
+                                   THEN padded_size ELSE 0 END), 0)
+             FROM objects WHERE account_id = 'a'";
+        let manifest = "SELECT id, revision, tombstone, content_digest FROM objects
+             WHERE account_id = 'a' AND collection_id = 'c'";
+
+        for (label, query) in [("quota", quota), ("manifest entries", manifest)] {
+            let plan: Vec<String> = sqlx::query(&format!("EXPLAIN QUERY PLAN {query}"))
+                .fetch_all(&db)
+                .await
+                .unwrap()
+                .iter()
+                .map(|row| row.get::<String, _>("detail"))
+                .collect();
+            assert!(
+                plan.iter()
+                    .any(|step| step.contains("COVERING INDEX objects_account_meta")),
+                "the {label} scan is not index-only: {plan:?}"
+            );
+        }
+
         db.close().await;
         let _ = std::fs::remove_dir_all(dir);
     }

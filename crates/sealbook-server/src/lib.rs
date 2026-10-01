@@ -229,8 +229,7 @@ pub async fn app(db_path: &str) -> anyhow::Result<Router> {
 /// Builds the app with explicit storage limits, rather than reading the
 /// environment. Tests use this so that one test's quota cannot affect another's.
 pub async fn app_with_limits(db_path: &str, limits: Limits) -> anyhow::Result<Router> {
-    let db = open_db(db_path).await?;
-    migrate(&db).await?;
+    let db = open_migrated(db_path).await?;
     verify_db_integrity(&db).await?;
     let opaque = load_or_create_setup(&db).await?;
     let dummy_record = load_or_create_dummy(&db, &opaque).await?;
