@@ -379,12 +379,24 @@ pub(crate) async fn rotate(
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
         revision += 1;
     }
-    sqlx::query("UPDATE revision_seq SET next_revision = ? WHERE account_id = ?")
-        .bind(revision)
-        .bind(&session.account_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    // A rotation re-encrypts exactly the current objects, so the count cannot
+    // change, but padding can put each one in a different size bucket.
+    let byte_total: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(padded_size), 0) FROM objects WHERE account_id = ?",
+    )
+    .bind(&session.account_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    sqlx::query(
+        "UPDATE revision_seq SET next_revision = ?, byte_total = ? WHERE account_id = ?",
+    )
+    .bind(revision)
+    .bind(byte_total)
+    .bind(&session.account_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
 
     sqlx::query("UPDATE collections SET key_epoch = ? WHERE id = ?")
         .bind(body.key_epoch as i64)

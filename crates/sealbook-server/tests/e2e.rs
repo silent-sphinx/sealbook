@@ -2418,3 +2418,98 @@ async fn an_account_cannot_enrol_devices_without_limit() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn the_quota_counters_never_drift_from_the_objects() {
+    let dir = std::env::temp_dir().join(format!("sealbook-usage-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let db_path = db.to_str().unwrap().to_string();
+    let base = spawn_http(&db_path).await;
+
+    let mut owner = SealbookClient::plaintext_http();
+    owner
+        .register(&base, "usagealice", "correct horse battery")
+        .await
+        .expect("register");
+
+    let check = |label: &'static str, path: String| async move {
+        let pool = sqlx::SqlitePool::connect(&format!("sqlite://{path}"))
+            .await
+            .expect("open db");
+        let row = sqlx::query(
+            "SELECT r.object_count, r.byte_total,
+                    (SELECT COUNT(*) FROM objects o WHERE o.account_id = r.account_id)
+                        AS real_count,
+                    (SELECT COALESCE(SUM(padded_size), 0) FROM objects o
+                      WHERE o.account_id = r.account_id) AS real_bytes
+             FROM revision_seq r",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("read usage");
+        pool.close().await;
+        let (stored_count, stored_bytes): (i64, i64) =
+            (row.get("object_count"), row.get("byte_total"));
+        let (real_count, real_bytes): (i64, i64) = (row.get("real_count"), row.get("real_bytes"));
+        assert_eq!(
+            (stored_count, stored_bytes),
+            (real_count, real_bytes),
+            "counters drifted after {label}: stored {stored_count} objects / \
+             {stored_bytes} bytes, objects say {real_count} / {real_bytes}"
+        );
+        real_count
+    };
+
+    // Three new objects.
+    let mut ids = Vec::new();
+    for index in 0..3 {
+        let id = Uuid::new_v4();
+        ids.push(id);
+        owner
+            .put_contact(
+                id,
+                &format!(r#"{{"@type":"Card","name":{{"full":"Contact {index}"}}}}"#),
+            )
+            .await
+            .expect("put");
+    }
+    assert_eq!(check("three inserts", db_path.clone()).await, 3);
+
+    // A replacement must not change the count.
+    owner
+        .put_contact(ids[0], r#"{"@type":"Card","name":{"full":"Edited"}}"#)
+        .await
+        .expect("replace");
+    assert_eq!(check("a replacement", db_path.clone()).await, 3);
+
+    // A replacement large enough to land in a different padding bucket.
+    let bulky = format!(
+        r#"{{"@type":"Card","name":{{"full":"{}"}}}}"#,
+        "x".repeat(4096)
+    );
+    owner.put_contact(ids[1], &bulky).await.expect("grow");
+    assert_eq!(check("a size change", db_path.clone()).await, 3);
+
+    // A rotation re-pads every object, which moves the byte total. :00
+    let mut joiner = SealbookClient::plaintext_http();
+    let (pair_code, confirm) = joiner.pair_join(&base, "usagealice").await.expect("join");
+    owner
+        .pair_approve(&pair_code, &confirm)
+        .await
+        .expect("approve");
+    assert!(joiner.pair_ready(&pair_code).await.expect("ready"));
+    joiner.login("correct horse battery").await.expect("login");
+    let joiner_device = joiner.state.as_ref().unwrap().device_id;
+    owner
+        .revoke_device(joiner_device, "correct horse battery")
+        .await
+        .expect("revoke");
+    assert_eq!(check("a key rotation", db_path.clone()).await, 3);
+
+    // A tombstone stays a row, so the count holds.
+    owner.delete_contact(ids[2]).await.expect("delete");
+    assert_eq!(check("a tombstone", db_path.clone()).await, 3);
+
+    let _ = std::fs::remove_dir_all(dir);
+}

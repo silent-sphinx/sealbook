@@ -222,7 +222,9 @@ async fn migrate_to_v1(db: &Pool<Sqlite>) -> anyhow::Result<()> {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS revision_seq (
                 account_id TEXT PRIMARY KEY,
-                next_revision INTEGER NOT NULL
+                next_revision INTEGER NOT NULL,
+                object_count INTEGER NOT NULL DEFAULT 0,
+                byte_total INTEGER NOT NULL DEFAULT 0
             )",
         )
         .execute(&mut *db)

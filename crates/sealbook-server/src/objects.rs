@@ -59,11 +59,14 @@ pub(crate) async fn put_object(
         .begin()
         .await
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-    let seq = sqlx::query("SELECT next_revision FROM revision_seq WHERE account_id = ?")
-        .bind(&session.account_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let seq = sqlx::query(
+        "SELECT next_revision, object_count, byte_total FROM revision_seq
+         WHERE account_id = ?",
+    )
+    .bind(&session.account_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
     let revision: i64 = seq.get("next_revision");
     // The revision is chosen by the client, because the manifest it signs commits
     // to it. A mismatch means another device wrote first.
@@ -78,26 +81,20 @@ pub(crate) async fn put_object(
         ..
     } = state.limits;
 
-    let usage = sqlx::query(
-        "SELECT COUNT(*) AS objects, COALESCE(SUM(padded_size), 0) AS bytes,
-                COALESCE(SUM(CASE WHEN id = ? AND collection_id = ? THEN padded_size ELSE 0 END), 0)
-                    AS replaced,
-                COALESCE(SUM(CASE WHEN id = ? AND collection_id = ? THEN 1 ELSE 0 END), 0)
-                    AS present
-         FROM objects WHERE account_id = ?",
+    let existing_objects: i64 = seq.get("object_count");
+    let existing_bytes: i64 = seq.get("byte_total");
+    let replaced: Option<i64> = sqlx::query_scalar(
+        "SELECT padded_size FROM objects
+         WHERE account_id = ? AND collection_id = ? AND id = ?",
     )
-    .bind(body.id.to_string())
-    .bind(collection_id.to_string())
-    .bind(body.id.to_string())
-    .bind(collection_id.to_string())
     .bind(&session.account_id)
-    .fetch_one(&mut *tx)
+    .bind(collection_id.to_string())
+    .bind(body.id.to_string())
+    .fetch_optional(&mut *tx)
     .await
     .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-    let existing_objects: i64 = usage.get("objects");
-    let existing_bytes: i64 = usage.get("bytes");
-    let replaced: i64 = usage.get("replaced");
-    let is_new = usage.get::<i64, _>("present") == 0;
+    let is_new = replaced.is_none();
+    let replaced = replaced.unwrap_or(0);
     let objects_after = existing_objects + i64::from(is_new);
     let bytes_after = existing_bytes - replaced + body.padded_size as i64;
     if objects_after > max_objects || bytes_after > max_bytes {
@@ -119,12 +116,17 @@ pub(crate) async fn put_object(
         ));
     }
 
-    sqlx::query("UPDATE revision_seq SET next_revision = ? WHERE account_id = ?")
-        .bind(revision + 1)
-        .bind(&session.account_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    sqlx::query(
+        "UPDATE revision_seq SET next_revision = ?, object_count = ?, byte_total = ?
+         WHERE account_id = ?",
+    )
+    .bind(revision + 1)
+    .bind(objects_after)
+    .bind(bytes_after)
+    .bind(&session.account_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
 
     let digest = content_digest(&body.nonce, &body.ciphertext).to_vec();
     sqlx::query(
