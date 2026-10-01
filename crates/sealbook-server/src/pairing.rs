@@ -307,7 +307,7 @@ pub(crate) async fn pair_approve(
         .map_err(|_| err(StatusCode::BAD_REQUEST, "grant signature"))?;
 
     let collection =
-        sqlx::query("SELECT id FROM collections WHERE account_id = ? AND kind = 'contacts'")
+        sqlx::query("SELECT id FROM collections WHERE account_id = ?")
             .bind(&session.account_id)
             .fetch_one(&state.db)
             .await

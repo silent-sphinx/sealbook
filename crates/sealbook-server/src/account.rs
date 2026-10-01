@@ -339,7 +339,7 @@ pub(crate) async fn change_password(
     let username: String = account.get("username");
 
     let collection =
-        sqlx::query("SELECT id FROM collections WHERE account_id = ? AND kind = 'contacts'")
+        sqlx::query("SELECT id FROM collections WHERE account_id = ?")
             .bind(&session.account_id)
             .fetch_one(&mut *tx)
             .await

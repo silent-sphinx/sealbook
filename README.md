@@ -2,7 +2,7 @@
 
 <img src="Logo.png" width="200" alt="Sealbook logo">
 
-Sealbook is a fully end-to-end encrypted vault for your contacts, calendars and notes, built to be self-hosted. Your data is encrypted on your device and the server only ever sees ciphertext. It cannot read your contacts, and neither can anyone who takes a copy of its database.
+Sealbook is a fully end-to-end encrypted vault for your contacts, calendars and notes, built to be self-hosted. Your data is encrypted on your device and the server only ever sees ciphertext. It cannot read your data, and neither can anyone who takes a copy of its database.
 
 This project exists because the usual options don't offer this. CalDAV and CardDAV servers store your address book in the clear, and hand your provider everyone you know. Sealbook uses its own protocol instead, designed security-first and *resistant* to future quantum attack.
 

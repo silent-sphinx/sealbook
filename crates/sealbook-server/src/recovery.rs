@@ -47,7 +47,7 @@ pub(crate) async fn recover_start(
     let row = sqlx::query(
         "SELECT c.id, w.hpke_enc, w.wrapped_ck, w.ciphersuite
          FROM accounts a
-         JOIN collections c ON c.account_id = a.id AND c.kind = 'contacts'
+         JOIN collections c ON c.account_id = a.id
          JOIN key_wraps w ON w.collection_id = c.id AND w.recipient_kind = 'phrase'
          WHERE a.username = ? AND a.phrase_lookup_id = ?",
     )
@@ -162,7 +162,7 @@ pub(crate) async fn recover_finish(
     }
     let account_id: String = account.get("id");
     let collection =
-        sqlx::query("SELECT id FROM collections WHERE account_id = ? AND kind = 'contacts'")
+        sqlx::query("SELECT id FROM collections WHERE account_id = ?")
             .bind(&account_id)
             .fetch_one(&state.db)
             .await

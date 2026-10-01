@@ -154,7 +154,7 @@ async fn migrate_to_v1(db: &Pool<Sqlite>) -> anyhow::Result<()> {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS collections (
                 id TEXT PRIMARY KEY,
-                account_id TEXT NOT NULL,
+                account_id TEXT NOT NULL UNIQUE,
                 kind TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 key_epoch INTEGER NOT NULL DEFAULT 1
