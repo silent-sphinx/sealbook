@@ -878,3 +878,75 @@ fn validate_state_permissions(path: &Path) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_note_payload_carries_every_field_exactly_once() {
+        let notebook = Uuid::from_u128(2);
+        let json = note_json("  Weekly plan  ", "# Monday\n\n- ship\n", notebook, None);
+        let value: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+        assert_eq!(value["@type"], "Note");
+        assert_eq!(value["version"], "1.0");
+        assert_eq!(value["body"], "# Monday\n\n- ship\n");
+        assert_eq!(value["notebookId"], notebook.to_string());
+        assert_eq!(value["createdAt"], value["updatedAt"]);
+        // One key per field. The calendar event payload once listed `calendarId`
+        // twice, which `json!` accepts silently.
+        assert_eq!(json.matches("\"notebookId\"").count(), 1);
+        assert_eq!(json.matches("\"createdAt\"").count(), 1);
+    }
+
+    #[test]
+    fn an_update_keeps_the_original_creation_time() {
+        let created = "2020-05-04T03:02:01Z";
+        let json = note_json("t", "b", Uuid::from_u128(2), Some(created));
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["createdAt"], created);
+        assert_ne!(value["updatedAt"], created);
+        assert_eq!(note_created_at(&json).as_deref(), Some(created));
+    }
+
+    #[test]
+    fn note_fields_fall_back_rather_than_panicking() {
+        let fallback = Uuid::from_u128(7);
+        assert_eq!(note_title("not json"), "Untitled");
+        assert_eq!(note_title(r#"{"title":"   "}"#), "Untitled");
+        assert_eq!(note_title(r#"{"title":"  Plan "}"#), "Plan");
+        assert_eq!(note_body("not json"), "");
+        assert_eq!(note_created_at("not json"), None);
+        assert_eq!(note_notebook_id("not json", fallback), fallback);
+        assert_eq!(
+            note_notebook_id(r#"{"notebookId":"nope"}"#, fallback),
+            fallback
+        );
+        assert_eq!(
+            note_notebook_id(
+                r#"{"notebookId":"00000000-0000-0000-0000-000000000002"}"#,
+                fallback
+            ),
+            Uuid::from_u128(2)
+        );
+    }
+
+    #[test]
+    fn the_body_comes_from_the_flag_or_the_file() {
+        assert_eq!(
+            read_note_body(Some("inline".into()), None).unwrap(),
+            "inline"
+        );
+
+        let path = std::env::temp_dir().join(format!("sealbook-body-{}.md", Uuid::new_v4()));
+        std::fs::write(&path, "# From a file\n").unwrap();
+        assert_eq!(
+            read_note_body(None, Some(path.clone())).unwrap(),
+            "# From a file\n"
+        );
+        std::fs::remove_file(&path).unwrap();
+
+        let missing = std::env::temp_dir().join(format!("sealbook-absent-{}.md", Uuid::new_v4()));
+        assert!(read_note_body(None, Some(missing)).is_err());
+    }
+}
