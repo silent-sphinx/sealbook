@@ -254,11 +254,13 @@ async fn migrate_to_v1(db: &Pool<Sqlite>) -> anyhow::Result<()> {
                  ON object_revisions (created_at)",
             // Covers both scans every PUT runs: the account's `padded_size` for the
             // quota check and the collection's `content_digest` for the manifest.
-            // Both columns are declared after `ciphertext`, so reaching them on a
-            // row whose ciphertext spilled to overflow pages would walk the whole
-            // overflow chain, twice per write.
+            //
+            // `revision` sits ahead of `id` so the same index also orders the
+            // snapshot walk. Without that the walk sorts the whole collection,
+            // ciphertexts and all, through a temp b-tree on every page it serves,
+            // rather than reading just the page it was asked for.
             "CREATE INDEX IF NOT EXISTS objects_account_meta
-                 ON objects (account_id, collection_id, id, revision, tombstone,
+                 ON objects (account_id, collection_id, revision, id, tombstone,
                              padded_size, content_digest)",
             "CREATE INDEX IF NOT EXISTS sessions_expires_at ON sessions (expires_at)",
             "CREATE INDEX IF NOT EXISTS devices_account ON devices (account_id)",
@@ -511,6 +513,45 @@ mod tests {
                 "the {label} scan is not index-only: {plan:?}"
             );
         }
+
+        db.close().await;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The walk selects `ciphertext`, so a sort means spooling every object in the
+    /// collection through a temp b-tree to hand back one page, on every page.
+    #[tokio::test]
+    async fn the_snapshot_walk_reads_its_page_in_revision_order() {
+        let dir = std::env::temp_dir().join(format!("sealbook-db-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("sealbook.db");
+        let db = open_migrated(path.to_str().unwrap()).await.unwrap();
+
+        let plan: Vec<String> = sqlx::query(
+            "EXPLAIN QUERY PLAN
+             SELECT id AS object_id, revision, tombstone, nonce, ciphertext,
+                    padded_size, content_type
+             FROM objects
+             WHERE account_id = 'a' AND collection_id = 'c' AND revision > 0
+             ORDER BY revision ASC
+             LIMIT 51",
+        )
+        .fetch_all(&db)
+        .await
+        .unwrap()
+        .iter()
+        .map(|row| row.get::<String, _>("detail"))
+        .collect();
+
+        assert!(
+            !plan.iter().any(|step| step.contains("TEMP B-TREE")),
+            "the snapshot walk sorts the collection to serve one page: {plan:?}"
+        );
+        assert!(
+            plan.iter()
+                .any(|step| step.contains("objects_account_meta") && step.contains("revision>")),
+            "the snapshot walk does not seek on revision: {plan:?}"
+        );
 
         db.close().await;
         let _ = std::fs::remove_dir_all(dir);
