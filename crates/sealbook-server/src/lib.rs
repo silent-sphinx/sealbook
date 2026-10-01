@@ -302,6 +302,19 @@ fn revision_retention() -> Duration {
     Duration::from_secs(days.saturating_mul(86_400))
 }
 
+/// Rows deleted per statement by the retention sweeps.
+///
+/// One unbounded `DELETE` holds the write lock for as long as it takes and grows
+/// the WAL by everything it touches, which on the first sweep after a backlog
+/// means blocking every write in the process. Batching gives other writers the
+/// lock back between statements.
+const PRUNE_BATCH: i64 = 2_000;
+
+/// Bytes charged per retained revision on top of its padded size: the AEAD tag,
+/// the row header, the ids and the index entry. Deliberately an over-estimate,
+/// like `rotation_body_estimate`.
+const REVISION_ROW_OVERHEAD: i64 = 64;
+
 /// Deletes superseded object revisions older than the retention window.
 ///
 /// The newest revision of each account is kept whatever its age, so that a
@@ -312,18 +325,84 @@ pub async fn prune_old_revisions(
     retention: Duration,
 ) -> Result<u64, sqlx::Error> {
     let cutoff = now().saturating_sub(retention.as_secs() as i64);
-    let deleted = sqlx::query(
-        "DELETE FROM object_revisions
-         WHERE created_at < ?
-           AND revision < COALESCE(
-               (SELECT next_revision - 1 FROM revision_seq s WHERE s.account_id = object_revisions.account_id),
-               0)",
-    )
-    .bind(cutoff)
-    .execute(db)
-    .await?
-    .rows_affected();
-    Ok(deleted)
+    let mut total = 0;
+    loop {
+        let deleted = sqlx::query(
+            "DELETE FROM object_revisions WHERE rowid IN (
+                 SELECT r.rowid FROM object_revisions r
+                 WHERE r.created_at < ?
+                   AND r.revision < COALESCE(
+                       (SELECT s.next_revision - 1 FROM revision_seq s
+                         WHERE s.account_id = r.account_id),
+                       0)
+                 LIMIT ?)",
+        )
+        .bind(cutoff)
+        .bind(PRUNE_BATCH)
+        .execute(db)
+        .await?
+        .rows_affected();
+        total += deleted;
+        if deleted < PRUNE_BATCH as u64 {
+            return Ok(total);
+        }
+    }
+}
+
+/// Deletes an account's oldest retained revisions once its log outgrows `budget`.
+///
+/// The storage quota counts only the live `objects` table, so before this the
+/// revision log was bounded by the retention window and the write rate and by
+/// nothing else: at the rates the limiter permits, one account on a 128 MiB quota
+/// could append terabytes a day and every byte stayed for thirty days. Age was
+/// capping how long a revision lived, not how many there were.
+///
+/// Dropping the oldest first raises an away client's chance of being told to
+/// resync, which is a supported answer and the same one the age sweep already
+/// produces. The newest revision of each account is kept regardless, so a
+/// caught-up client is never sent round a resync by this.
+pub async fn prune_oversized_revision_logs(
+    db: &Pool<Sqlite>,
+    budget: i64,
+) -> Result<u64, sqlx::Error> {
+    let mut total = 0;
+    loop {
+        // The running total is per account, newest revision first, so `running`
+        // is what the log would cost if it were kept back to this row. Every row
+        // past the budget goes, oldest first.
+        //
+        // Both correlated references are qualified: unqualified, `account_id`
+        // inside the subquery resolves against `revision_seq` itself, which
+        // silently compares every row to one arbitrary account's watermark.
+        let deleted = sqlx::query(
+            "DELETE FROM object_revisions WHERE rowid IN (
+                 SELECT r.rowid FROM (
+                     SELECT rowid AS rowid, account_id AS account_id,
+                            revision AS revision,
+                            SUM(padded_size + ?) OVER (
+                                PARTITION BY account_id ORDER BY revision DESC
+                                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                            ) AS running
+                     FROM object_revisions) AS r
+                 WHERE r.running > ?
+                   AND r.revision < COALESCE(
+                       (SELECT s.next_revision - 1 FROM revision_seq s
+                         WHERE s.account_id = r.account_id),
+                       0)
+                 ORDER BY r.running DESC
+                 LIMIT ?)",
+        )
+        .bind(REVISION_ROW_OVERHEAD)
+        .bind(budget)
+        .bind(PRUNE_BATCH)
+        .execute(db)
+        .await?
+        .rows_affected();
+        total += deleted;
+        if deleted < PRUNE_BATCH as u64 {
+            return Ok(total);
+        }
+    }
 }
 
 fn spawn_session_sweeper(state: Shared) {
@@ -346,6 +425,18 @@ fn spawn_session_sweeper(state: Shared) {
                 Ok(_) => {}
                 Err(error) => {
                     tracing::warn!(%error, "pruning object revisions failed");
+                }
+            }
+            // The log gets the same byte budget as the live vault, so an account's
+            // total footprint stays within about twice its quota however fast it
+            // writes, instead of being bounded only by the retention window.
+            match prune_oversized_revision_logs(&state.db, state.limits.max_bytes).await {
+                Ok(deleted) if deleted > 0 => {
+                    info!(deleted, "pruned revision logs past their byte budget");
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    tracing::warn!(%error, "pruning oversized revision logs failed");
                 }
             }
             tokio::time::sleep(SESSION_SWEEP_INTERVAL).await;
@@ -742,7 +833,6 @@ mod tests {
         );
     }
 
-
     #[cfg(test)]
     async fn seed_account(db: &Pool<Sqlite>, account: &str, device: &str, collection: &str) {
         sqlx::query(
@@ -771,6 +861,114 @@ mod tests {
         .execute(db)
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn pruning_caps_a_revision_log_that_outgrows_its_byte_budget() {
+        let dir = std::env::temp_dir().join(format!("sealbook-budget-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_file = dir.join("sealbook.db");
+        let db_path = db_file.to_str().unwrap().to_string();
+        let _ = app(&db_path).await.unwrap();
+        let db = sqlx::SqlitePool::connect(&format!("sqlite://{}", db_file.display()))
+            .await
+            .unwrap();
+
+        seed_account(&db, "one", "device-one", "collection-one").await;
+        seed_account(&db, "two", "device-two", "collection-two").await;
+        for account in ["one", "two"] {
+            sqlx::query("INSERT INTO revision_seq (account_id, next_revision) VALUES (?, 6)")
+                .bind(account)
+                .execute(&db)
+                .await
+                .unwrap();
+            // Five revisions of 1,000 padded bytes each, all brand new, so the age
+            // sweep would keep every one of them.
+            for revision in 1..=5 {
+                sqlx::query(
+                    "INSERT INTO object_revisions
+                     (account_id, revision, collection_id, object_id, tombstone,
+                      padded_size, created_at)
+                     VALUES (?, ?, 'collection', 'object', 0, 1000, ?)",
+                )
+                .bind(account)
+                .bind(revision)
+                .bind(now())
+                .execute(&db)
+                .await
+                .unwrap();
+            }
+        }
+
+        // Room for two rows of 1,000 + 64 bytes, not three.
+        let deleted = prune_oversized_revision_logs(&db, 2 * (1000 + 64))
+            .await
+            .unwrap();
+        assert_eq!(deleted, 6, "three rows per account should have gone");
+
+        for account in ["one", "two"] {
+            let kept: Vec<i64> = sqlx::query_scalar(
+                "SELECT revision FROM object_revisions WHERE account_id = ?
+                 ORDER BY revision",
+            )
+            .bind(account)
+            .fetch_all(&db)
+            .await
+            .unwrap();
+            assert_eq!(
+                kept,
+                vec![4, 5],
+                "account {account} kept the wrong revisions"
+            );
+        }
+
+        db.close().await;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A budget smaller than a single revision must still not take the newest one,
+    /// or a caught-up client is sent round a resync on every poll.
+    #[tokio::test]
+    async fn the_byte_budget_never_drops_an_account_s_newest_revision() {
+        let dir = std::env::temp_dir().join(format!("sealbook-budget-min-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_file = dir.join("sealbook.db");
+        let db_path = db_file.to_str().unwrap().to_string();
+        let _ = app(&db_path).await.unwrap();
+        let db = sqlx::SqlitePool::connect(&format!("sqlite://{}", db_file.display()))
+            .await
+            .unwrap();
+
+        seed_account(&db, "account", "device", "collection").await;
+        sqlx::query("INSERT INTO revision_seq (account_id, next_revision) VALUES ('account', 3)")
+            .execute(&db)
+            .await
+            .unwrap();
+        for revision in 1..=2 {
+            sqlx::query(
+                "INSERT INTO object_revisions
+                 (account_id, revision, collection_id, object_id, tombstone,
+                  padded_size, created_at)
+                 VALUES ('account', ?, 'collection', 'object', 0, 4096, ?)",
+            )
+            .bind(revision)
+            .bind(now())
+            .execute(&db)
+            .await
+            .unwrap();
+        }
+
+        prune_oversized_revision_logs(&db, 1).await.unwrap();
+
+        let kept: Vec<i64> =
+            sqlx::query_scalar("SELECT revision FROM object_revisions ORDER BY revision")
+                .fetch_all(&db)
+                .await
+                .unwrap();
+        assert_eq!(kept, vec![2], "the newest revision must survive any budget");
+
+        db.close().await;
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[tokio::test]

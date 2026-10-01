@@ -1961,6 +1961,89 @@ async fn a_write_past_the_object_quota_is_refused() {
         .expect("an update must not count as a new object");
 }
 
+/// Deleting an object has to give its quota slot back.
+///
+/// A tombstone stays a row, and nothing compacts it, so counting one against
+/// `max_objects` meant a vault that had been filled and emptied was permanently
+/// full: every further write was refused although the account held nothing.
+#[tokio::test]
+async fn a_deleted_object_frees_its_quota_slot() {
+    let dir = std::env::temp_dir().join(format!("sealbook-churn-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let app = sealbook_server::app_with_limits(
+        db.to_str().unwrap(),
+        sealbook_server::Limits {
+            max_objects: 2,
+            max_bytes: 1024 * 1024,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        .unwrap();
+    });
+    let base = format!("http://{addr}");
+
+    let mut owner = SealbookClient::plaintext_http();
+    owner
+        .register(&base, "churnalice", "correct horse battery")
+        .await
+        .expect("register");
+
+    let first = Uuid::new_v4();
+    owner
+        .put_contact(first, r#"{"@type":"Card","name":{"full":"First"}}"#)
+        .await
+        .expect("put first");
+    owner
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"Second"}}"#,
+        )
+        .await
+        .expect("put second");
+    owner
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"One too many"}}"#,
+        )
+        .await
+        .expect_err("the vault is full");
+
+    owner.delete_contact(first).await.expect("delete");
+
+    // The tombstone still occupies a row, but the account holds one object, so
+    // there is room for another.
+    owner
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"Replacement"}}"#,
+        )
+        .await
+        .expect("a deleted object must free its slot");
+    owner
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"Still too many"}}"#,
+        )
+        .await
+        .expect_err("the live ceiling still applies");
+
+    let listed = owner.list_contacts().await.expect("list");
+    assert_eq!(listed.len(), 2, "wrong live contents: {listed:?}");
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[tokio::test]
 async fn the_change_feed_paginates() {
     let (_db, base, client) = account_with_contacts("paginate", 5).await;
@@ -1989,6 +2072,178 @@ async fn the_change_feed_paginates() {
 /// A rotation installs a new password KDF salt and a new recovery-phrase record.
 /// Neither is a key wrap, so neither was covered by the rotation signature, and
 /// both went into `accounts` on the word of whatever sent the request. Anything
+/// A rotation must not be able to tombstone an object it is re-encrypting.
+///
+/// The `UPDATE` a rotation runs does not carry `tombstone`, but the revision row
+/// it appends took the flag straight from the request. A body claiming one left
+/// `objects` saying the object is live and `object_revisions` saying it was
+/// deleted, so a device syncing incrementally dropped an object that a snapshot
+/// walk still served — and neither manifest digest covers the other's view, so
+/// nothing downstream could notice.
+///
+/// Built by hand, because a conforming client leaves tombstones out of a
+/// rotation altogether.
+#[tokio::test]
+async fn a_rotation_that_tombstones_a_live_object_is_refused() {
+    use sealbook_crypto::{
+        generate_kdf_salt, generate_phrase, phrase_lookup_id, phrase_recovery_public,
+        wrap_collection_key, wrap_for_device, wrap_for_phrase, DeviceHpkePublic,
+        PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE,
+    };
+    use sealbook_protocol::{
+        DevicePublicKeys, ManifestBody, PhraseRecoveryBody, RotateRequest, RotatedObject,
+        JSCONTACT_CONTENT_TYPE,
+    };
+
+    let dir = std::env::temp_dir().join(format!("sealbook-rot-tomb-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let password = "correct horse battery";
+    let mut owner = SealbookClient::plaintext_http();
+    owner.register(&base, "tombalice", password).await.unwrap();
+    let object_id = Uuid::new_v4();
+    owner
+        .put_contact(
+            object_id,
+            r#"{"@type":"Card","name":{"full":"Ada Lovelace"}}"#,
+        )
+        .await
+        .expect("put");
+
+    let state = owner.state.as_ref().unwrap();
+    let (collection_id, device_id, token) = (
+        state.collection_id,
+        state.device_id,
+        state.session_token.clone().unwrap(),
+    );
+    let http = reqwest::Client::new();
+    let devices: Vec<DevicePublicKeys> = http
+        .get(format!("{base}/v1/account/devices"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let device = devices
+        .into_iter()
+        .find(|candidate| candidate.device_id == device_id)
+        .expect("the registering device must be enrolled");
+
+    // Wraps the server will accept, so that the request reaches the object checks
+    // rather than being turned away earlier.
+    let new_ck = CollectionKey::generate();
+    let salt = generate_kdf_salt();
+    let (_phrase, entropy) = generate_phrase().unwrap();
+    let device_wrap = wrap_for_device(&DeviceHpkePublic(device.xwing_hpke_pk.clone()), &new_ck)
+        .expect("wrap for device");
+    let recovery_wrap =
+        wrap_collection_key(password.as_bytes(), &salt, &new_ck).expect("wrap for password");
+    let phrase_wrap = wrap_for_phrase(&entropy, &new_ck).expect("wrap for phrase");
+    let phrase_public = phrase_recovery_public(&entropy).unwrap();
+    let key_epoch = owner.server_key_epoch().await.unwrap() + 1;
+
+    // The live object, re-sent as a tombstone. Empty ciphertext and a zero padded
+    // size are the shape a tombstone is allowed to have, so only the flag itself
+    // is wrong.
+    let request = RotateRequest {
+        key_epoch,
+        revoke_device_id: None,
+        kdf_salt: salt.to_vec(),
+        key_wraps: vec![
+            KeyWrapBody {
+                recipient_kind: "device".into(),
+                recipient_id: device_id.to_string(),
+                hpke_enc: device_wrap.enc,
+                wrapped_ck: device_wrap.ciphertext,
+                ciphersuite: XWING_CIPHERSUITE.into(),
+            },
+            KeyWrapBody {
+                recipient_kind: "recovery".into(),
+                recipient_id: "tombalice".into(),
+                hpke_enc: recovery_wrap.nonce.to_vec(),
+                wrapped_ck: recovery_wrap.ciphertext,
+                ciphersuite: RECOVERY_CIPHERSUITE.into(),
+            },
+            KeyWrapBody {
+                recipient_kind: "phrase".into(),
+                recipient_id: "tombalice".into(),
+                hpke_enc: phrase_wrap.nonce.to_vec(),
+                wrapped_ck: phrase_wrap.ciphertext,
+                ciphersuite: PHRASE_CIPHERSUITE.into(),
+            },
+        ],
+        phrase_recovery: PhraseRecoveryBody {
+            mldsa_pk: phrase_public.mldsa_pk.clone(),
+            ed25519_pk: phrase_public.ed25519_pk.clone(),
+            lookup_id: phrase_lookup_id(&entropy).unwrap().to_vec(),
+            scheme: PHRASE_SCHEME.into(),
+        },
+        objects: vec![RotatedObject {
+            id: object_id,
+            revision: 2,
+            nonce: Vec::new(),
+            ciphertext: Vec::new(),
+            padded_size: 0,
+            content_type: JSCONTACT_CONTENT_TYPE.into(),
+            tombstone: true,
+        }],
+        manifest: ManifestBody {
+            manifest_seq: 3,
+            key_epoch,
+            latest_revision: 2,
+            object_count: 1,
+            digest: vec![0u8; 32],
+            device_id,
+            signature: DualSignatureBody {
+                mldsa: Vec::new(),
+                ed25519: Vec::new(),
+            },
+        },
+        rotation_signature: DualSignatureBody {
+            mldsa: Vec::new(),
+            ed25519: Vec::new(),
+        },
+    };
+
+    let response = http
+        .post(format!("{base}/v1/collections/{collection_id}/rotate"))
+        .bearer_auth(&token)
+        .json(&request)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 400);
+    let body = response.text().await.unwrap();
+    assert!(
+        body.contains("tombstone"),
+        "refused for the wrong reason: {body}"
+    );
+
+    // And the two tables still agree: the object is live in both.
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    let live: i64 = sqlx::query_scalar("SELECT tombstone FROM objects WHERE id = ?")
+        .bind(object_id.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(live, 0, "the object must still be live");
+    let tombstoned_revisions: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM object_revisions WHERE tombstone = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(tombstoned_revisions, 0, "a delete was logged anyway");
+    pool.close().await;
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// able to modify a rotation body could therefore swap in a `lookup_id` and phrase
 /// verification key it controlled, and then enrol a device of its own through the
 /// recovery flow.
@@ -2438,25 +2693,35 @@ async fn the_quota_counters_never_drift_from_the_objects() {
             .await
             .expect("open db");
         let row = sqlx::query(
-            "SELECT r.object_count, r.byte_total,
+            "SELECT r.object_count, r.byte_total, r.tombstone_count,
                     (SELECT COUNT(*) FROM objects o WHERE o.account_id = r.account_id)
                         AS real_count,
                     (SELECT COALESCE(SUM(padded_size), 0) FROM objects o
-                      WHERE o.account_id = r.account_id) AS real_bytes
+                      WHERE o.account_id = r.account_id) AS real_bytes,
+                    (SELECT COALESCE(SUM(tombstone), 0) FROM objects o
+                      WHERE o.account_id = r.account_id) AS real_tombstones
              FROM revision_seq r",
         )
         .fetch_one(&pool)
         .await
         .expect("read usage");
         pool.close().await;
-        let (stored_count, stored_bytes): (i64, i64) =
-            (row.get("object_count"), row.get("byte_total"));
-        let (real_count, real_bytes): (i64, i64) = (row.get("real_count"), row.get("real_bytes"));
+        let (stored_count, stored_bytes, stored_tombstones): (i64, i64, i64) = (
+            row.get("object_count"),
+            row.get("byte_total"),
+            row.get("tombstone_count"),
+        );
+        let (real_count, real_bytes, real_tombstones): (i64, i64, i64) = (
+            row.get("real_count"),
+            row.get("real_bytes"),
+            row.get("real_tombstones"),
+        );
         assert_eq!(
-            (stored_count, stored_bytes),
-            (real_count, real_bytes),
+            (stored_count, stored_bytes, stored_tombstones),
+            (real_count, real_bytes, real_tombstones),
             "counters drifted after {label}: stored {stored_count} objects / \
-             {stored_bytes} bytes, objects say {real_count} / {real_bytes}"
+             {stored_bytes} bytes / {stored_tombstones} tombstones, objects say \
+             {real_count} / {real_bytes} / {real_tombstones}"
         );
         real_count
     };
@@ -2566,7 +2831,11 @@ async fn a_revocation_succeeds_with_a_tombstone_in_the_vault() {
         "the collection key was not rotated"
     );
     let contacts = owner.list_contacts().await.expect("list");
-    assert_eq!(contacts.len(), 1, "the live object must survive: {contacts:?}");
+    assert_eq!(
+        contacts.len(),
+        1,
+        "the live object must survive: {contacts:?}"
+    );
     assert_eq!(contacts[0].0, keep);
     assert!(contacts[0].1.contains("Ada Lovelace"));
 
@@ -2633,7 +2902,10 @@ async fn deleting_an_account_leaves_nothing_in_any_table() {
             .fetch_one(&pool)
             .await
             .expect("count");
-        assert!(rows > 0, "{table} was empty before the delete, so it proves nothing");
+        assert!(
+            rows > 0,
+            "{table} was empty before the delete, so it proves nothing"
+        );
     }
 
     owner.delete_account().await.expect("delete account");
@@ -2643,7 +2915,10 @@ async fn deleting_an_account_leaves_nothing_in_any_table() {
             .fetch_one(&pool)
             .await
             .expect("count");
-        assert_eq!(rows, 0, "{table} still holds {rows} row(s) after the account was deleted");
+        assert_eq!(
+            rows, 0,
+            "{table} still holds {rows} row(s) after the account was deleted"
+        );
     }
 
     // The server's own secrets are not account data and must survive.

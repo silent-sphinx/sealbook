@@ -42,11 +42,18 @@ pub(crate) async fn put_object(
         return Err(err(StatusCode::TOO_MANY_REQUESTS, "rate limited"));
     }
     validate_object(&body)?;
+
+    let mut tx = state
+        .db
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+
     let collection =
         sqlx::query("SELECT key_epoch FROM collections WHERE id = ? AND account_id = ?")
             .bind(collection_id.to_string())
             .bind(&session.account_id)
-            .fetch_optional(&state.db)
+            .fetch_optional(&mut *tx)
             .await
             .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
     let Some(collection) = collection else {
@@ -54,13 +61,8 @@ pub(crate) async fn put_object(
     };
     let key_epoch: i64 = collection.get("key_epoch");
 
-    let mut tx = state
-        .db
-        .begin()
-        .await
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
     let seq = sqlx::query(
-        "SELECT next_revision, object_count, byte_total FROM revision_seq
+        "SELECT next_revision, object_count, byte_total, tombstone_count FROM revision_seq
          WHERE account_id = ?",
     )
     .bind(&session.account_id)
@@ -83,8 +85,9 @@ pub(crate) async fn put_object(
 
     let existing_objects: i64 = seq.get("object_count");
     let existing_bytes: i64 = seq.get("byte_total");
-    let replaced: Option<i64> = sqlx::query_scalar(
-        "SELECT padded_size FROM objects
+    let existing_tombstones: i64 = seq.get("tombstone_count");
+    let replaced: Option<(i64, i64)> = sqlx::query_as(
+        "SELECT padded_size, tombstone FROM objects
          WHERE account_id = ? AND collection_id = ? AND id = ?",
     )
     .bind(&session.account_id)
@@ -94,13 +97,28 @@ pub(crate) async fn put_object(
     .await
     .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
     let is_new = replaced.is_none();
-    let replaced = replaced.unwrap_or(0);
+    let (replaced, replaced_tombstone) = replaced.unwrap_or((0, 0));
     let objects_after = existing_objects + i64::from(is_new);
     let bytes_after = existing_bytes - replaced + body.padded_size as i64;
-    if objects_after > max_objects || bytes_after > max_bytes {
+    let tombstones_after = existing_tombstones - replaced_tombstone + i64::from(body.tombstone);
+    // A tombstone is a row, but it is not an object the account still holds.
+    // Counting one against `max_objects` meant a vault that had been filled and
+    // emptied was permanently full: the rows could never be re-used, and nothing
+    // compacts them. The live count is also the honest input to the rotation
+    // projection below, since a rotation body carries only live objects.
+    let live_after = objects_after - tombstones_after;
+    if live_after > max_objects || bytes_after > max_bytes {
         return Err(err(
             StatusCode::INSUFFICIENT_STORAGE,
             "account storage quota exceeded",
+        ));
+    }
+    // Tombstones still cost a row and a manifest entry each, so they get their
+    // own ceiling rather than no ceiling.
+    if tombstones_after > max_objects {
+        return Err(err(
+            StatusCode::INSUFFICIENT_STORAGE,
+            "account storage quota exceeded: too many deleted objects",
         ));
     }
     // The vault also has to stay small enough to rotate. A rotation re-encrypts
@@ -108,7 +126,7 @@ pub(crate) async fn put_object(
     // rotated — and every operation that has to invalidate the collection key
     // goes through a rotation. Refusing the write is the only failure mode that
     // does not end with a revoked device still holding a working key.
-    if !state.limits.rotation_fits(objects_after, bytes_after) {
+    if !state.limits.rotation_fits(live_after, bytes_after) {
         return Err(err(
             StatusCode::INSUFFICIENT_STORAGE,
             "account storage quota exceeded: the vault would grow past what one \
@@ -117,12 +135,14 @@ pub(crate) async fn put_object(
     }
 
     sqlx::query(
-        "UPDATE revision_seq SET next_revision = ?, object_count = ?, byte_total = ?
+        "UPDATE revision_seq SET next_revision = ?, object_count = ?, byte_total = ?,
+             tombstone_count = ?
          WHERE account_id = ?",
     )
     .bind(revision + 1)
     .bind(objects_after)
     .bind(bytes_after)
+    .bind(tombstones_after)
     .bind(&session.account_id)
     .execute(&mut *tx)
     .await
@@ -217,6 +237,11 @@ pub(crate) async fn collection_manifest(
     if owned.is_none() {
         return Err(err(StatusCode::NOT_FOUND, "collection"));
     }
+    // The entries and the manifest that commits to them must come from one
+    // snapshot. Read apart, a write landing in between returns the new manifest
+    // beside the old entries, and the client's digest check — the whole point of
+    // this endpoint — fails exactly as it would against a server withholding an
+    // object.
     let mut tx = state
         .db
         .begin()
@@ -224,13 +249,11 @@ pub(crate) async fn collection_manifest(
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
     let entries =
         manifest::entries(&mut tx, &session.account_id, &collection_id.to_string()).await?;
+    let manifest = manifest::load(&mut *tx, &collection_id.to_string()).await?;
     tx.commit()
         .await
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-    Ok(Json(ManifestResponse {
-        manifest: manifest::load(&state.db, &collection_id.to_string()).await?,
-        entries,
-    }))
+    Ok(Json(ManifestResponse { manifest, entries }))
 }
 
 pub(crate) async fn changes(
@@ -258,10 +281,20 @@ pub(crate) async fn changes(
     // are rows in `objects`, so it is a complete description, not just a current
     // one.
     let snapshot = query.snapshot.unwrap_or(false);
+
+    // One snapshot for the whole answer. Read from the pool one statement at a
+    // time, the watermark, the epoch, the rows and the manifest could each come
+    // from a different commit, so a write landing mid-handler produced a reply
+    // that described no state the vault was ever in.
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
     let latest_assigned: i64 =
         sqlx::query_scalar("SELECT next_revision - 1 FROM revision_seq WHERE account_id = ?")
             .bind(&session.account_id)
-            .fetch_optional(&state.db)
+            .fetch_optional(&mut *tx)
             .await
             .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
             .unwrap_or(0);
@@ -269,7 +302,7 @@ pub(crate) async fn changes(
         sqlx::query_scalar("SELECT key_epoch FROM collections WHERE id = ? AND account_id = ?")
             .bind(collection_id.to_string())
             .bind(&session.account_id)
-            .fetch_optional(&state.db)
+            .fetch_optional(&mut *tx)
             .await
             .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
             .ok_or_else(|| err(StatusCode::NOT_FOUND, "collection"))?;
@@ -279,7 +312,7 @@ pub(crate) async fn changes(
         let floor: Option<i64> =
             sqlx::query_scalar("SELECT MIN(revision) FROM object_revisions WHERE account_id = ?")
                 .bind(&session.account_id)
-                .fetch_optional(&state.db)
+                .fetch_optional(&mut *tx)
                 .await
                 .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
                 .flatten();
@@ -293,12 +326,16 @@ pub(crate) async fn changes(
         // one round trip is unambiguous; serving a partial snapshot from the
         // client's stale watermark would look like an answer and quietly omit
         // everything below it.
+        let manifest = manifest::load(&mut *tx, &collection_id.to_string()).await?;
+        tx.commit()
+            .await
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
         return Ok(Json(ChangesResponse {
             latest_revision: latest_assigned as u64,
             key_epoch: key_epoch as u64,
             objects: Vec::new(),
             has_more: false,
-            manifest: manifest::load(&state.db, &collection_id.to_string()).await?,
+            manifest,
             resync: true,
         }));
     }
@@ -318,7 +355,7 @@ pub(crate) async fn changes(
         .bind(collection_id.to_string())
         .bind(after)
         .bind(probe)
-        .fetch_all(&state.db)
+        .fetch_all(&mut *tx)
         .await
     } else {
         sqlx::query(
@@ -333,7 +370,7 @@ pub(crate) async fn changes(
         .bind(collection_id.to_string())
         .bind(after)
         .bind(probe)
-        .fetch_all(&state.db)
+        .fetch_all(&mut *tx)
         .await
     }
     .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
@@ -356,12 +393,16 @@ pub(crate) async fn changes(
             content_type: row.get("content_type"),
         });
     }
+    let manifest = manifest::load(&mut *tx, &collection_id.to_string()).await?;
+    tx.commit()
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
     Ok(Json(ChangesResponse {
         latest_revision: latest,
         key_epoch: key_epoch as u64,
         objects,
         has_more,
-        manifest: manifest::load(&state.db, &collection_id.to_string()).await?,
+        manifest,
         // A snapshot walk is itself the resync.
         resync: snapshot,
     }))

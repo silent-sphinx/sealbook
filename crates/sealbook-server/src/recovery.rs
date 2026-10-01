@@ -161,16 +161,15 @@ pub(crate) async fn recover_finish(
         return Err(err(StatusCode::UNAUTHORIZED, "invalid credentials"));
     }
     let account_id: String = account.get("id");
-    let collection =
-        sqlx::query("SELECT id FROM collections WHERE account_id = ?")
-            .bind(&account_id)
-            .fetch_one(&state.db)
-            .await
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let collection = sqlx::query("SELECT id FROM collections WHERE account_id = ?")
+        .bind(&account_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
     let collection_id: String = collection.get("id");
     let mut tx = state
         .db
-        .begin()
+        .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
     insert_device(

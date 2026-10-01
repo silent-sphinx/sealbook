@@ -89,126 +89,35 @@ pub(crate) async fn rotate(
         return Err(err(StatusCode::BAD_REQUEST, "invalid kdf salt"));
     }
 
-    let collection =
-        sqlx::query("SELECT id, key_epoch FROM collections WHERE id = ? AND account_id = ?")
-            .bind(collection_id.to_string())
-            .bind(&session.account_id)
-            .fetch_optional(&state.db)
-            .await
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
-            .ok_or_else(|| err(StatusCode::NOT_FOUND, "collection"))?;
-    let collection_id_text: String = collection.get("id");
-    let current_epoch: i64 = collection.get("key_epoch");
-    // Reject replays and concurrent rotations: the epoch must advance by one.
-    if body.key_epoch != (current_epoch as u64) + 1 {
-        return Err(err(StatusCode::CONFLICT, "stale key epoch"));
-    }
-
-    if let Some(device_id) = body.revoke_device_id {
-        let target = sqlx::query(
-            "SELECT id FROM devices WHERE id = ? AND account_id = ? AND revoked_at IS NULL",
-        )
-        .bind(device_id.to_string())
-        .bind(&session.account_id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-        if target.is_none() {
-            return Err(err(StatusCode::NOT_FOUND, "device"));
-        }
-    }
-
-    // Every device that keeps access must get a wrap of the new key.
-    let revoked = body
-        .revoke_device_id
-        .map(|device| device.to_string())
-        .unwrap_or_default();
-    let remaining: Vec<String> = sqlx::query(
-        "SELECT id FROM devices
-         WHERE account_id = ? AND revoked_at IS NULL AND id != ?
-         ORDER BY created_at ASC",
-    )
-    .bind(&session.account_id)
-    .bind(&revoked)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
-    .into_iter()
-    .map(|row| row.get::<String, _>("id"))
-    .collect();
-    if remaining.is_empty() {
-        return Err(err(
-            StatusCode::BAD_REQUEST,
-            "cannot revoke the last device",
-        ));
-    }
-
-    let account = sqlx::query("SELECT username FROM accounts WHERE id = ?")
-        .bind(&session.account_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|_| err(StatusCode::NOT_FOUND, "account not found"))?;
-    let username: String = account.get("username");
-    validate_rotation_wraps(&remaining, &username, &body.key_wraps)?;
-
-    // The rotation must cover exactly the live objects: no silent drops, and
-    // nothing left behind under the old key.
-    let existing: Vec<String> = sqlx::query(
-        "SELECT id FROM objects
-         WHERE account_id = ? AND collection_id = ? AND tombstone = 0",
-    )
-    .bind(&session.account_id)
-    .bind(&collection_id_text)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
-    .into_iter()
-    .map(|row| row.get::<String, _>("id"))
-    .collect();
+    // Everything that depends only on the request body is done before the
+    // transaction opens, because all of it hashes the whole body: the object
+    // digest the transcript covers, and the per-object content digests the rows
+    // store. At the 128 MiB ceiling that is several hundred milliseconds of
+    // SHA-256, and under the write lock it would stall every other writer for
+    // that long.
     let mut supplied: Vec<String> = Vec::with_capacity(body.objects.len());
     for object in &body.objects {
         validate_rotated_object(object)?;
-        supplied.push(object.id.to_string());
-    }
-    let mut expected_sorted = existing.clone();
-    expected_sorted.sort();
-    let mut supplied_sorted = supplied.clone();
-    supplied_sorted.sort();
-    supplied_sorted.dedup();
-    if supplied_sorted.len() != supplied.len() || supplied_sorted != expected_sorted {
-        return Err(err(
-            StatusCode::BAD_REQUEST,
-            "rotation must re-encrypt exactly the current objects",
-        ));
-    }
-
-    // Revisions are chosen by the client so that the manifest can commit to them,
-    // and must run consecutively from the collection's next revision.
-    let first_revision: i64 =
-        sqlx::query_scalar("SELECT next_revision FROM revision_seq WHERE account_id = ?")
-            .bind(&session.account_id)
-            .fetch_one(&state.db)
-            .await
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-    for (index, object) in body.objects.iter().enumerate() {
-        if object.revision != (first_revision as u64) + index as u64 {
+        // A rotation re-encrypts the live objects, and the `UPDATE` below does
+        // not carry `tombstone`, so a rotated object claiming to be a tombstone
+        // left `objects` saying the object is live and `object_revisions` saying
+        // it was deleted. Devices on the change feed would then drop an object
+        // that a snapshot walk still serves, and neither manifest digest covers
+        // the other's view, so nothing downstream could catch it.
+        if object.tombstone {
             return Err(err(
-                StatusCode::CONFLICT,
-                "rotation revisions must run consecutively from the next revision",
+                StatusCode::BAD_REQUEST,
+                "a rotation re-encrypts live objects; a tombstone has no plaintext \
+                 to re-encrypt and must be left out",
             ));
         }
+        supplied.push(object.id.to_string());
     }
-
-    // Bind the whole rotation to the device performing it.
-    let signer = sqlx::query(
-        "SELECT mldsa_pk, ed25519_pk FROM devices WHERE id = ? AND account_id = ? AND revoked_at IS NULL",
-    )
-    .bind(&session.device_id)
-    .bind(&session.account_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
-    .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "invalid token"))?;
+    let content_digests: Vec<Vec<u8>> = body
+        .objects
+        .iter()
+        .map(|object| content_digest(&object.nonce, &object.ciphertext).to_vec())
+        .collect();
     let wrap_entries: Vec<WrapDigestEntry<'_>> = body
         .key_wraps
         .iter()
@@ -257,6 +166,135 @@ pub(crate) async fn rotate(
         &manifest_digest,
         &recovery_payload,
     );
+
+    // Everything this rotation checks against the vault, and everything it then
+    // writes, runs in one `BEGIN IMMEDIATE` transaction. Read from the pool first
+    // and committed afterwards, as they were, each check described a vault that
+    // could already have moved: a write landing in between invalidated the
+    // revision run, the live object set and the epoch this request was built
+    // against, and the rotation's first write then failed with an unretryable
+    // `SQLITE_BUSY_SNAPSHOT` rather than a conflict the client could act on.
+    let mut tx = state
+        .db
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+
+    let collection =
+        sqlx::query("SELECT id, key_epoch FROM collections WHERE id = ? AND account_id = ?")
+            .bind(collection_id.to_string())
+            .bind(&session.account_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
+            .ok_or_else(|| err(StatusCode::NOT_FOUND, "collection"))?;
+    let collection_id_text: String = collection.get("id");
+    let current_epoch: i64 = collection.get("key_epoch");
+    // Reject replays and concurrent rotations: the epoch must advance by one.
+    if body.key_epoch != (current_epoch as u64) + 1 {
+        return Err(err(StatusCode::CONFLICT, "stale key epoch"));
+    }
+
+    if let Some(device_id) = body.revoke_device_id {
+        let target = sqlx::query(
+            "SELECT id FROM devices WHERE id = ? AND account_id = ? AND revoked_at IS NULL",
+        )
+        .bind(device_id.to_string())
+        .bind(&session.account_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+        if target.is_none() {
+            return Err(err(StatusCode::NOT_FOUND, "device"));
+        }
+    }
+
+    // Every device that keeps access must get a wrap of the new key.
+    let revoked = body
+        .revoke_device_id
+        .map(|device| device.to_string())
+        .unwrap_or_default();
+    let remaining: Vec<String> = sqlx::query(
+        "SELECT id FROM devices
+         WHERE account_id = ? AND revoked_at IS NULL AND id != ?
+         ORDER BY created_at ASC",
+    )
+    .bind(&session.account_id)
+    .bind(&revoked)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
+    .into_iter()
+    .map(|row| row.get::<String, _>("id"))
+    .collect();
+    if remaining.is_empty() {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "cannot revoke the last device",
+        ));
+    }
+
+    let account = sqlx::query("SELECT username FROM accounts WHERE id = ?")
+        .bind(&session.account_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|_| err(StatusCode::NOT_FOUND, "account not found"))?;
+    let username: String = account.get("username");
+    validate_rotation_wraps(&remaining, &username, &body.key_wraps)?;
+
+    // The rotation must cover exactly the live objects: no silent drops, and
+    // nothing left behind under the old key.
+    let existing: Vec<String> = sqlx::query(
+        "SELECT id FROM objects
+         WHERE account_id = ? AND collection_id = ? AND tombstone = 0",
+    )
+    .bind(&session.account_id)
+    .bind(&collection_id_text)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
+    .into_iter()
+    .map(|row| row.get::<String, _>("id"))
+    .collect();
+    let mut expected_sorted = existing.clone();
+    expected_sorted.sort();
+    let mut supplied_sorted = supplied.clone();
+    supplied_sorted.sort();
+    supplied_sorted.dedup();
+    if supplied_sorted.len() != supplied.len() || supplied_sorted != expected_sorted {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "rotation must re-encrypt exactly the current objects",
+        ));
+    }
+
+    // Revisions are chosen by the client so that the manifest can commit to them,
+    // and must run consecutively from the collection's next revision.
+    let first_revision: i64 =
+        sqlx::query_scalar("SELECT next_revision FROM revision_seq WHERE account_id = ?")
+            .bind(&session.account_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    for (index, object) in body.objects.iter().enumerate() {
+        if object.revision != (first_revision as u64) + index as u64 {
+            return Err(err(
+                StatusCode::CONFLICT,
+                "rotation revisions must run consecutively from the next revision",
+            ));
+        }
+    }
+
+    // Bind the whole rotation to the device performing it.
+    let signer = sqlx::query(
+        "SELECT mldsa_pk, ed25519_pk FROM devices WHERE id = ? AND account_id = ? AND revoked_at IS NULL",
+    )
+    .bind(&session.device_id)
+    .bind(&session.account_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
+    .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "invalid token"))?;
     verify(
         &DeviceSigningPublic {
             mldsa_pk: signer.get("mldsa_pk"),
@@ -269,12 +307,6 @@ pub(crate) async fn rotate(
         },
     )
     .map_err(|_| err(StatusCode::BAD_REQUEST, "rotation signature"))?;
-
-    let mut tx = state
-        .db
-        .begin()
-        .await
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
 
     if let Some(device_id) = body.revoke_device_id {
         let updated = sqlx::query(
@@ -338,8 +370,7 @@ pub(crate) async fn rotate(
     .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
 
     let mut revision = first_revision;
-    for object in &body.objects {
-        let digest = content_digest(&object.nonce, &object.ciphertext).to_vec();
+    for (object, digest) in body.objects.iter().zip(&content_digests) {
         sqlx::query(
             "UPDATE objects
              SET revision = ?, ciphertext = ?, nonce = ?, padded_size = ?, content_type = ?,
@@ -351,7 +382,7 @@ pub(crate) async fn rotate(
         .bind(&object.nonce)
         .bind(object.padded_size as i64)
         .bind(&object.content_type)
-        .bind(&digest)
+        .bind(digest)
         .bind(&session.account_id)
         .bind(&collection_id_text)
         .bind(object.id.to_string())
@@ -372,27 +403,36 @@ pub(crate) async fn rotate(
         .bind(&object.nonce)
         .bind(object.padded_size as i64)
         .bind(&object.content_type)
-        .bind(&digest)
+        .bind(digest)
         .bind(now())
         .execute(&mut *tx)
         .await
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
         revision += 1;
     }
-    // A rotation re-encrypts exactly the current objects, so the count cannot
-    // change, but padding can put each one in a different size bucket.
-    let byte_total: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(padded_size), 0) FROM objects WHERE account_id = ?",
+    // A rotation re-encrypts exactly the live objects and cannot tombstone one,
+    // so neither count can change here, but padding can put each object in a
+    // different size bucket. All three are re-derived from the rows rather than
+    // adjusted, which also heals any drift a past bug left behind. The index
+    // covers every column read, so this is one index-only pass.
+    let totals: (i64, i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*), COALESCE(SUM(padded_size), 0), COALESCE(SUM(tombstone), 0)
+         FROM objects WHERE account_id = ?",
     )
     .bind(&session.account_id)
     .fetch_one(&mut *tx)
     .await
     .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let (object_count, byte_total, tombstone_count) = totals;
     sqlx::query(
-        "UPDATE revision_seq SET next_revision = ?, byte_total = ? WHERE account_id = ?",
+        "UPDATE revision_seq
+             SET next_revision = ?, object_count = ?, byte_total = ?, tombstone_count = ?
+         WHERE account_id = ?",
     )
     .bind(revision)
+    .bind(object_count)
     .bind(byte_total)
+    .bind(tombstone_count)
     .bind(&session.account_id)
     .execute(&mut *tx)
     .await

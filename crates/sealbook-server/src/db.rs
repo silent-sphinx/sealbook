@@ -77,7 +77,7 @@ pub(crate) async fn open_migrated(path: &str) -> anyhow::Result<Pool<Sqlite>> {
 /// Stored in SQLite's `user_version` header field, which is transactional, so a
 /// migration and the version bump that records it commit together or not at all.
 /// Bump this and add a step to `migrate` when the schema changes.
-pub(crate) const SCHEMA_VERSION: i64 = 1;
+pub(crate) const SCHEMA_VERSION: i64 = 2;
 
 /// Brings the database up to `SCHEMA_VERSION`.
 ///
@@ -95,6 +95,9 @@ pub(crate) async fn migrate(db: &Pool<Sqlite>) -> anyhow::Result<()> {
     }
     if version < 1 {
         migrate_to_v1(db).await?;
+    }
+    if version < 2 {
+        migrate_to_v2(db).await?;
     }
     Ok(())
 }
@@ -285,6 +288,62 @@ async fn migrate_to_v1(db: &Pool<Sqlite>) -> anyhow::Result<()> {
     }
     tx.commit().await?;
     tracing::info!(version = 1, "database schema created");
+    Ok(())
+}
+
+/// The indexes the two foreign-key cascades need, and the tombstone counter the
+/// quota needs in order to tell a deleted object from a live one.
+///
+/// A `FOREIGN KEY ... ON DELETE CASCADE` is only as fast as the child table's
+/// index on the referencing column. Neither `sessions.account_id` nor
+/// `objects.collection_id` leads an index in v1, so deleting one account scanned
+/// every session and every object in the database, and so did the account-wide
+/// session delete that a password change, a rename and a recovery each run.
+async fn migrate_to_v2(db: &Pool<Sqlite>) -> anyhow::Result<()> {
+    let mut tx = db.begin().await?;
+    {
+        let db = &mut *tx;
+        for statement in [
+            // One index per referencing column, because the two cascades arrive
+            // from opposite directions: `accounts` knows only an account id,
+            // `devices` only a device id, and a composite can lead on just one of
+            // them. `sessions_account` also serves the account-wide session
+            // delete that a password change, a rename and a recovery each run.
+            "CREATE INDEX IF NOT EXISTS sessions_account ON sessions (account_id)",
+            "CREATE INDEX IF NOT EXISTS sessions_device ON sessions (device_id)",
+            // `objects`' primary key leads on `account_id`, so the cascade from
+            // `collections`, which knows only a collection id, could not use it.
+            "CREATE INDEX IF NOT EXISTS objects_collection
+                 ON objects (collection_id)",
+        ] {
+            sqlx::query(statement).execute(&mut *db).await?;
+        }
+
+        sqlx::query(
+            "ALTER TABLE revision_seq
+                 ADD COLUMN tombstone_count INTEGER NOT NULL DEFAULT 0",
+        )
+        .execute(&mut *db)
+        .await?;
+        // Back-filled from the rows themselves, so an existing vault starts
+        // counting from the truth rather than from zero.
+        sqlx::query(
+            "UPDATE revision_seq
+                 SET tombstone_count = COALESCE(
+                     (SELECT COUNT(*) FROM objects o
+                       WHERE o.account_id = revision_seq.account_id
+                         AND o.tombstone = 1),
+                     0)",
+        )
+        .execute(&mut *db)
+        .await?;
+
+        sqlx::query("PRAGMA user_version = 2")
+            .execute(&mut *db)
+            .await?;
+    }
+    tx.commit().await?;
+    tracing::info!(version = 2, "database schema migrated");
     Ok(())
 }
 
@@ -500,6 +559,9 @@ mod tests {
             "objects_account_meta",
             "sessions_expires_at",
             "devices_account",
+            "sessions_account",
+            "sessions_device",
+            "objects_collection",
         ] {
             assert!(
                 indexes.iter().any(|name| name == expected),
@@ -620,6 +682,194 @@ mod tests {
                 "the {label} sorts: {plan:?}"
             );
         }
+
+        db.close().await;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Both foreign-key cascades have to seek. Without an index on the
+    /// referencing column, deleting one account scans every session and every
+    /// object in the database, not just that account's.
+    #[tokio::test]
+    async fn the_cascading_deletes_never_scan_a_child_table() {
+        let dir = std::env::temp_dir().join(format!("sealbook-db-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("sealbook.db");
+        let db = open_migrated(path.to_str().unwrap()).await.unwrap();
+
+        for (label, query) in [
+            ("the account cascade", "DELETE FROM accounts WHERE id = 'a'"),
+            (
+                "the collection cascade",
+                "DELETE FROM collections WHERE id = 'c'",
+            ),
+            ("the device cascade", "DELETE FROM devices WHERE id = 'd'"),
+            (
+                "an account's session revoke",
+                "DELETE FROM sessions WHERE account_id = 'a'",
+            ),
+        ] {
+            let plan: Vec<String> = sqlx::query(&format!("EXPLAIN QUERY PLAN {query}"))
+                .fetch_all(&db)
+                .await
+                .unwrap()
+                .iter()
+                .map(|row| row.get::<String, _>("detail"))
+                .collect();
+            assert!(
+                !plan.iter().any(|step| step.contains("SCAN")),
+                "{label} scans a child table: {plan:?}"
+            );
+        }
+
+        db.close().await;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// An existing vault's tombstone counter has to start from the rows it
+    /// already holds, not from zero, or the quota under-counts for ever.
+    #[tokio::test]
+    async fn the_tombstone_counter_is_back_filled_from_the_objects() {
+        let (dir, db) = temp_db().await;
+        migrate_to_v1(&db).await.unwrap();
+        sqlx::query(
+            "INSERT INTO accounts (id, username, opaque_record, kdf_salt, created_at)
+             VALUES ('account', 'account', X'', X'', 0)",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO collections (id, account_id, kind, created_at)
+             VALUES ('collection', 'account', 'vault', 0)",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO revision_seq (account_id, next_revision) VALUES ('account', 4)")
+            .execute(&db)
+            .await
+            .unwrap();
+        for (id, tombstone) in [("live", 0), ("gone-one", 1), ("gone-two", 1)] {
+            sqlx::query(
+                "INSERT INTO objects
+                 (id, collection_id, account_id, revision, tombstone, ciphertext, nonce,
+                  padded_size, content_type, content_digest)
+                 VALUES (?, 'collection', 'account', 1, ?, X'', X'', 0,
+                         'application/jscontact+json', X'')",
+            )
+            .bind(id)
+            .bind(tombstone)
+            .execute(&db)
+            .await
+            .unwrap();
+        }
+
+        migrate(&db).await.unwrap();
+
+        let counted: i64 = sqlx::query_scalar("SELECT tombstone_count FROM revision_seq")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+        assert_eq!(counted, 2, "the two tombstones were not counted");
+        assert_eq!(schema_version(&db).await.unwrap(), SCHEMA_VERSION);
+
+        db.close().await;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The write paths take the write lock before they read, so two writers
+    /// serialise instead of one of them failing after it has already read.
+    ///
+    /// A deferred `BEGIN` takes its read snapshot on the first `SELECT` and asks
+    /// for the write lock only at the first write. If another connection commits
+    /// in between, that write returns `SQLITE_BUSY_SNAPSHOT`, which the busy
+    /// handler is never consulted about — so `busy_timeout` cannot absorb it and
+    /// the request fails. Both halves are asserted here, because the contrast is
+    /// the whole reason the write paths pass `BEGIN IMMEDIATE`.
+    #[tokio::test]
+    async fn writers_serialise_on_an_immediate_transaction() {
+        let dir = std::env::temp_dir().join(format!("sealbook-db-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("sealbook.db");
+        let db = open_migrated(path.to_str().unwrap()).await.unwrap();
+        sqlx::query(
+            "INSERT INTO accounts (id, username, opaque_record, kdf_salt, created_at)
+             VALUES ('account', 'account', X'', X'', 0)",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO revision_seq (account_id, next_revision) VALUES ('account', 1)")
+            .execute(&db)
+            .await
+            .unwrap();
+
+        // What the deferred transaction the handlers used to open would do.
+        let mut deferred = db.begin().await.unwrap();
+        let read: i64 =
+            sqlx::query_scalar("SELECT next_revision FROM revision_seq WHERE account_id = ?")
+                .bind("account")
+                .fetch_one(&mut *deferred)
+                .await
+                .unwrap();
+        assert_eq!(read, 1);
+        sqlx::query("UPDATE revision_seq SET next_revision = 2 WHERE account_id = 'account'")
+            .execute(&db)
+            .await
+            .unwrap();
+        let conflict =
+            sqlx::query("UPDATE revision_seq SET next_revision = 2 WHERE account_id = 'account'")
+                .execute(&mut *deferred)
+                .await;
+        assert!(
+            conflict.is_err(),
+            "a deferred writer that read a stale revision must not be able to write it"
+        );
+        drop(deferred);
+
+        // What they do now: the second writer waits for the lock, then reads the
+        // revision the first one committed rather than a stale one.
+        let mut first = db.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        let second = tokio::spawn({
+            let db = db.clone();
+            async move {
+                let mut tx = db.begin_with("BEGIN IMMEDIATE").await.expect("begin");
+                let seen: i64 = sqlx::query_scalar(
+                    "SELECT next_revision FROM revision_seq WHERE account_id = ?",
+                )
+                .bind("account")
+                .fetch_one(&mut *tx)
+                .await
+                .expect("read");
+                sqlx::query("UPDATE revision_seq SET next_revision = ? WHERE account_id = ?")
+                    .bind(seen + 1)
+                    .bind("account")
+                    .execute(&mut *tx)
+                    .await
+                    .expect("write");
+                tx.commit().await.expect("commit");
+                seen
+            }
+        });
+        // Long enough that the spawned writer is waiting on the lock, not racing
+        // to take it first.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        sqlx::query("UPDATE revision_seq SET next_revision = 10 WHERE account_id = 'account'")
+            .execute(&mut *first)
+            .await
+            .unwrap();
+        first.commit().await.unwrap();
+
+        let seen = second.await.unwrap();
+        assert_eq!(seen, 10, "the second writer read a stale revision");
+        let final_revision: i64 =
+            sqlx::query_scalar("SELECT next_revision FROM revision_seq WHERE account_id = ?")
+                .bind("account")
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        assert_eq!(final_revision, 11, "the second write was lost");
 
         db.close().await;
         let _ = std::fs::remove_dir_all(dir);

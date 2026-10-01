@@ -209,10 +209,18 @@ pub(crate) async fn verify_and_store(
 }
 
 /// The collection's stored manifest, for serving to clients.
-pub(crate) async fn load(
-    db: &sqlx::Pool<Sqlite>,
+///
+/// Generic over the executor so that a caller which has already read the entries
+/// inside a transaction can read the manifest from that same snapshot. A manifest
+/// loaded from a later one describes a collection the caller is not about to
+/// return, and the digest comparison it exists for then fails.
+pub(crate) async fn load<'e, E>(
+    db: E,
     collection_id: &str,
-) -> Result<Option<ManifestBody>, (StatusCode, Json<ErrorBody>)> {
+) -> Result<Option<ManifestBody>, (StatusCode, Json<ErrorBody>)>
+where
+    E: sqlx::Executor<'e, Database = Sqlite>,
+{
     let row = sqlx::query(
         "SELECT manifest_seq, key_epoch, latest_revision, object_count, digest, device_id,
                 mldsa_sig, ed25519_sig

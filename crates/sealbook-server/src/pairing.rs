@@ -34,6 +34,15 @@ pub(crate) fn pair_id_for_key(key: &str, pending: &HashMap<Uuid, PendingPair>) -
         .map(|(pair_id, _)| *pair_id)
 }
 
+/// The fields of a `PendingPair` that an approval needs once the pairing lock has
+/// been released, so the code below reads the same as it did under the lock.
+struct PairView<'a> {
+    device: &'a DevicePublicKeys,
+    enrollment_signature: &'a DualSignatureBody,
+    username: &'a str,
+    confirm: &'a str,
+}
+
 pub(crate) fn verify_enroll(
     device: &DevicePublicKeys,
     sig: &DualSignatureBody,
@@ -209,6 +218,10 @@ pub(crate) async fn pair_status(
     {
         return Err(err(StatusCode::TOO_MANY_REQUESTS, "rate limited"));
     }
+    // Resolved before the pairing lock is taken, not under it. A joining device
+    // polls this every second or two, so a database round trip held under the one
+    // lock every pairing request needs made each poller wait on every other.
+    let caller = require_session(&state, &headers).await.ok();
     let mut pending = state.pending_pairs.lock().await;
     pending.retain(|_, p| p.created.elapsed() < Duration::from_secs(180));
     let pair_id = pair_id_for_key(&pair_key, &pending)
@@ -217,7 +230,7 @@ pub(crate) async fn pair_status(
         .get(&pair_id)
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "expired"))?;
     let status = if pair.approved { "ready" } else { "pending" };
-    if let Ok(session) = require_session(&state, &headers).await {
+    if let Some(session) = caller {
         if pair.account_id.as_deref() == Some(session.account_id.as_str()) {
             return Ok(Json(PairStatusResponse {
                 pair_id,
@@ -244,39 +257,58 @@ pub(crate) async fn pair_approve(
     Json(body): Json<PairApproveRequest>,
 ) -> Result<Json<PairStatusResponse>, (StatusCode, Json<ErrorBody>)> {
     let session = require_session(&state, &headers).await?;
-    let mut pending = state.pending_pairs.lock().await;
-    pending.retain(|_, p| p.created.elapsed() < Duration::from_secs(180));
-    let pair_id = pair_id_for_key(&pair_key, &pending)
-        .ok_or_else(|| err(StatusCode::NOT_FOUND, "expired"))?;
-    let pair = pending
-        .get_mut(&pair_id)
-        .ok_or_else(|| err(StatusCode::NOT_FOUND, "expired"))?;
-    if pair.account_id.as_deref() != Some(session.account_id.as_str()) {
-        return Err(err(StatusCode::NOT_FOUND, "expired"));
-    }
-    let expected_confirm = pair_confirmation(
-        pair_id,
-        pair.device.device_id,
-        &pair.device.mldsa_pk,
-        &pair.device.ed25519_pk,
-        &pair.device.xwing_hpke_pk,
-    );
-    if pair.confirm != expected_confirm {
-        return Err(err(StatusCode::BAD_REQUEST, "pair confirmation"));
-    }
-    if body.confirmation.trim() != expected_confirm {
-        return Err(err(StatusCode::BAD_REQUEST, "pair confirmation"));
-    }
-    if pair.approved {
-        return Ok(Json(PairStatusResponse {
+    // The pairing lock is taken twice, for as long as each of two in-memory
+    // lookups needs, and is not held across the dual signature verifications or
+    // the enrolling transaction below. Held across those, as it was, one approval
+    // stalled every `pair_status` poll on the server.
+    let (pair_id, pair_device, pair_enrollment_signature, pair_username, pair_confirm) = {
+        let mut pending = state.pending_pairs.lock().await;
+        pending.retain(|_, p| p.created.elapsed() < Duration::from_secs(180));
+        let pair_id = pair_id_for_key(&pair_key, &pending)
+            .ok_or_else(|| err(StatusCode::NOT_FOUND, "expired"))?;
+        let pair = pending
+            .get(&pair_id)
+            .ok_or_else(|| err(StatusCode::NOT_FOUND, "expired"))?;
+        if pair.account_id.as_deref() != Some(session.account_id.as_str()) {
+            return Err(err(StatusCode::NOT_FOUND, "expired"));
+        }
+        let expected_confirm = pair_confirmation(
             pair_id,
-            status: "ready".into(),
-            confirm: pair.confirm.clone(),
-            username: Some(pair.username.clone()),
-            device: Some(pair.device.clone()),
-        }));
-    }
-    verify_enroll(&pair.device, &pair.enrollment_signature)?;
+            pair.device.device_id,
+            &pair.device.mldsa_pk,
+            &pair.device.ed25519_pk,
+            &pair.device.xwing_hpke_pk,
+        );
+        if pair.confirm != expected_confirm {
+            return Err(err(StatusCode::BAD_REQUEST, "pair confirmation"));
+        }
+        if body.confirmation.trim() != expected_confirm {
+            return Err(err(StatusCode::BAD_REQUEST, "pair confirmation"));
+        }
+        if pair.approved {
+            return Ok(Json(PairStatusResponse {
+                pair_id,
+                status: "ready".into(),
+                confirm: pair.confirm.clone(),
+                username: Some(pair.username.clone()),
+                device: Some(pair.device.clone()),
+            }));
+        }
+        (
+            pair_id,
+            pair.device.clone(),
+            pair.enrollment_signature.clone(),
+            pair.username.clone(),
+            pair.confirm.clone(),
+        )
+    };
+    let pair = PairView {
+        device: &pair_device,
+        enrollment_signature: &pair_enrollment_signature,
+        username: &pair_username,
+        confirm: &pair_confirm,
+    };
+    verify_enroll(pair.device, pair.enrollment_signature)?;
     let approver = sqlx::query(
         "SELECT mldsa_pk, ed25519_pk FROM devices WHERE id = ? AND account_id = ? AND revoked_at IS NULL",
     )
@@ -293,7 +325,7 @@ pub(crate) async fn pair_approve(
         &pair.device.mldsa_pk,
         &pair.device.ed25519_pk,
         &pair.device.xwing_hpke_pk,
-        &pair.confirm,
+        pair.confirm,
     );
     let public = DeviceSigningPublic {
         mldsa_pk: approver.get("mldsa_pk"),
@@ -306,35 +338,40 @@ pub(crate) async fn pair_approve(
     verify(&public, &grant_t, &grant)
         .map_err(|_| err(StatusCode::BAD_REQUEST, "grant signature"))?;
 
-    let collection =
-        sqlx::query("SELECT id FROM collections WHERE account_id = ?")
-            .bind(&session.account_id)
-            .fetch_one(&state.db)
-            .await
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let collection = sqlx::query("SELECT id FROM collections WHERE account_id = ?")
+        .bind(&session.account_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
     let collection_id: String = collection.get("id");
     let mut tx = state
         .db
-        .begin()
+        .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
     insert_device(
         &mut tx,
         &session.account_id,
         &collection_id,
-        &pair.device,
+        pair.device,
         &body.wrap,
     )
     .await?;
     tx.commit()
         .await
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-    pair.approved = true;
+    // Re-acquired to record the approval. The entry can have expired while the
+    // enrolment ran; the device is enrolled either way, and the joining device
+    // learns that from its next poll finding nothing rather than from a stale
+    // "pending".
+    if let Some(entry) = state.pending_pairs.lock().await.get_mut(&pair_id) {
+        entry.approved = true;
+    }
     Ok(Json(PairStatusResponse {
         pair_id,
         status: "ready".into(),
-        confirm: pair.confirm.clone(),
-        username: Some(pair.username.clone()),
+        confirm: pair.confirm.to_string(),
+        username: Some(pair.username.to_string()),
         device: Some(pair.device.clone()),
     }))
 }

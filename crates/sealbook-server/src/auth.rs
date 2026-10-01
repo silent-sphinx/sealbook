@@ -120,7 +120,7 @@ pub(crate) async fn register_finish(
 
     let mut tx = state
         .db
-        .begin()
+        .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
     sqlx::query(
@@ -449,13 +449,11 @@ pub(crate) async fn login_finish(
     verify(&public, &transcript, &sig)
         .map_err(|_| err(StatusCode::UNAUTHORIZED, "invalid credentials"))?;
 
-    let collection = sqlx::query(
-        "SELECT id, key_epoch FROM collections WHERE account_id = ?",
-    )
-    .bind(&account_id)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let collection = sqlx::query("SELECT id, key_epoch FROM collections WHERE account_id = ?")
+        .bind(&account_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
     let collection_id: String = collection.get("id");
     let key_epoch: i64 = collection.get("key_epoch");
 

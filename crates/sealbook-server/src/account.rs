@@ -177,7 +177,7 @@ pub(crate) async fn change_username(
 
     let mut tx = state
         .db
-        .begin()
+        .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
 
@@ -207,13 +207,15 @@ pub(crate) async fn change_username(
     .await
     .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
 
-    tx.commit()
+    // In the same transaction as the rename. Run after the commit, as it was, a
+    // failure here left the account renamed with every session still live.
+    sqlx::query("DELETE FROM sessions WHERE account_id = ?")
+        .bind(&session.account_id)
+        .execute(&mut *tx)
         .await
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
 
-    sqlx::query("DELETE FROM sessions WHERE account_id = ?")
-        .bind(&session.account_id)
-        .execute(&state.db)
+    tx.commit()
         .await
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
     Ok(Json(SimpleStatusResponse {
@@ -327,7 +329,7 @@ pub(crate) async fn change_password(
 
     let mut tx = state
         .db
-        .begin()
+        .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
 
@@ -338,12 +340,11 @@ pub(crate) async fn change_password(
         .map_err(|_| err(StatusCode::NOT_FOUND, "account not found"))?;
     let username: String = account.get("username");
 
-    let collection =
-        sqlx::query("SELECT id FROM collections WHERE account_id = ?")
-            .bind(&session.account_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "collection not found"))?;
+    let collection = sqlx::query("SELECT id FROM collections WHERE account_id = ?")
+        .bind(&session.account_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "collection not found"))?;
     let collection_id: String = collection.get("id");
 
     sqlx::query("UPDATE accounts SET opaque_record = ?, kdf_salt = ? WHERE id = ?")
@@ -407,7 +408,7 @@ pub(crate) async fn delete_account(
 
     let mut tx = state
         .db
-        .begin()
+        .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
 

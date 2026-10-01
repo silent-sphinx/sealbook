@@ -32,7 +32,10 @@ struct EncryptedState {
 }
 
 #[derive(Parser)]
-#[command(name = "sealbook", about = "E2EE vault client: contacts, calendars and notes")]
+#[command(
+    name = "sealbook",
+    about = "E2EE vault client: contacts, calendars and notes"
+)]
 struct Cli {
     #[arg(long, default_value = "https://127.0.0.1:8443")]
     server: String,
