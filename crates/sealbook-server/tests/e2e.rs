@@ -7,7 +7,9 @@ use rustls::pki_types::CertificateDer;
 use rustls::version::TLS13;
 use rustls::{ClientConfig, RootCertStore};
 use sealbook_client::SealbookClient;
-use sealbook_crypto::opaque::client_login_start;
+use sealbook_crypto::opaque::{
+    client_login_start, client_register_finish, client_register_start, SealbookCipherSuite,
+};
 use sealbook_crypto::{
     decrypt_object, enrollment_transcript, entropy_from_phrase, generate_device_hpke,
     generate_device_signing, login_start_transcript, object_aad, open_login_challenge,
@@ -21,6 +23,46 @@ use sealbook_protocol::{
 };
 use sqlx::Row;
 use uuid::Uuid;
+
+/// The replacement-password material a recovery carries, and the payload digest
+/// the phrase proof must cover.
+struct RecoveryPassword {
+    upload: Vec<u8>,
+    kdf_salt: Vec<u8>,
+    nonce: Vec<u8>,
+    wrapped_ck: Vec<u8>,
+    ciphersuite: String,
+    payload: [u8; 32],
+}
+
+/// Finishes the OPAQUE registration a `recover/start` began and re-wraps the
+/// collection key under the new password, as a recovering client would.
+fn recovery_password(
+    password: &str,
+    opaque_response: &[u8],
+    registration: sealbook_crypto::opaque::ClientRegistration<SealbookCipherSuite>,
+    ck: &CollectionKey,
+) -> RecoveryPassword {
+    let upload =
+        client_register_finish(registration, password.as_bytes(), opaque_response).unwrap();
+    let kdf_salt = sealbook_crypto::generate_kdf_salt();
+    let wrap = sealbook_crypto::wrap_collection_key(password.as_bytes(), &kdf_salt, ck).unwrap();
+    let payload = sealbook_crypto::recovery_password_payload(
+        &upload,
+        &kdf_salt,
+        &wrap.nonce,
+        &wrap.ciphertext,
+        &wrap.ciphersuite,
+    );
+    RecoveryPassword {
+        upload,
+        kdf_salt: kdf_salt.to_vec(),
+        nonce: wrap.nonce.to_vec(),
+        wrapped_ck: wrap.ciphertext,
+        ciphersuite: wrap.ciphersuite,
+        payload,
+    }
+}
 
 /// Signs and MACs the roster a hand-built request has to carry.
 #[allow(clippy::too_many_arguments)]
@@ -242,10 +284,12 @@ async fn recovery_challenge_cannot_be_replayed() {
         .iter()
         .any(|row| row.get::<String, _>("name") == "phrase_mldsa_pk"));
     columns.close().await;
+    let (opaque_request, registration) = client_register_start(b"correct horse battery").unwrap();
     let response: RecoverStartResponse = reqwest::Client::new()
         .post(format!("{base}/v1/recover/start"))
         .json(&RecoverStartRequest {
             username: "replayalice".into(),
+            opaque_request,
             lookup_id: phrase_lookup_id(&entropy_from_phrase(&phrase).unwrap())
                 .unwrap()
                 .to_vec(),
@@ -270,6 +314,12 @@ async fn recovery_challenge_cannot_be_replayed() {
     );
     let enrollment_sig = sign(&sign_sk, &enrollment).unwrap();
     let wrap = wrap_for_device(&hpke_pk, owner.collection_key().unwrap()).unwrap();
+    let pw = recovery_password(
+        "correct horse battery",
+        &response.opaque_response,
+        registration,
+        owner.collection_key().unwrap(),
+    );
     let transcript = phrase_recovery_transcript(
         "replayalice",
         response.recovery_id,
@@ -278,6 +328,7 @@ async fn recovery_challenge_cannot_be_replayed() {
         &sign_pk.mldsa_pk,
         &sign_pk.ed25519_pk,
         &hpke_pk.0,
+        &pw.payload,
     );
     let device = sealbook_protocol::DevicePublicKeys {
         device_id,
@@ -320,6 +371,11 @@ async fn recovery_challenge_cannot_be_replayed() {
             ciphersuite: XWING_CIPHERSUITE.into(),
         },
         roster,
+        upload: pw.upload.clone(),
+        kdf_salt: pw.kdf_salt.clone(),
+        recovery_nonce: pw.nonce.clone(),
+        recovery_wrapped_ck: pw.wrapped_ck.clone(),
+        recovery_ciphersuite: pw.ciphersuite.clone(),
     };
     let http = reqwest::Client::new();
     let first = http
@@ -1030,11 +1086,13 @@ async fn recovery_rejects_a_proof_with_a_foreign_mldsa_signature() {
     let entropy = entropy_from_phrase(&phrase).unwrap();
 
     let http = reqwest::Client::new();
+    let (opaque_request, registration) = client_register_start(b"correct horse battery").unwrap();
     let start: RecoverStartResponse = http
         .post(format!("{base}/v1/recover/start"))
         .json(&RecoverStartRequest {
             username: "forgebob".into(),
             lookup_id: phrase_lookup_id(&entropy).unwrap().to_vec(),
+            opaque_request,
         })
         .send()
         .await
@@ -1056,6 +1114,12 @@ async fn recovery_rejects_a_proof_with_a_foreign_mldsa_signature() {
     );
     let enrollment_sig = sign(&sign_sk, &enrollment).unwrap();
     let wrap = wrap_for_device(&hpke_pk, owner.collection_key().unwrap()).unwrap();
+    let pw = recovery_password(
+        "correct horse battery",
+        &start.opaque_response,
+        registration,
+        owner.collection_key().unwrap(),
+    );
     let transcript = phrase_recovery_transcript(
         "forgebob",
         start.recovery_id,
@@ -1064,6 +1128,7 @@ async fn recovery_rejects_a_proof_with_a_foreign_mldsa_signature() {
         &sign_pk.mldsa_pk,
         &sign_pk.ed25519_pk,
         &hpke_pk.0,
+        &pw.payload,
     );
     let roster = recovery_roster(
         &start,
@@ -1108,6 +1173,11 @@ async fn recovery_rejects_a_proof_with_a_foreign_mldsa_signature() {
                 ciphersuite: XWING_CIPHERSUITE.into(),
             },
             roster,
+            upload: pw.upload,
+            kdf_salt: pw.kdf_salt,
+            recovery_nonce: pw.nonce,
+            recovery_wrapped_ck: pw.wrapped_ck,
+            recovery_ciphersuite: pw.ciphersuite,
         })
         .send()
         .await
@@ -1138,6 +1208,7 @@ async fn recover_start_does_not_disclose_recovery_public_keys() {
         .json(&RecoverStartRequest {
             username: "lookupbob".into(),
             lookup_id: phrase_lookup_id(&entropy).unwrap().to_vec(),
+            opaque_request: client_register_start(b"correct horse battery").unwrap().0,
         })
         .send()
         .await
@@ -3745,11 +3816,13 @@ async fn a_recovery_that_never_rotated_is_caught_at_the_next_login() {
 
     // Recover onto a new device and go no further.
     let http = reqwest::Client::new();
+    let (opaque_request, registration) = client_register_start(password.as_bytes()).unwrap();
     let start: RecoverStartResponse = http
         .post(format!("{base}/v1/recover/start"))
         .json(&RecoverStartRequest {
             username: "owedbob".into(),
             lookup_id: phrase_lookup_id(&entropy).unwrap().to_vec(),
+            opaque_request,
         })
         .send()
         .await
@@ -3779,6 +3852,12 @@ async fn a_recovery_that_never_rotated_is_caught_at_the_next_login() {
     )
     .unwrap();
     let wrap = wrap_for_device(&hpke_pk, owner.collection_key().unwrap()).unwrap();
+    let pw = recovery_password(
+        password,
+        &start.opaque_response,
+        registration,
+        owner.collection_key().unwrap(),
+    );
     let proof = sign_phrase_recovery(
         &entropy,
         &phrase_recovery_transcript(
@@ -3789,6 +3868,7 @@ async fn a_recovery_that_never_rotated_is_caught_at_the_next_login() {
             &sign_pk.mldsa_pk,
             &sign_pk.ed25519_pk,
             &hpke_pk.0,
+            &pw.payload,
         ),
     )
     .unwrap();
@@ -3815,6 +3895,11 @@ async fn a_recovery_that_never_rotated_is_caught_at_the_next_login() {
                 ciphersuite: XWING_CIPHERSUITE.into(),
             },
             roster,
+            upload: pw.upload,
+            kdf_salt: pw.kdf_salt,
+            recovery_nonce: pw.nonce,
+            recovery_wrapped_ck: pw.wrapped_ck,
+            recovery_ciphersuite: pw.ciphersuite,
         })
         .send()
         .await
@@ -3857,6 +3942,266 @@ async fn a_recovery_that_never_rotated_is_caught_at_the_next_login() {
         .recover(&base, "owedbob", &second_phrase, password)
         .await
         .expect("the phrase the rotation issued must work");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Bug #4: the phrase has to recover an account whose password is the thing that
+/// was lost. Before this, recovery still asked for the password, so forgetting it
+/// meant the vault was gone however carefully the 24 words had been kept.
+#[tokio::test]
+async fn the_phrase_recovers_an_account_whose_password_was_forgotten() {
+    let dir = std::env::temp_dir().join(format!("sealbook-pwreset-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let forgotten = "correct horse battery";
+    let mut owner = SealbookClient::plaintext_http();
+    let phrase = owner
+        .register(&base, "resetalice", forgotten)
+        .await
+        .unwrap();
+    owner
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"Ada Lovelace"}}"#,
+        )
+        .await
+        .unwrap();
+
+    // A new device, the 24 words, and a password chosen now. The old one is
+    // neither known nor asked for.
+    let chosen = "a different password entirely";
+    let mut recovered = SealbookClient::plaintext_http();
+    let next_phrase = recovered
+        .recover(&base, "resetalice", &phrase, chosen)
+        .await
+        .expect("the phrase alone must recover the account");
+    assert_eq!(next_phrase.split_whitespace().count(), 24);
+    assert_ne!(next_phrase, phrase);
+
+    // The vault came back, decrypted.
+    let contacts = recovered.list_contacts().await.expect("read the vault");
+    assert_eq!(contacts.len(), 1);
+    assert!(contacts[0].1.contains("Ada Lovelace"));
+
+    // The password that was set works for a fresh sign-in, and writes are allowed,
+    // so the rotation that recovery owes really did complete.
+    let state = recovered.state.clone().unwrap();
+    let mut again = SealbookClient::with_state(state);
+    again
+        .login(chosen)
+        .await
+        .expect("the password set during recovery must sign in");
+    again
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"Grace Hopper"}}"#,
+        )
+        .await
+        .expect("write after recovery");
+    assert_eq!(again.list_contacts().await.unwrap().len(), 2);
+
+    // The forgotten password is gone, not merely unused.
+    let mut stale = SealbookClient::with_state(recovered.state.clone().unwrap());
+    assert!(
+        stale.login(forgotten).await.is_err(),
+        "the password replaced during recovery must stop working"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The phrase proof covers the credentials the recovery installs, so a proxy that
+/// rewrites the body cannot swap in a password of its own and take the account.
+#[tokio::test]
+async fn a_recovery_whose_new_password_was_modified_after_signing_is_refused() {
+    let dir = std::env::temp_dir().join(format!("sealbook-pwtamper-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let password = "correct horse battery";
+    let mut owner = SealbookClient::plaintext_http();
+    let phrase = owner.register(&base, "tamperbob", password).await.unwrap();
+    let entropy = entropy_from_phrase(&phrase).unwrap();
+
+    let http = reqwest::Client::new();
+    let (opaque_request, registration) = client_register_start(password.as_bytes()).unwrap();
+    let start: RecoverStartResponse = http
+        .post(format!("{base}/v1/recover/start"))
+        .json(&RecoverStartRequest {
+            username: "tamperbob".into(),
+            lookup_id: phrase_lookup_id(&entropy).unwrap().to_vec(),
+            opaque_request,
+        })
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let (_hpke_sk, hpke_pk) = generate_device_hpke().unwrap();
+    let (sign_sk, sign_pk) = generate_device_signing().unwrap();
+    let device_id = Uuid::new_v4();
+    let device = sealbook_protocol::DevicePublicKeys {
+        device_id,
+        mldsa_pk: sign_pk.mldsa_pk.clone(),
+        ed25519_pk: sign_pk.ed25519_pk.clone(),
+        xwing_hpke_pk: hpke_pk.0.clone(),
+    };
+    let enrollment = sign(
+        &sign_sk,
+        &enrollment_transcript(
+            device_id,
+            &sign_pk.mldsa_pk,
+            &sign_pk.ed25519_pk,
+            &hpke_pk.0,
+        ),
+    )
+    .unwrap();
+    let wrap = wrap_for_device(&hpke_pk, owner.collection_key().unwrap()).unwrap();
+    let pw = recovery_password(
+        password,
+        &start.opaque_response,
+        registration,
+        owner.collection_key().unwrap(),
+    );
+    let proof = sign_phrase_recovery(
+        &entropy,
+        &phrase_recovery_transcript(
+            "tamperbob",
+            start.recovery_id,
+            &start.challenge,
+            device_id,
+            &sign_pk.mldsa_pk,
+            &sign_pk.ed25519_pk,
+            &hpke_pk.0,
+            &pw.payload,
+        ),
+    )
+    .unwrap();
+    let roster = recovery_roster(&start, &entropy, &device, owner.collection_key().unwrap());
+    let valid = RecoverFinishRequest {
+        username: "tamperbob".into(),
+        recovery_id: start.recovery_id,
+        challenge: start.challenge.clone(),
+        phrase_proof: DualSignatureBody {
+            mldsa: proof.mldsa,
+            ed25519: proof.ed25519,
+        },
+        device,
+        enrollment_signature: DualSignatureBody {
+            mldsa: enrollment.mldsa,
+            ed25519: enrollment.ed25519,
+        },
+        wrap: KeyWrapBody {
+            recipient_kind: "device".into(),
+            recipient_id: device_id.to_string(),
+            hpke_enc: wrap.enc,
+            wrapped_ck: wrap.ciphertext,
+            ciphersuite: XWING_CIPHERSUITE.into(),
+        },
+        roster,
+        upload: pw.upload,
+        kdf_salt: pw.kdf_salt,
+        recovery_nonce: pw.nonce,
+        recovery_wrapped_ck: pw.wrapped_ck,
+        recovery_ciphersuite: pw.ciphersuite,
+    };
+
+    // Substitute the KDF salt, leaving the signature untouched.
+    let forged = RecoverFinishRequest {
+        kdf_salt: vec![0xCD; valid.kdf_salt.len()],
+        ..valid.clone()
+    };
+    let response = http
+        .post(format!("{base}/v1/recover/finish"))
+        .json(&forged)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        401,
+        "a substituted KDF salt must be refused"
+    );
+
+    // The challenge is single use, so a fresh one is needed for the control. That
+    // the unmodified request is accepted is what makes the rejection meaningful.
+    let (opaque_request, registration) = client_register_start(password.as_bytes()).unwrap();
+    let start: RecoverStartResponse = http
+        .post(format!("{base}/v1/recover/start"))
+        .json(&RecoverStartRequest {
+            username: "tamperbob".into(),
+            lookup_id: phrase_lookup_id(&entropy).unwrap().to_vec(),
+            opaque_request,
+        })
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let pw = recovery_password(
+        password,
+        &start.opaque_response,
+        registration,
+        owner.collection_key().unwrap(),
+    );
+    let proof = sign_phrase_recovery(
+        &entropy,
+        &phrase_recovery_transcript(
+            "tamperbob",
+            start.recovery_id,
+            &start.challenge,
+            device_id,
+            &sign_pk.mldsa_pk,
+            &sign_pk.ed25519_pk,
+            &hpke_pk.0,
+            &pw.payload,
+        ),
+    )
+    .unwrap();
+    let roster = recovery_roster(
+        &start,
+        &entropy,
+        &valid.device,
+        owner.collection_key().unwrap(),
+    );
+    let control = RecoverFinishRequest {
+        recovery_id: start.recovery_id,
+        challenge: start.challenge,
+        phrase_proof: DualSignatureBody {
+            mldsa: proof.mldsa,
+            ed25519: proof.ed25519,
+        },
+        roster,
+        upload: pw.upload,
+        kdf_salt: pw.kdf_salt,
+        recovery_nonce: pw.nonce,
+        recovery_wrapped_ck: pw.wrapped_ck,
+        recovery_ciphersuite: pw.ciphersuite,
+        ..valid
+    };
+    let response = http
+        .post(format!("{base}/v1/recover/finish"))
+        .json(&control)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        200,
+        "the unmodified recovery must be accepted: {}",
+        response.text().await.unwrap_or_default()
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }

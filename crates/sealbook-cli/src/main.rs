@@ -62,6 +62,10 @@ enum Command {
         #[arg(long)]
         code: String,
     },
+    /// Recover an account from its 24 recovery words, setting a new password.
+    ///
+    /// The old password is not needed and stops working: the phrase exists for
+    /// the case where the password is what was lost.
     Recover {
         #[arg(long)]
         username: String,
@@ -298,7 +302,7 @@ async fn main() -> Result<()> {
         }
         Command::Recover { username } => {
             let phrase = read_secret("Recovery phrase: ", "SEALBOOK_PHRASE")?;
-            let password = read_secret("Password: ", "SEALBOOK_PASSWORD")?;
+            let password = read_new_password()?;
             let mut client = SealbookClient::https(pinned.clone()).context("tls client")?;
             let new_phrase = client
                 .recover(&cli.server, &username, &phrase, &password)
@@ -306,6 +310,7 @@ async fn main() -> Result<()> {
                 .context("recover")?;
             save_state(&cli.state, client.state.as_ref().unwrap())?;
             println!("recovered {username}");
+            println!("The password you just set replaces the old one, which no longer works.");
             println!(
                 "\nRecovery rotated the vault key, so the phrase you just used no longer \
                  works.\nWrite these words down. They are shown once:"
@@ -848,6 +853,25 @@ fn save_state(path: &Path, state: &LocalState) -> Result<()> {
     drop(output);
     std::fs::rename(temporary, path)?;
     Ok(())
+}
+
+/// Reads a password that is being set rather than checked, so it is confirmed.
+///
+/// A typo in a recovery would otherwise lock the account to a password nobody
+/// knows, with the phrase already spent.
+fn read_new_password() -> Result<String> {
+    if let Ok(value) = std::env::var("SEALBOOK_PASSWORD") {
+        return Ok(value);
+    }
+    let password = rpassword::prompt_password("New password: ")?;
+    let again = rpassword::prompt_password("Confirm new password: ")?;
+    if password != again {
+        anyhow::bail!("the passwords do not match");
+    }
+    if password.is_empty() {
+        anyhow::bail!("the password cannot be empty");
+    }
+    Ok(password)
 }
 
 fn read_secret(prompt: &str, environment: &str) -> Result<String> {

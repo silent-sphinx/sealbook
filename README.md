@@ -7,15 +7,6 @@ Sealbook is a fully end-to-end encrypted vault for your contacts, calendars and 
 This project exists because the usual options don't offer this. CalDAV and CardDAV servers store your address book in the clear, and hand your provider everyone you know. Sealbook uses its own protocol instead, designed security-first and *resistant* to future quantum attack.
 
 > [!IMPORTANT]
-> One caveat to "neither can anyone who takes a copy of its database": so that a
-> password alone can recover a vault, the collection key is also stored wrapped
-> under `Argon2id(password, salt)`, and that wrap and its salt are in the
-> database. Anyone holding a copy can therefore guess at your password offline,
-> at a cost of one Argon2id evaluation (64 MiB, 3 passes) per guess. **A strong
-> password is load-bearing.** The 24-word recovery phrase is 256 bits of entropy
-> and is not open to this. [SECURITY.md](SECURITY.md) has the full threat model.
-
-> [!IMPORTANT]
 > This repository is the **server** and the **CLI**. To use Sealbook from a phone
 > or browser you also need a client: [sealbook-web](https://github.com/silent-sphinx/sealbook-web)
 > or [sealbook-android](https://github.com/silent-sphinx/sealbook-android).
@@ -36,6 +27,7 @@ This project exists because the usual options don't offer this. CalDAV and CardD
   - [Configuration](#configuration)
     - [The ones you'll actually touch](#the-ones-youll-actually-touch)
     - [The rest](#the-rest)
+  - [Storage limits](#storage-limits)
   - [Behind a reverse proxy](#behind-a-reverse-proxy)
   - [Backups](#backups)
   - [Running from source](#running-from-source)

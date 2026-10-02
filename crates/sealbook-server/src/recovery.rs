@@ -9,9 +9,11 @@ use axum::Json;
 use sqlx::Row;
 use uuid::Uuid;
 
+use sealbook_crypto::opaque::{server_register_finish, server_register_start};
 use sealbook_crypto::{
-    ct_eq, generate_login_challenge, phrase_recovery_transcript, verify_phrase_recovery,
-    DeviceSigningPublic, DualSignature, PHRASE_LOOKUP_ID_LEN,
+    ct_eq, generate_login_challenge, is_supported_recovery_ciphersuite, phrase_recovery_transcript,
+    recovery_password_payload, verify_phrase_recovery, DeviceSigningPublic, DualSignature,
+    HPKE_AEAD_TAG_LEN, KDF_SALT_LEN, NONCE_LEN, PHRASE_LOOKUP_ID_LEN,
 };
 use sealbook_protocol::{
     valid_username, ErrorBody, KeyWrapBody, RecoverFinishRequest, RecoverFinishResponse,
@@ -70,6 +72,17 @@ pub(crate) async fn recover_start(
         None => None,
     };
     let collection_id = collection_id.and_then(|id| Uuid::parse_str(&id).ok());
+    // Begin the password reset. Evaluated against the account's own username so
+    // the record this produces is usable for login, and against a fixed dummy
+    // name when there is no such account, so the two cases cost the same and look
+    // the same. Nothing here is derived from the existing password.
+    let opaque_name: &[u8] = if collection_id.is_some() {
+        body.username.as_bytes()
+    } else {
+        b"\x00sealbook-dummy"
+    };
+    let opaque_response = server_register_start(&state.opaque, &body.opaque_request, opaque_name)
+        .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid credentials"))?;
     let wrap = row
         .map(|r| KeyWrapBody {
             recipient_kind: "phrase".into(),
@@ -99,6 +112,7 @@ pub(crate) async fn recover_start(
         challenge: challenge.to_vec(),
         roster,
         collection_id,
+        opaque_response,
     }))
 }
 
@@ -156,6 +170,15 @@ pub(crate) async fn recover_finish(
             })
         })
         .unwrap_or_else(|| state.dummy_phrase_recovery_pk.clone());
+    if body.kdf_salt.len() != KDF_SALT_LEN {
+        return Err(err(StatusCode::BAD_REQUEST, "invalid kdf salt"));
+    }
+    if !is_supported_recovery_ciphersuite(&body.recovery_ciphersuite)
+        || body.recovery_nonce.len() != NONCE_LEN
+        || body.recovery_wrapped_ck.len() != 32 + HPKE_AEAD_TAG_LEN
+    {
+        return Err(err(StatusCode::BAD_REQUEST, "invalid ciphersuite"));
+    }
     let transcript = phrase_recovery_transcript(
         &body.username,
         body.recovery_id,
@@ -164,6 +187,13 @@ pub(crate) async fn recover_finish(
         &body.device.mldsa_pk,
         &body.device.ed25519_pk,
         &body.device.xwing_hpke_pk,
+        &recovery_password_payload(
+            &body.upload,
+            &body.kdf_salt,
+            &body.recovery_nonce,
+            &body.recovery_wrapped_ck,
+            &body.recovery_ciphersuite,
+        ),
     );
     let proof = DualSignature {
         mldsa: body.phrase_proof.mldsa.clone(),
@@ -207,6 +237,33 @@ pub(crate) async fn recover_finish(
         &body.roster,
     )
     .await?;
+    // The phrase proved itself, so the password it asks for takes effect. This is
+    // what makes the phrase a recovery credential rather than a second factor on
+    // top of a password the user may no longer have.
+    let record = server_register_finish(&body.upload)
+        .map_err(|_| err(StatusCode::BAD_REQUEST, "opaque finish"))?;
+    sqlx::query("UPDATE accounts SET opaque_record = ?, kdf_salt = ? WHERE id = ?")
+        .bind(&record)
+        .bind(&body.kdf_salt)
+        .bind(&account_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    // The password wrap of the collection key was made under the old password, so
+    // it is replaced with the one the client re-made under the new one. Left
+    // alone, the account would have a password that logs in but cannot decrypt.
+    sqlx::query(
+        "UPDATE key_wraps SET hpke_enc = ?, wrapped_ck = ?, ciphersuite = ?
+         WHERE collection_id = ? AND recipient_kind = 'recovery'",
+    )
+    .bind(&body.recovery_nonce)
+    .bind(&body.recovery_wrapped_ck)
+    .bind(&body.recovery_ciphersuite)
+    .bind(&collection_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+
     // The phrase that was just used still unwraps the current collection key, and
     // so does every other copy of it. Only a client can rotate, so the debt is
     // recorded here and `rotate` is what clears it; until then this account is

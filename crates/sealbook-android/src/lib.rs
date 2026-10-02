@@ -10,13 +10,13 @@ use sealbook_crypto::{
     generate_kdf_salt, generate_phrase, key_rotation_transcript, key_wraps_digest,
     login_start_transcript, login_transcript, manifest_digest, manifest_transcript, object_aad,
     open_login_challenge, pair_grant_transcript, password_change_payload, phrase_lookup_id,
-    phrase_recovery_public, phrase_recovery_transcript, rotated_objects_digest,
-    rotation_recovery_payload, sign, sign_phrase_recovery, unwrap_collection_key,
-    unwrap_for_device, unwrap_for_phrase, username_change_payload, verify, wrap_collection_key,
-    wrap_for_device, wrap_for_phrase, CollectionKey, DeviceHpkePublic, DeviceHpkeSecret,
-    DeviceHpkeWrap, DeviceSigningPublic, DeviceSigningSecrets, DualSignature, EncryptedObject,
-    ManifestDigestEntry, ObjectDigestEntry, RecoveryWrap, WrapDigestEntry, PHRASE_CIPHERSUITE,
-    PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
+    phrase_recovery_public, phrase_recovery_transcript, recovery_password_payload,
+    rotated_objects_digest, rotation_recovery_payload, sign, sign_phrase_recovery,
+    unwrap_collection_key, unwrap_for_device, unwrap_for_phrase, username_change_payload, verify,
+    wrap_collection_key, wrap_for_device, wrap_for_phrase, CollectionKey, DeviceHpkePublic,
+    DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningPublic, DeviceSigningSecrets, DualSignature,
+    EncryptedObject, ManifestDigestEntry, ObjectDigestEntry, RecoveryWrap, WrapDigestEntry,
+    PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
 };
 use sealbook_crypto::{phrase_recovery_keys, RosterPin};
 use sealbook_protocol::{DevicePublicKeys, RosterBody, RosterSignerBody};
@@ -573,6 +573,11 @@ pub fn phrase_recovery_proof(
     mldsa_pk_b64: String,
     ed25519_pk_b64: String,
     hpke_pk_b64: String,
+    upload_b64: String,
+    kdf_salt_b64: String,
+    recovery_nonce_b64: String,
+    recovery_wrapped_ck_b64: String,
+    recovery_ciphersuite: String,
 ) -> Result<DualSigResult, CryptoError> {
     let entropy = entropy_from_phrase(&phrase)?;
     let transcript = phrase_recovery_transcript(
@@ -583,6 +588,13 @@ pub fn phrase_recovery_proof(
         &unb64(&mldsa_pk_b64)?,
         &unb64(&ed25519_pk_b64)?,
         &unb64(&hpke_pk_b64)?,
+        &recovery_password_payload(
+            &unb64(&upload_b64)?,
+            &unb64(&kdf_salt_b64)?,
+            &unb64(&recovery_nonce_b64)?,
+            &unb64(&recovery_wrapped_ck_b64)?,
+            &recovery_ciphersuite,
+        ),
     );
     let proof = sign_phrase_recovery(&entropy, &transcript)?;
     Ok(DualSigResult {

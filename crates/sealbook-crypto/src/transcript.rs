@@ -377,6 +377,36 @@ pub fn login_transcript(
     h.finalize().into()
 }
 
+/// Digest of the credentials a recovery installs.
+///
+/// A recovery replaces the password, because the phrase exists for the case where
+/// the password is the thing that was lost. That makes the new OPAQUE record, the
+/// KDF salt and the re-made password wrap of the collection key part of what the
+/// phrase has to vouch for: unbound, anything able to rewrite the request body
+/// could swap in a password of its own and take the account. This is
+/// `password_change_payload`'s reasoning applied to the recovery path.
+pub fn recovery_password_payload(
+    upload: &[u8],
+    kdf_salt: &[u8],
+    recovery_nonce: &[u8],
+    recovery_wrapped_ck: &[u8],
+    recovery_ciphersuite: &str,
+) -> [u8; 32] {
+    let mut h = Sha256::new();
+    h.update(b"sealbook-recovery-password-v1");
+    absorb(&mut h, upload);
+    absorb(&mut h, kdf_salt);
+    absorb(&mut h, recovery_nonce);
+    absorb(&mut h, recovery_wrapped_ck);
+    absorb(&mut h, recovery_ciphersuite.as_bytes());
+    h.finalize().into()
+}
+
+/// Signed with the recovery phrase's key to enrol a device and reset the password.
+///
+/// Fields are length-prefixed: `username` and `challenge` both vary in length, and
+/// raw concatenation let one borrow bytes from the other.
+#[allow(clippy::too_many_arguments)]
 pub fn phrase_recovery_transcript(
     username: &str,
     recovery_id: Uuid,
@@ -385,22 +415,70 @@ pub fn phrase_recovery_transcript(
     mldsa_pk: &[u8],
     ed25519_pk: &[u8],
     xwing_hpke_pk: &[u8],
+    password_payload: &[u8; 32],
 ) -> [u8; 32] {
     let mut h = Sha256::new();
-    h.update(b"sealbook-phrase-recovery-v1");
-    h.update(username.as_bytes());
+    h.update(b"sealbook-phrase-recovery-v2");
+    absorb(&mut h, username.as_bytes());
     h.update(recovery_id.as_bytes());
-    h.update(challenge);
+    absorb(&mut h, challenge);
     h.update(device_id.as_bytes());
-    h.update(mldsa_pk);
-    h.update(ed25519_pk);
-    h.update(xwing_hpke_pk);
+    absorb(&mut h, mldsa_pk);
+    absorb(&mut h, ed25519_pk);
+    absorb(&mut h, xwing_hpke_pk);
+    h.update(password_payload);
     h.finalize().into()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recovery_transcript_binds_the_password_it_installs() {
+        let recovery_id = Uuid::new_v4();
+        let device_id = Uuid::new_v4();
+        let payload = |upload: &[u8], salt: &[u8]| {
+            recovery_password_payload(upload, salt, b"nonce", b"wrapped", "suite")
+        };
+        let sign = |payload: &[u8; 32]| {
+            phrase_recovery_transcript(
+                "alice",
+                recovery_id,
+                b"challenge",
+                device_id,
+                b"mldsa",
+                b"ed",
+                b"xwing",
+                payload,
+            )
+        };
+        let base = sign(&payload(b"upload", b"salt"));
+        assert_ne!(
+            base,
+            sign(&payload(b"other", b"salt")),
+            "the new password verifier must be bound"
+        );
+        assert_ne!(
+            base,
+            sign(&payload(b"upload", b"salt2")),
+            "the new kdf salt must be bound"
+        );
+        // Length prefixing: a byte moved across a field boundary must show up.
+        assert_ne!(
+            phrase_recovery_transcript(
+                "alic",
+                recovery_id,
+                b"echallenge",
+                device_id,
+                b"mldsa",
+                b"ed",
+                b"xwing",
+                &payload(b"upload", b"salt"),
+            ),
+            base,
+        );
+    }
 
     #[test]
     fn pair_confirmation_binds_joiner_keys() {

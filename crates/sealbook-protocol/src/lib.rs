@@ -615,11 +615,23 @@ pub struct PairApproveRequest {
     pub roster: RosterBody,
 }
 
+/// Step 1 of recovery: fetch the phrase's key wrap and begin a password reset.
+///
+/// A recovery exists for the case where the password is what was lost, so it
+/// replaces the password rather than asking for it. That needs an OPAQUE
+/// registration round trip, which is what `opaque_request` starts.
+///
+/// Unauthenticated, like `login/challenge`, and it reveals nothing: an unknown
+/// username, or a `lookup_id` that does not match, gets a dummy wrap and a
+/// registration response of the same shape. The response carries no material
+/// derived from the existing password, so it cannot be harvested to attack it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecoverStartRequest {
     pub username: String,
     #[serde(with = "b64")]
     pub lookup_id: Vec<u8>,
+    #[serde(with = "b64")]
+    pub opaque_request: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -633,6 +645,8 @@ pub struct RecoverStartResponse {
     /// the phrase wrap opens.
     pub roster: Option<RosterBody>,
     pub collection_id: Option<Uuid>,
+    #[serde(with = "b64")]
+    pub opaque_response: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -647,6 +661,18 @@ pub struct RecoverFinishRequest {
     pub wrap: KeyWrapBody,
     /// The current roster plus the recovering device, signed by the phrase key.
     pub roster: RosterBody,
+    /// The replacement password, as an OPAQUE registration upload, plus the KDF
+    /// salt and the collection-key wrap re-made under it. `phrase_proof` covers
+    /// all of it, so none of it can be substituted in flight.
+    #[serde(with = "b64")]
+    pub upload: Vec<u8>,
+    #[serde(with = "b64")]
+    pub kdf_salt: Vec<u8>,
+    #[serde(with = "b64")]
+    pub recovery_nonce: Vec<u8>,
+    #[serde(with = "b64")]
+    pub recovery_wrapped_ck: Vec<u8>,
+    pub recovery_ciphersuite: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

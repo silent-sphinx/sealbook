@@ -9,10 +9,10 @@ use sealbook_crypto::{
     enrollment_transcript, entropy_from_phrase, generate_device_hpke, generate_device_signing,
     generate_kdf_salt, generate_phrase, login_start_transcript, login_transcript, manifest_digest,
     manifest_transcript, open_login_challenge, phrase_lookup_id, phrase_recovery_keys,
-    phrase_recovery_transcript, sign, sign_phrase_recovery, unwrap_for_phrase, verify_roster_chain,
-    wrap_collection_key, wrap_for_device, wrap_for_phrase, CollectionKey, DeviceHpkeSecret,
-    DeviceHpkeWrap, DeviceSigningSecrets, RecoveryWrap, PHRASE_CIPHERSUITE, RECOVERY_CIPHERSUITE,
-    XWING_CIPHERSUITE,
+    phrase_recovery_transcript, recovery_password_payload, sign, sign_phrase_recovery,
+    unwrap_for_phrase, verify_roster_chain, wrap_collection_key, wrap_for_device, wrap_for_phrase,
+    CollectionKey, DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets, RecoveryWrap,
+    PHRASE_CIPHERSUITE, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
 };
 use sealbook_protocol::{
     DevicePublicKeys, DualSignatureBody, KeyWrapBody, LoginChallengeRequest, LoginFinishRequest,
@@ -321,27 +321,38 @@ impl SealbookClient {
         Ok(())
     }
 
-    /// Recovers an account onto a fresh device and rotates the collection key.
+    /// Recovers an account onto a fresh device, setting a new password, and
+    /// rotates the collection key.
+    ///
+    /// `new_password` replaces the account password; the old one is not needed and
+    /// stops working. The phrase is the credential for the case where the password
+    /// is the thing that was lost, so requiring the password here would have left
+    /// anyone who forgot it locked out of a vault they hold the words for.
     ///
     /// Returns the **new** recovery phrase. Recovery rotates because the phrase
     /// just used would otherwise keep working: enrolling a device does not change
-    /// the key the phrase unwraps, so anyone else holding a copy of that phrase —
-    /// a photographed backup, a former partner — would keep their access. The
+    /// the key the phrase unwraps, so anyone else holding a copy of that phrase, a
+    /// photographed backup or a former partner, would keep their access. The
     /// caller must show the returned phrase to the user.
     pub async fn recover(
         &mut self,
         server: &str,
         username: &str,
         phrase: &str,
-        password: &str,
+        new_password: &str,
     ) -> Result<String, ClientError> {
+        let password = new_password;
         let entropy = entropy_from_phrase(phrase)?;
+        // Begin registering the replacement password, so the server can answer
+        // with the OPRF evaluation this needs in the same round trip.
+        let (opaque_request, registration) = client_register_start(password.as_bytes())?;
         let start: sealbook_protocol::RecoverStartResponse = self
             .post_json(
                 &format!("{server}/v1/recover/start"),
                 &RecoverStartRequest {
                     username: username.to_string(),
                     lookup_id: phrase_lookup_id(&entropy)?.to_vec(),
+                    opaque_request,
                 },
                 None,
             )
@@ -399,6 +410,20 @@ impl SealbookClient {
             ed25519_pk: sign_pk.ed25519_pk.clone(),
             xwing_hpke_pk: hpke_pk.0.clone(),
         };
+        // The replacement password, and the collection-key wrap re-made under it
+        // from the key the phrase just opened.
+        let upload =
+            client_register_finish(registration, password.as_bytes(), &start.opaque_response)?;
+        let salt = generate_kdf_salt();
+        let recovery_wrap = wrap_collection_key(password.as_bytes(), &salt, &ck)?;
+        let password_payload = recovery_password_payload(
+            &upload,
+            &salt,
+            &recovery_wrap.nonce,
+            &recovery_wrap.ciphertext,
+            &recovery_wrap.ciphersuite,
+        );
+
         let mut devices = current.devices.clone();
         devices.push(device.clone());
         let next_roster = RosterBody::seal(
@@ -420,6 +445,7 @@ impl SealbookClient {
             &sign_pk.mldsa_pk,
             &sign_pk.ed25519_pk,
             &hpke_pk.0,
+            &password_payload,
         );
         let finish: sealbook_protocol::RecoverFinishResponse = self
             .post_json(
@@ -448,6 +474,11 @@ impl SealbookClient {
                         ciphersuite: XWING_CIPHERSUITE.into(),
                     },
                     roster: next_roster.clone(),
+                    upload,
+                    kdf_salt: salt.to_vec(),
+                    recovery_nonce: recovery_wrap.nonce.to_vec(),
+                    recovery_wrapped_ck: recovery_wrap.ciphertext,
+                    recovery_ciphersuite: recovery_wrap.ciphersuite,
                 },
                 None,
             )
@@ -460,7 +491,7 @@ impl SealbookClient {
             collection_id: finish.collection_id,
             device_id,
             session_token: None,
-            kdf_salt: Vec::new(),
+            kdf_salt: salt.to_vec(),
             hpke_sk: hpke_sk.as_bytes().to_vec(),
             mldsa_seed: sign_sk.mldsa_seed.clone(),
             ed25519_sk: sign_sk.ed25519_sk.clone(),
