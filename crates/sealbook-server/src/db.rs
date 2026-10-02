@@ -77,7 +77,7 @@ pub(crate) async fn open_migrated(path: &str) -> anyhow::Result<Pool<Sqlite>> {
 /// Stored in SQLite's `user_version` header field, which is transactional, so a
 /// migration and the version bump that records it commit together or not at all.
 /// Bump this and add a step to `migrate` when the schema changes.
-pub(crate) const SCHEMA_VERSION: i64 = 2;
+pub(crate) const SCHEMA_VERSION: i64 = 1;
 
 /// Brings the database up to `SCHEMA_VERSION`.
 ///
@@ -95,9 +95,6 @@ pub(crate) async fn migrate(db: &Pool<Sqlite>) -> anyhow::Result<()> {
     }
     if version < 1 {
         migrate_to_v1(db).await?;
-    }
-    if version < 2 {
-        migrate_to_v2(db).await?;
     }
     Ok(())
 }
@@ -236,6 +233,10 @@ async fn migrate_to_v1(db: &Pool<Sqlite>) -> anyhow::Result<()> {
                 next_revision INTEGER NOT NULL,
                 object_count INTEGER NOT NULL DEFAULT 0,
                 byte_total INTEGER NOT NULL DEFAULT 0,
+                -- Of `object_count`, how many are tombstones. A tombstone holds a
+                -- row and a manifest entry but is not an object the account still
+                -- has, so the quota counts the difference.
+                tombstone_count INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (account_id) REFERENCES accounts (id) ON DELETE CASCADE
             )",
         )
@@ -253,6 +254,28 @@ async fn migrate_to_v1(db: &Pool<Sqlite>) -> anyhow::Result<()> {
                 mldsa_sig BLOB NOT NULL,
                 ed25519_sig BLOB NOT NULL,
                 updated_at INTEGER NOT NULL,
+                FOREIGN KEY (collection_id) REFERENCES collections (id) ON DELETE CASCADE
+            )",
+        )
+        .execute(&mut *db)
+        .await?;
+        // The per-bucket state behind the manifest digest.
+        //
+        // The digest is a two-level tree — one digest per bucket of object ids,
+        // hashed into a root — so a write rebuilds the one bucket it touched and
+        // then the root. Flat over every entry it could only be recomputed by
+        // re-reading the collection, which would make the server's per-write check
+        // a full pass and a first full sync quadratic.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS manifest_digest_state (
+                collection_id TEXT PRIMARY KEY,
+                -- 256 digests of 32 bytes, bucket 0 first. All-zero means empty.
+                buckets BLOB NOT NULL,
+                object_count INTEGER NOT NULL,
+                -- Keyed by collection alone. An `account_id` here would be a
+                -- second referencing column needing a second index to keep the
+                -- account cascade off a table scan, and it would buy nothing: the
+                -- row already goes when its collection does.
                 FOREIGN KEY (collection_id) REFERENCES collections (id) ON DELETE CASCADE
             )",
         )
@@ -278,6 +301,26 @@ async fn migrate_to_v1(db: &Pool<Sqlite>) -> anyhow::Result<()> {
                              padded_size, content_digest)",
             "CREATE INDEX IF NOT EXISTS sessions_expires_at ON sessions (expires_at)",
             "CREATE INDEX IF NOT EXISTS devices_account ON devices (account_id)",
+            // One index per referencing column, because the two cascades into
+            // `sessions` arrive from opposite directions: `accounts` knows only an
+            // account id, `devices` only a device id, and a composite can lead on
+            // just one of them. A `FOREIGN KEY ... ON DELETE CASCADE` is only as
+            // fast as the child's index on the referencing column, so without
+            // these, deleting one account scanned every session in the database.
+            // `sessions_account` also serves the account-wide session delete that
+            // a password change, a rename and a recovery each run.
+            "CREATE INDEX IF NOT EXISTS sessions_account ON sessions (account_id)",
+            "CREATE INDEX IF NOT EXISTS sessions_device ON sessions (device_id)",
+            // `objects`' primary key leads on `account_id`, so the cascade from
+            // `collections`, which knows only a collection id, could not use it.
+            "CREATE INDEX IF NOT EXISTS objects_collection ON objects (collection_id)",
+            // Rebuilding one manifest bucket is a range scan over the ids sharing
+            // a first byte, so this is ordered by `id` and carries everything the
+            // digest commits to. `objects_account_meta` is ordered by `revision`,
+            // for the snapshot walk, and cannot serve both.
+            "CREATE INDEX IF NOT EXISTS objects_manifest
+                 ON objects (account_id, collection_id, id, revision, tombstone,
+                             content_digest)",
         ] {
             sqlx::query(statement).execute(&mut *db).await?;
         }
@@ -288,62 +331,6 @@ async fn migrate_to_v1(db: &Pool<Sqlite>) -> anyhow::Result<()> {
     }
     tx.commit().await?;
     tracing::info!(version = 1, "database schema created");
-    Ok(())
-}
-
-/// The indexes the two foreign-key cascades need, and the tombstone counter the
-/// quota needs in order to tell a deleted object from a live one.
-///
-/// A `FOREIGN KEY ... ON DELETE CASCADE` is only as fast as the child table's
-/// index on the referencing column. Neither `sessions.account_id` nor
-/// `objects.collection_id` leads an index in v1, so deleting one account scanned
-/// every session and every object in the database, and so did the account-wide
-/// session delete that a password change, a rename and a recovery each run.
-async fn migrate_to_v2(db: &Pool<Sqlite>) -> anyhow::Result<()> {
-    let mut tx = db.begin().await?;
-    {
-        let db = &mut *tx;
-        for statement in [
-            // One index per referencing column, because the two cascades arrive
-            // from opposite directions: `accounts` knows only an account id,
-            // `devices` only a device id, and a composite can lead on just one of
-            // them. `sessions_account` also serves the account-wide session
-            // delete that a password change, a rename and a recovery each run.
-            "CREATE INDEX IF NOT EXISTS sessions_account ON sessions (account_id)",
-            "CREATE INDEX IF NOT EXISTS sessions_device ON sessions (device_id)",
-            // `objects`' primary key leads on `account_id`, so the cascade from
-            // `collections`, which knows only a collection id, could not use it.
-            "CREATE INDEX IF NOT EXISTS objects_collection
-                 ON objects (collection_id)",
-        ] {
-            sqlx::query(statement).execute(&mut *db).await?;
-        }
-
-        sqlx::query(
-            "ALTER TABLE revision_seq
-                 ADD COLUMN tombstone_count INTEGER NOT NULL DEFAULT 0",
-        )
-        .execute(&mut *db)
-        .await?;
-        // Back-filled from the rows themselves, so an existing vault starts
-        // counting from the truth rather than from zero.
-        sqlx::query(
-            "UPDATE revision_seq
-                 SET tombstone_count = COALESCE(
-                     (SELECT COUNT(*) FROM objects o
-                       WHERE o.account_id = revision_seq.account_id
-                         AND o.tombstone = 1),
-                     0)",
-        )
-        .execute(&mut *db)
-        .await?;
-
-        sqlx::query("PRAGMA user_version = 2")
-            .execute(&mut *db)
-            .await?;
-    }
-    tx.commit().await?;
-    tracing::info!(version = 2, "database schema migrated");
     Ok(())
 }
 
@@ -562,6 +549,7 @@ mod tests {
             "sessions_account",
             "sessions_device",
             "objects_collection",
+            "objects_manifest",
         ] {
             assert!(
                 indexes.iter().any(|name| name == expected),
@@ -572,7 +560,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// The two queries every PUT runs must be answerable from the index alone.
+    /// Every read a PUT makes over `objects` must be answerable from an index
+    /// alone, and the manifest read must be a *range* over one bucket rather than
+    /// the whole collection — that bucket read is what replaced the full pass the
+    /// digest used to need on every write.
     #[tokio::test]
     async fn the_per_write_scans_of_objects_never_touch_a_table_row() {
         let dir = std::env::temp_dir().join(format!("sealbook-db-{}", uuid::Uuid::new_v4()));
@@ -580,16 +571,23 @@ mod tests {
         let path = dir.join("sealbook.db");
         let db = open_migrated(path.to_str().unwrap()).await.unwrap();
 
-        let quota = "SELECT COUNT(*), COALESCE(SUM(padded_size), 0),
-                 COALESCE(SUM(CASE WHEN id = 'o' AND collection_id = 'c'
-                                   THEN padded_size ELSE 0 END), 0),
-                 COALESCE(SUM(CASE WHEN id = 'o' AND collection_id = 'c'
-                                   THEN 1 ELSE 0 END), 0)
+        // What the write path actually runs: the replaced object's size and
+        // tombstone flag, and the one bucket whose digest changed.
+        let replaced = "SELECT padded_size, tombstone FROM objects
+             WHERE account_id = 'a' AND collection_id = 'c' AND id = 'o'";
+        let bucket = "SELECT id, revision, tombstone, content_digest FROM objects
+             WHERE account_id = 'a' AND collection_id = 'c'
+               AND id >= 'ab' AND id < 'abg'";
+        // Still used, by the rotation that re-derives the counters.
+        let totals = "SELECT COUNT(*), COALESCE(SUM(padded_size), 0),
+                 COALESCE(SUM(tombstone), 0)
              FROM objects WHERE account_id = 'a'";
-        let manifest = "SELECT id, revision, tombstone, content_digest FROM objects
-             WHERE account_id = 'a' AND collection_id = 'c'";
 
-        for (label, query) in [("quota", quota), ("manifest entries", manifest)] {
+        for (label, query) in [
+            ("replaced object", replaced),
+            ("bucket digest", bucket),
+            ("rotation totals", totals),
+        ] {
             let plan: Vec<String> = sqlx::query(&format!("EXPLAIN QUERY PLAN {query}"))
                 .fetch_all(&db)
                 .await
@@ -598,11 +596,29 @@ mod tests {
                 .map(|row| row.get::<String, _>("detail"))
                 .collect();
             assert!(
-                plan.iter()
-                    .any(|step| step.contains("COVERING INDEX objects_account_meta")),
-                "the {label} scan is not index-only: {plan:?}"
+                plan.iter().any(|step| step.contains("COVERING INDEX")
+                    || step.contains("USING INDEX sqlite_autoindex_objects_1")),
+                "the {label} read is not index-only: {plan:?}"
+            );
+            assert!(
+                !plan.iter().any(|step| step.contains("SCAN")),
+                "the {label} read scans: {plan:?}"
             );
         }
+
+        // The bucket read must seek on the id range, not filter the collection.
+        let plan: Vec<String> = sqlx::query(&format!("EXPLAIN QUERY PLAN {bucket}"))
+            .fetch_all(&db)
+            .await
+            .unwrap()
+            .iter()
+            .map(|row| row.get::<String, _>("detail"))
+            .collect();
+        assert!(
+            plan.iter()
+                .any(|step| step.contains("id>?") || step.contains("id<?")),
+            "the bucket digest read does not seek on the id range: {plan:?}"
+        );
 
         db.close().await;
         let _ = std::fs::remove_dir_all(dir);
@@ -726,58 +742,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// An existing vault's tombstone counter has to start from the rows it
-    /// already holds, not from zero, or the quota under-counts for ever.
-    #[tokio::test]
-    async fn the_tombstone_counter_is_back_filled_from_the_objects() {
-        let (dir, db) = temp_db().await;
-        migrate_to_v1(&db).await.unwrap();
-        sqlx::query(
-            "INSERT INTO accounts (id, username, opaque_record, kdf_salt, created_at)
-             VALUES ('account', 'account', X'', X'', 0)",
-        )
-        .execute(&db)
-        .await
-        .unwrap();
-        sqlx::query(
-            "INSERT INTO collections (id, account_id, kind, created_at)
-             VALUES ('collection', 'account', 'vault', 0)",
-        )
-        .execute(&db)
-        .await
-        .unwrap();
-        sqlx::query("INSERT INTO revision_seq (account_id, next_revision) VALUES ('account', 4)")
-            .execute(&db)
-            .await
-            .unwrap();
-        for (id, tombstone) in [("live", 0), ("gone-one", 1), ("gone-two", 1)] {
-            sqlx::query(
-                "INSERT INTO objects
-                 (id, collection_id, account_id, revision, tombstone, ciphertext, nonce,
-                  padded_size, content_type, content_digest)
-                 VALUES (?, 'collection', 'account', 1, ?, X'', X'', 0,
-                         'application/jscontact+json', X'')",
-            )
-            .bind(id)
-            .bind(tombstone)
-            .execute(&db)
-            .await
-            .unwrap();
-        }
-
-        migrate(&db).await.unwrap();
-
-        let counted: i64 = sqlx::query_scalar("SELECT tombstone_count FROM revision_seq")
-            .fetch_one(&db)
-            .await
-            .unwrap();
-        assert_eq!(counted, 2, "the two tombstones were not counted");
-        assert_eq!(schema_version(&db).await.unwrap(), SCHEMA_VERSION);
-
-        db.close().await;
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
     /// The write paths take the write lock before they read, so two writers
     /// serialise instead of one of them failing after it has already read.
     ///
@@ -895,6 +859,7 @@ mod tests {
             "object_revisions",
             "revision_seq",
             "manifests",
+            "manifest_digest_state",
         ] {
             assert!(
                 tables.iter().any(|name| name == expected),

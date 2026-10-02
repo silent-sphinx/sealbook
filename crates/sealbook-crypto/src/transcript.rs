@@ -61,6 +61,7 @@ pub fn rotated_objects_digest(entries: &[ObjectDigestEntry<'_>]) -> [u8; 32] {
 }
 
 /// One object as the manifest commits to it.
+#[derive(Clone)]
 pub struct ManifestDigestEntry {
     pub id: Uuid,
     pub revision: u64,
@@ -69,20 +70,16 @@ pub struct ManifestDigestEntry {
     pub content_digest: [u8; 32],
 }
 
-/// Digest of a collection's entire contents.
-///
-/// Entries are sorted by object id here rather than trusting the caller's order,
-/// so a client and the server always agree on the digest without having to agree
-/// on an iteration order as well.
-///
-/// Committing to `content_digest` alongside the revision is the part that makes a
-/// rollback visible. Without it a server could serve the ciphertext from an older
-/// revision under the current revision number and nothing would notice.
-pub fn manifest_digest(entries: &[ManifestDigestEntry]) -> [u8; 32] {
+pub const MANIFEST_BUCKETS: usize = 256;
+pub fn manifest_bucket_of(id: Uuid) -> u8 {
+    id.as_bytes()[0]
+}
+
+pub fn manifest_bucket_digest(entries: &[ManifestDigestEntry]) -> [u8; 32] {
     let mut sorted: Vec<&ManifestDigestEntry> = entries.iter().collect();
     sorted.sort_by_key(|entry| *entry.id.as_bytes());
     let mut h = Sha256::new();
-    h.update(b"sealbook-manifest-v1");
+    h.update(b"sealbook-manifest-bucket-v1");
     h.update((sorted.len() as u64).to_be_bytes());
     for entry in sorted {
         absorb(&mut h, entry.id.as_bytes());
@@ -91,6 +88,36 @@ pub fn manifest_digest(entries: &[ManifestDigestEntry]) -> [u8; 32] {
         absorb(&mut h, &entry.content_digest);
     }
     h.finalize().into()
+}
+
+pub fn manifest_root(buckets: &[[u8; 32]; MANIFEST_BUCKETS], object_count: u64) -> [u8; 32] {
+    let mut h = Sha256::new();
+    h.update(b"sealbook-manifest-v1");
+    h.update(object_count.to_be_bytes());
+    for bucket in buckets.iter() {
+        h.update(bucket);
+    }
+    h.finalize().into()
+}
+
+/// Digest of a collection's entire contents.
+pub fn manifest_digest(entries: &[ManifestDigestEntry]) -> [u8; 32] {
+    let mut buckets = [[0u8; 32]; MANIFEST_BUCKETS];
+    let mut grouped: Vec<Vec<&ManifestDigestEntry>> = vec![Vec::new(); MANIFEST_BUCKETS];
+    for entry in entries {
+        grouped[manifest_bucket_of(entry.id) as usize].push(entry);
+    }
+    for (bucket, members) in buckets.iter_mut().zip(grouped) {
+        // An empty bucket stays all zeroes rather than being hashed, so a vault
+        // with nothing in it costs nothing to describe and the root still binds
+        // the count.
+        if members.is_empty() {
+            continue;
+        }
+        let owned: Vec<ManifestDigestEntry> = members.into_iter().cloned().collect();
+        *bucket = manifest_bucket_digest(&owned);
+    }
+    manifest_root(&buckets, entries.len() as u64)
 }
 
 /// `SHA-256(nonce || ciphertext)`, the per-object commitment inside a manifest.
@@ -102,10 +129,6 @@ pub fn content_digest(nonce: &[u8], ciphertext: &[u8]) -> [u8; 32] {
 }
 
 /// Signed by the writing device over the state of the collection after its write.
-///
-/// The server verifies every scalar here against its own tables before storing
-/// it, so a stored manifest is a device-signed statement of the truth rather than
-/// of whatever the client claimed.
 pub fn manifest_transcript(
     collection_id: Uuid,
     manifest_seq: u64,
@@ -126,11 +149,6 @@ pub fn manifest_transcript(
 }
 
 /// Signed by the device performing an account mutation.
-///
-/// `op` names the operation and `payload` digests whatever that operation
-/// carries, so a signature for one change cannot be replayed as another. The
-/// server-issued challenge makes it fresh: a captured signature is useless once
-/// the challenge is consumed.
 pub fn account_op_transcript(
     op: &str,
     challenge_id: Uuid,
@@ -613,6 +631,104 @@ mod tests {
             base,
             login_start_transcript(challenge_id, "bob", device_id, &challenge, b"request")
         );
+    }
+
+    /// The property the server's incremental path stands on: rebuilding the root
+    /// from per-bucket digests must equal hashing the whole set in one pass. If
+    /// these ever disagree, a client and the server disagree about the vault and
+    /// every write is refused.
+    #[test]
+    fn the_root_from_per_bucket_digests_equals_the_whole_set_digest() {
+        for count in [0usize, 1, 2, 7, 64, 500, 2_000] {
+            let entries: Vec<ManifestDigestEntry> = (0..count)
+                .map(|index| ManifestDigestEntry {
+                    id: Uuid::new_v4(),
+                    revision: index as u64 + 1,
+                    tombstone: index % 5 == 0,
+                    content_digest: [index as u8; 32],
+                })
+                .collect();
+
+            // What a writer does: group by bucket, hash each bucket, hash the root.
+            let mut buckets = [[0u8; 32]; MANIFEST_BUCKETS];
+            for (index, bucket) in buckets.iter_mut().enumerate() {
+                let members: Vec<ManifestDigestEntry> = entries
+                    .iter()
+                    .filter(|entry| manifest_bucket_of(entry.id) as usize == index)
+                    .cloned()
+                    .collect();
+                if !members.is_empty() {
+                    *bucket = manifest_bucket_digest(&members);
+                }
+            }
+
+            assert_eq!(
+                manifest_root(&buckets, entries.len() as u64),
+                manifest_digest(&entries),
+                "incremental and whole-set digests disagree at {count} entries"
+            );
+        }
+    }
+
+    #[test]
+    fn a_write_changes_only_its_own_bucket() {
+        let entries: Vec<ManifestDigestEntry> = (0..200)
+            .map(|index| ManifestDigestEntry {
+                id: Uuid::new_v4(),
+                revision: index as u64 + 1,
+                tombstone: false,
+                content_digest: [index as u8; 32],
+            })
+            .collect();
+        let bucket_of = |entries: &[ManifestDigestEntry], bucket: usize| -> [u8; 32] {
+            let members: Vec<ManifestDigestEntry> = entries
+                .iter()
+                .filter(|entry| manifest_bucket_of(entry.id) as usize == bucket)
+                .cloned()
+                .collect();
+            if members.is_empty() {
+                [0u8; 32]
+            } else {
+                manifest_bucket_digest(&members)
+            }
+        };
+
+        let mut changed = entries.clone();
+        changed[7].revision += 1;
+        let touched = manifest_bucket_of(entries[7].id) as usize;
+
+        assert_ne!(
+            manifest_digest(&entries),
+            manifest_digest(&changed),
+            "a revision bump must change the root"
+        );
+        assert_ne!(
+            bucket_of(&entries, touched),
+            bucket_of(&changed, touched),
+            "the object's own bucket must change"
+        );
+        for bucket in 0..MANIFEST_BUCKETS {
+            if bucket == touched {
+                continue;
+            }
+            assert_eq!(
+                bucket_of(&entries, bucket),
+                bucket_of(&changed, bucket),
+                "bucket {bucket} changed although nothing in it did"
+            );
+        }
+    }
+
+    /// An entry must not be movable to another bucket without changing the root.
+    #[test]
+    fn the_root_binds_which_bucket_an_entry_is_in() {
+        let mut buckets = [[0u8; 32]; MANIFEST_BUCKETS];
+        buckets[3] = [1u8; 32];
+        let base = manifest_root(&buckets, 1);
+        let mut moved = [[0u8; 32]; MANIFEST_BUCKETS];
+        moved[4] = [1u8; 32];
+        assert_ne!(base, manifest_root(&moved, 1), "bucket position must bind");
+        assert_ne!(base, manifest_root(&buckets, 2), "the count must bind");
     }
 
     #[test]

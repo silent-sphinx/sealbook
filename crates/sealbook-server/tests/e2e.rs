@@ -2070,19 +2070,152 @@ async fn the_change_feed_paginates() {
 }
 
 /// A rotation installs a new password KDF salt and a new recovery-phrase record.
-/// Neither is a key wrap, so neither was covered by the rotation signature, and
-/// both went into `accounts` on the word of whatever sent the request. Anything
+#[tokio::test]
+async fn the_incremental_manifest_digest_matches_a_full_rebuild() {
+    use sealbook_crypto::{manifest_digest, ManifestDigestEntry};
+
+    let dir = std::env::temp_dir().join(format!("sealbook-digest-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db_file = dir.join("sealbook.db");
+    let base = spawn_http(db_file.to_str().unwrap()).await;
+
+    let mut owner = SealbookClient::plaintext_http();
+    owner
+        .register(&base, "digestalice", "correct horse battery")
+        .await
+        .expect("register");
+
+    // Ids with a chosen first byte, so objects deliberately share buckets: three
+    // in bucket 0x11, three in 0x11 again after replacement, and some spread out.
+    let id_in_bucket = |bucket: u8, tail: u8| {
+        let mut bytes = [0u8; 16];
+        bytes[0] = bucket;
+        bytes[15] = tail;
+        Uuid::from_bytes(bytes)
+    };
+
+    let mut ids = Vec::new();
+    for tail in 0..6u8 {
+        ids.push(id_in_bucket(0x11, tail));
+    }
+    for tail in 0..4u8 {
+        ids.push(id_in_bucket(0xff, tail));
+    }
+    ids.push(id_in_bucket(0x00, 1));
+    for (index, id) in ids.iter().enumerate() {
+        owner
+            .put_contact(
+                *id,
+                &format!(r#"{{"@type":"Card","name":{{"full":"Contact {index}"}}}}"#),
+            )
+            .await
+            .expect("put");
+    }
+
+    // Replacements inside a shared bucket, then deletes, then a write after the
+    // deletes — each one exercises a different branch of the bucket update.
+    owner
+        .put_contact(
+            ids[0],
+            r#"{"@type":"Card","name":{"full":"Edited nought"}}"#,
+        )
+        .await
+        .expect("replace");
+    owner
+        .put_contact(ids[7], r#"{"@type":"Card","name":{"full":"Edited seven"}}"#)
+        .await
+        .expect("replace");
+    owner.delete_contact(ids[2]).await.expect("delete");
+    owner.delete_contact(ids[8]).await.expect("delete");
+    owner
+        .put_contact(
+            id_in_bucket(0x11, 99),
+            r#"{"@type":"Card","name":{"full":"Late"}}"#,
+        )
+        .await
+        .expect("put after delete");
+
+    // What the digest should be, computed the way a client does: one pass over
+    // every entry, tombstones included.
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db_file.display()))
+        .await
+        .unwrap();
+    let rows = sqlx::query("SELECT id, revision, tombstone, content_digest FROM objects")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    let entries: Vec<ManifestDigestEntry> = rows
+        .iter()
+        .map(|row| {
+            let mut content_digest = [0u8; 32];
+            content_digest.copy_from_slice(&row.get::<Vec<u8>, _>("content_digest"));
+            ManifestDigestEntry {
+                id: Uuid::parse_str(&row.get::<String, _>("id")).unwrap(),
+                revision: row.get::<i64, _>("revision") as u64,
+                tombstone: row.get::<i64, _>("tombstone") != 0,
+                content_digest,
+            }
+        })
+        .collect();
+    let expected = manifest_digest(&entries);
+
+    let stored: Vec<u8> = sqlx::query_scalar("SELECT digest FROM manifests")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        stored,
+        expected.to_vec(),
+        "the stored manifest digest drifted from the objects"
+    );
+
+    // And the state's own count has to match the rows, since the root binds it.
+    let (counted, real): (i64, i64) = (
+        sqlx::query_scalar("SELECT object_count FROM manifest_digest_state")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        sqlx::query_scalar("SELECT COUNT(*) FROM objects")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+    );
+    assert_eq!(counted, real, "the bucket state's object count drifted");
+    assert_eq!(real, 12, "wrong number of rows: {real}");
+    pool.close().await;
+
+    // A rotation rebuilds the state from scratch; the digest must land in the
+    // same place the incremental path would have.
+    let mut joiner = SealbookClient::plaintext_http();
+    let (pair_code, confirm) = joiner.pair_join(&base, "digestalice").await.expect("join");
+    owner
+        .pair_approve(&pair_code, &confirm)
+        .await
+        .expect("approve");
+    assert!(joiner.pair_ready(&pair_code).await.expect("ready"));
+    joiner.login("correct horse battery").await.expect("login");
+    let joiner_device = joiner.state.as_ref().unwrap().device_id;
+    owner
+        .revoke_device(joiner_device, "correct horse battery")
+        .await
+        .expect("revoke");
+
+    // Still writable, which means the rebuilt state still agrees with the client.
+    owner
+        .put_contact(
+            id_in_bucket(0x11, 200),
+            r#"{"@type":"Card","name":{"full":"After rotation"}}"#,
+        )
+        .await
+        .expect("a write after a rotation must agree with the rebuilt state");
+
+    let listed = owner.list_contacts().await.expect("list");
+    assert_eq!(listed.len(), 11, "wrong live contents: {listed:?}");
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// A rotation must not be able to tombstone an object it is re-encrypting.
-///
-/// The `UPDATE` a rotation runs does not carry `tombstone`, but the revision row
-/// it appends took the flag straight from the request. A body claiming one left
-/// `objects` saying the object is live and `object_revisions` saying it was
-/// deleted, so a device syncing incrementally dropped an object that a snapshot
-/// walk still served — and neither manifest digest covers the other's view, so
-/// nothing downstream could notice.
-///
-/// Built by hand, because a conforming client leaves tombstones out of a
-/// rotation altogether.
 #[tokio::test]
 async fn a_rotation_that_tombstones_a_live_object_is_refused() {
     use sealbook_crypto::{

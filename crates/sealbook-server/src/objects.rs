@@ -195,6 +195,17 @@ pub(crate) async fn put_object(
     .await
     .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
 
+    // Folds the write into the bucket digests, so the manifest check below reads
+    // a digest instead of recomputing one over the whole collection.
+    manifest::record_object_write(
+        &mut tx,
+        &session.account_id,
+        &collection_id.to_string(),
+        body.id,
+        is_new,
+    )
+    .await?;
+
     manifest::verify_and_store(
         &mut tx,
         manifest::Expected {

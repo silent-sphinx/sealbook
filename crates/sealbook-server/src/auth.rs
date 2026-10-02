@@ -188,6 +188,11 @@ pub(crate) async fn register_finish(
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
     }
 
+    // Creates the bucket state for the new, empty collection, so the manifest
+    // check below has something to read and every later write is incremental.
+    manifest::rebuild_digest_state(&mut tx, &account_id.to_string(), &collection_id.to_string())
+        .await?;
+
     // An account has a signed manifest from the moment it exists, so a client is
     // never asked to accept an unsigned "your vault is empty" from the server.
     manifest::verify_and_store(

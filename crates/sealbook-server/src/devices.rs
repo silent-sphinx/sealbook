@@ -445,6 +445,11 @@ pub(crate) async fn rotate(
         .await
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
 
+    // A rotation rewrites every live object, so the buckets are rebuilt in one
+    // pass rather than one at a time. That pass also re-derives the count, so a
+    // rotation repairs the state as well as updating it.
+    manifest::rebuild_digest_state(&mut tx, &session.account_id, &collection_id_text).await?;
+
     manifest::verify_and_store(
         &mut tx,
         manifest::Expected {

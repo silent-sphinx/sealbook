@@ -21,6 +21,10 @@ impl SealbookClient {
     }
 
     fn digest_entries(entries: &[ManifestEntry]) -> Result<[u8; 32], ManifestError> {
+        Ok(manifest_digest(&Self::digest_inputs(entries)?))
+    }
+
+    fn digest_inputs(entries: &[ManifestEntry]) -> Result<Vec<ManifestDigestEntry>, ManifestError> {
         let mut out = Vec::with_capacity(entries.len());
         for entry in entries {
             if entry.content_digest.len() != 32 {
@@ -35,7 +39,7 @@ impl SealbookClient {
                 content_digest,
             });
         }
-        Ok(manifest_digest(&out))
+        Ok(out)
     }
 
     /// Checks a served manifest against the entry set it is supposed to describe.

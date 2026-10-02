@@ -23,8 +23,8 @@ use sqlx::{Row, Sqlite, Transaction};
 use uuid::Uuid;
 
 use sealbook_crypto::{
-    manifest_digest, manifest_transcript, verify, DeviceSigningPublic, DualSignature,
-    ManifestDigestEntry,
+    manifest_bucket_digest, manifest_bucket_of, manifest_root, manifest_transcript, verify,
+    DeviceSigningPublic, DualSignature, ManifestDigestEntry, MANIFEST_BUCKETS,
 };
 use sealbook_protocol::{ErrorBody, ManifestBody, ManifestEntry};
 
@@ -83,22 +83,202 @@ pub(crate) async fn entries(
     Ok(out)
 }
 
-pub(crate) fn digest_of(entries: &[ManifestEntry]) -> Result<[u8; 32], ()> {
-    let mut digest_entries = Vec::with_capacity(entries.len());
-    for entry in entries {
-        let mut content_digest = [0u8; 32];
-        if entry.content_digest.len() != 32 {
-            return Err(());
+/// The 256 bucket digests of a collection, as stored.
+type Buckets = [[u8; 32]; MANIFEST_BUCKETS];
+
+const BUCKETS_BLOB_LEN: usize = MANIFEST_BUCKETS * 32;
+
+fn buckets_to_blob(buckets: &Buckets) -> Vec<u8> {
+    let mut blob = Vec::with_capacity(BUCKETS_BLOB_LEN);
+    for bucket in buckets.iter() {
+        blob.extend_from_slice(bucket);
+    }
+    blob
+}
+
+fn buckets_from_blob(blob: &[u8]) -> Option<Buckets> {
+    if blob.len() != BUCKETS_BLOB_LEN {
+        return None;
+    }
+    let mut buckets = [[0u8; 32]; MANIFEST_BUCKETS];
+    for (bucket, chunk) in buckets.iter_mut().zip(blob.chunks(32)) {
+        bucket.copy_from_slice(chunk);
+    }
+    Some(buckets)
+}
+
+/// The id range covering one bucket.
+///
+/// Ids are stored as lowercase canonical UUID text, so a bucket — every id whose
+/// first byte is `bucket` — is the contiguous range of ids beginning with those
+/// two hex digits. `g` sorts above every character a UUID string can contain, so
+/// it closes the range without naming the next bucket.
+fn bucket_range(bucket: u8) -> (String, String) {
+    let prefix = format!("{bucket:02x}");
+    let high = format!("{prefix}g");
+    (prefix, high)
+}
+
+/// Digest of one bucket, read from the rows.
+///
+/// A range scan over the ids sharing a first byte, answered entirely from
+/// `objects_manifest`. This is the only read a write does over the objects table,
+/// and it touches about one 256th of the collection.
+async fn bucket_digest(
+    tx: &mut Transaction<'_, Sqlite>,
+    account_id: &str,
+    collection_id: &str,
+    bucket: u8,
+) -> Result<[u8; 32], (StatusCode, Json<ErrorBody>)> {
+    let (low, high) = bucket_range(bucket);
+    let rows = sqlx::query(
+        "SELECT id, revision, tombstone, content_digest FROM objects
+         WHERE account_id = ? AND collection_id = ? AND id >= ? AND id < ?",
+    )
+    .bind(account_id)
+    .bind(collection_id)
+    .bind(&low)
+    .bind(&high)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    if rows.is_empty() {
+        return Ok([0u8; 32]);
+    }
+    let mut entries = Vec::with_capacity(rows.len());
+    for row in rows {
+        let id: String = row.get("id");
+        let id = Uuid::parse_str(&id).map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+        let content_digest: Vec<u8> = row.get("content_digest");
+        if content_digest.len() != 32 {
+            return Err(err(StatusCode::INTERNAL_SERVER_ERROR, "db"));
         }
-        content_digest.copy_from_slice(&entry.content_digest);
-        digest_entries.push(ManifestDigestEntry {
+        let mut digest = [0u8; 32];
+        digest.copy_from_slice(&content_digest);
+        entries.push(ManifestDigestEntry {
+            id,
+            revision: row.get::<i64, _>("revision") as u64,
+            tombstone: row.get::<i64, _>("tombstone") != 0,
+            content_digest: digest,
+        });
+    }
+    Ok(manifest_bucket_digest(&entries))
+}
+
+/// Rebuilds every bucket from the rows, in one pass, and stores the result.
+///
+/// Used where a write touched an unknown number of buckets — a rotation, which
+/// rewrites the whole vault anyway — and to build the state for a collection that
+/// predates it. Also the repair path: the state is derived data, so recomputing
+/// it heals any drift.
+pub(crate) async fn rebuild_digest_state(
+    tx: &mut Transaction<'_, Sqlite>,
+    account_id: &str,
+    collection_id: &str,
+) -> Result<(Buckets, i64), (StatusCode, Json<ErrorBody>)> {
+    let entries = entries(tx, account_id, collection_id).await?;
+    let mut grouped: Vec<Vec<ManifestDigestEntry>> =
+        (0..MANIFEST_BUCKETS).map(|_| Vec::new()).collect();
+    for entry in &entries {
+        if entry.content_digest.len() != 32 {
+            return Err(err(StatusCode::INTERNAL_SERVER_ERROR, "db"));
+        }
+        let mut digest = [0u8; 32];
+        digest.copy_from_slice(&entry.content_digest);
+        grouped[manifest_bucket_of(entry.id) as usize].push(ManifestDigestEntry {
             id: entry.id,
             revision: entry.revision,
             tombstone: entry.tombstone,
-            content_digest,
+            content_digest: digest,
         });
     }
-    Ok(manifest_digest(&digest_entries))
+    let mut buckets = [[0u8; 32]; MANIFEST_BUCKETS];
+    for (bucket, members) in buckets.iter_mut().zip(grouped) {
+        if !members.is_empty() {
+            *bucket = manifest_bucket_digest(&members);
+        }
+    }
+    let count = entries.len() as i64;
+    store_digest_state(tx, collection_id, &buckets, count).await?;
+    Ok((buckets, count))
+}
+
+async fn store_digest_state(
+    tx: &mut Transaction<'_, Sqlite>,
+    collection_id: &str,
+    buckets: &Buckets,
+    object_count: i64,
+) -> Result<(), (StatusCode, Json<ErrorBody>)> {
+    sqlx::query(
+        "INSERT INTO manifest_digest_state (collection_id, buckets, object_count)
+         VALUES (?, ?, ?)
+         ON CONFLICT(collection_id) DO UPDATE SET
+            buckets = excluded.buckets,
+            object_count = excluded.object_count",
+    )
+    .bind(collection_id)
+    .bind(buckets_to_blob(buckets))
+    .bind(object_count)
+    .execute(&mut **tx)
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    Ok(())
+}
+
+/// The stored bucket state, if this collection has one.
+async fn stored_digest_state(
+    tx: &mut Transaction<'_, Sqlite>,
+    collection_id: &str,
+) -> Result<Option<(Buckets, i64)>, (StatusCode, Json<ErrorBody>)> {
+    let row = sqlx::query(
+        "SELECT buckets, object_count FROM manifest_digest_state WHERE collection_id = ?",
+    )
+    .bind(collection_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let blob: Vec<u8> = row.get("buckets");
+    let buckets =
+        buckets_from_blob(&blob).ok_or_else(|| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    Ok(Some((buckets, row.get::<i64, _>("object_count"))))
+}
+
+/// The stored bucket state, derived from the rows if the row is somehow missing.
+async fn digest_state(
+    tx: &mut Transaction<'_, Sqlite>,
+    account_id: &str,
+    collection_id: &str,
+) -> Result<(Buckets, i64), (StatusCode, Json<ErrorBody>)> {
+    match stored_digest_state(tx, collection_id).await? {
+        Some(state) => Ok(state),
+        None => rebuild_digest_state(tx, account_id, collection_id).await,
+    }
+}
+
+/// Folds one object write into the stored state.
+///
+/// Only the bucket the object's id falls in can have changed, so only that one is
+/// rebuilt. `is_new` says whether the write added a row, which is the only way the
+/// count moves — a replacement, including tombstoning, leaves it alone.
+pub(crate) async fn record_object_write(
+    tx: &mut Transaction<'_, Sqlite>,
+    account_id: &str,
+    collection_id: &str,
+    object_id: Uuid,
+    is_new: bool,
+) -> Result<(), (StatusCode, Json<ErrorBody>)> {
+    // Called after the object row is written, so a rebuild from the rows already
+    // accounts for this write and must not then be incremented again.
+    let Some((mut buckets, count)) = stored_digest_state(tx, collection_id).await? else {
+        rebuild_digest_state(tx, account_id, collection_id).await?;
+        return Ok(());
+    };
+    let bucket = manifest_bucket_of(object_id);
+    buckets[bucket as usize] = bucket_digest(tx, account_id, collection_id, bucket).await?;
+    store_digest_state(tx, collection_id, &buckets, count + i64::from(is_new)).await
 }
 
 /// Checks a submitted manifest against the server's own view and stores it.
@@ -128,14 +308,18 @@ pub(crate) async fn verify_and_store(
         return Err(err(StatusCode::BAD_REQUEST, "manifest revision mismatch"));
     }
 
-    let entries = entries(tx, expected.account_id, expected.collection_id).await?;
-    if body.object_count != entries.len() as u64 {
+    // Read from the bucket state rather than from a pass over the collection.
+    // Recomputing the digest here from every object is what made a full sync
+    // quadratic: one write, one scan of everything written so far.
+    let (buckets, object_count) =
+        digest_state(tx, expected.account_id, expected.collection_id).await?;
+    if body.object_count != object_count as u64 {
         return Err(err(
             StatusCode::BAD_REQUEST,
             "manifest object count mismatch",
         ));
     }
-    let digest = digest_of(&entries).map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let digest = manifest_root(&buckets, object_count as u64);
     if body.digest != digest {
         // The client signed something other than what the server now holds. Both
         // sides having to agree is the point: it means a stored manifest can be
