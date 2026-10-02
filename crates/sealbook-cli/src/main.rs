@@ -253,7 +253,7 @@ async fn main() -> Result<()> {
             let state = load_state(&cli.state)?;
             let mut client =
                 SealbookClient::with_state_and_tls(state, pinned.clone()).context("tls client")?;
-            client.login(&password).await.context("login")?;
+            sign_in(&mut client, &password).await?;
             save_state(&cli.state, client.state.as_ref().unwrap())?;
             println!("logged in");
         }
@@ -282,7 +282,7 @@ async fn main() -> Result<()> {
             let state = load_state(&cli.state)?;
             let mut client =
                 SealbookClient::with_state_and_tls(state, pinned.clone()).context("tls client")?;
-            client.login(&password).await.context("login")?;
+            sign_in(&mut client, &password).await?;
             let preview = client.pair_preview(&code).await.context("pair preview")?;
             println!(
                 "Type the confirmation code shown on the joining device\n(spaces and case are ignored):"
@@ -317,7 +317,7 @@ async fn main() -> Result<()> {
             let password = read_secret("Password: ", "SEALBOOK_PASSWORD")?;
             let mut client =
                 SealbookClient::with_state_and_tls(state, pinned.clone()).context("tls client")?;
-            client.login(&password).await.context("login")?;
+            sign_in(&mut client, &password).await?;
             let new_phrase = client.change_phrase(&password).await.context("phrase")?;
             save_state(&cli.state, client.state.as_ref().unwrap())?;
             println!(
@@ -333,7 +333,7 @@ async fn main() -> Result<()> {
                     .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
                 let mut client = SealbookClient::with_state_and_tls(state, pinned.clone())
                     .context("tls client")?;
-                client.login(&password).await.context("login")?;
+                sign_in(&mut client, &password).await?;
                 client
                     .ensure_default_address_book()
                     .await
@@ -358,7 +358,7 @@ async fn main() -> Result<()> {
                     .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
                 let mut client = SealbookClient::with_state_and_tls(state, pinned.clone())
                     .context("tls client")?;
-                client.login(&password).await.context("login")?;
+                sign_in(&mut client, &password).await?;
                 client
                     .ensure_default_address_book()
                     .await
@@ -377,7 +377,7 @@ async fn main() -> Result<()> {
                     .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
                 let mut client =
                     SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
-                client.login(&password).await.context("login")?;
+                sign_in(&mut client, &password).await?;
                 let revision = client.delete_contact(id).await.context("delete")?;
                 println!("deleted encrypted contact {id} at revision {revision}");
                 save_state(&cli.state, client.state.as_ref().unwrap())?;
@@ -388,7 +388,7 @@ async fn main() -> Result<()> {
                     .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
                 let mut client =
                     SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
-                client.login(&password).await.context("login")?;
+                sign_in(&mut client, &password).await?;
                 client
                     .ensure_default_address_book()
                     .await
@@ -419,7 +419,7 @@ async fn main() -> Result<()> {
                 .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
             let mut client =
                 SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
-            client.login(&password).await.context("login")?;
+            sign_in(&mut client, &password).await?;
             client
                 .ensure_default_address_book()
                 .await
@@ -447,7 +447,7 @@ async fn main() -> Result<()> {
             let password = read_secret("Password: ", "SEALBOOK_PASSWORD")?;
             let mut client =
                 SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
-            client.login(&password).await.context("login")?;
+            sign_in(&mut client, &password).await?;
             let this_device = client.state.as_ref().unwrap().device_id;
             match command {
                 DevicesCommand::List {} => {
@@ -484,7 +484,7 @@ async fn main() -> Result<()> {
                 .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
             let mut client =
                 SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
-            client.login(&password).await.context("login")?;
+            sign_in(&mut client, &password).await?;
             match command {
                 CalendarCommand::Create { name, color } => {
                     let id = Uuid::new_v4();
@@ -525,7 +525,7 @@ async fn main() -> Result<()> {
                 .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
             let mut client =
                 SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
-            client.login(&password).await.context("login")?;
+            sign_in(&mut client, &password).await?;
             client
                 .ensure_default_notebook()
                 .await
@@ -560,7 +560,7 @@ async fn main() -> Result<()> {
                 .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
             let mut client =
                 SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
-            client.login(&password).await.context("login")?;
+            sign_in(&mut client, &password).await?;
             let default_notebook = client
                 .ensure_default_notebook()
                 .await
@@ -658,6 +658,37 @@ fn read_note_body(body: Option<String>, file: Option<PathBuf>) -> Result<String>
         .read_to_string(&mut buf)
         .context("read note body from stdin")?;
     Ok(buf)
+}
+
+/// Signs in, finishing an interrupted recovery if the server says one is owed.
+///
+/// A recovery enrols a device without rotating the collection key, so the phrase
+/// it used still opens the vault until a rotation lands. If the first attempt
+/// died in between, every later command would otherwise refuse to write with
+/// nothing to act on. Doing it here means any command picks the rotation up, and
+/// the replacement phrase is printed where the user will see it.
+async fn sign_in(client: &mut SealbookClient, password: &str) -> Result<()> {
+    match client.login(password).await {
+        Ok(()) => Ok(()),
+        Err(sealbook_client::ClientError::RecoveryRotationPending) => {
+            eprintln!(
+                "An earlier recovery on this account never finished: the vault key was left \
+                 unrotated, so the recovery phrase used then still opens it. Finishing that \
+                 now, which re-encrypts the vault and issues a new phrase."
+            );
+            let phrase = client
+                .complete_recovery_rotation(password)
+                .await
+                .context("finish the interrupted recovery")?;
+            println!(
+                "\nThe vault key has been rotated. Your previous recovery phrase no longer \
+                 works. Write these words down; they are shown once:"
+            );
+            println!("{phrase}");
+            Ok(())
+        }
+        Err(error) => Err(anyhow::Error::new(error).context("login")),
+    }
 }
 
 async fn find_note(client: &mut SealbookClient, id: Uuid) -> Result<String> {

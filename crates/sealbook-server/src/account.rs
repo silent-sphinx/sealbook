@@ -159,6 +159,7 @@ pub(crate) async fn change_username(
     Json(body): Json<ChangeUsernameRequest>,
 ) -> Result<Json<SimpleStatusResponse>, (StatusCode, Json<ErrorBody>)> {
     let session = require_recent_session(&state, &headers).await?;
+    crate::recovery::require_rotation_not_owed(&state, &session.account_id).await?;
     if !valid_username(&body.new_username) {
         return Err(err(StatusCode::BAD_REQUEST, "invalid username"));
     }
@@ -229,6 +230,7 @@ pub(crate) async fn change_password_start(
     Json(body): Json<ChangePasswordStartRequest>,
 ) -> Result<Json<ChangePasswordStartResponse>, (StatusCode, Json<ErrorBody>)> {
     let session = require_recent_session(&state, &headers).await?;
+    crate::recovery::require_rotation_not_owed(&state, &session.account_id).await?;
     // Carries its own challenge rather than going through `account_challenge`, so
     // it needs its own bound. An OPAQUE registration start is real server work.
     if !state
@@ -281,6 +283,7 @@ pub(crate) async fn change_password(
     Json(body): Json<ChangePasswordRequest>,
 ) -> Result<Json<SimpleStatusResponse>, (StatusCode, Json<ErrorBody>)> {
     let session = require_recent_session(&state, &headers).await?;
+    crate::recovery::require_rotation_not_owed(&state, &session.account_id).await?;
     let pending = state
         .pending_password_changes
         .lock()

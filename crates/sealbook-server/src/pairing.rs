@@ -258,6 +258,9 @@ pub(crate) async fn pair_approve(
     Json(body): Json<PairApproveRequest>,
 ) -> Result<Json<PairStatusResponse>, (StatusCode, Json<ErrorBody>)> {
     let session = require_session(&state, &headers).await?;
+    // Handing the current collection key to another device while a phrase that
+    // opens it may be in someone else's hands would widen the exposure.
+    crate::recovery::require_rotation_not_owed(&state, &session.account_id).await?;
     // The pairing lock is taken twice, for as long as each of two in-memory
     // lookups needs, and is not held across the dual signature verifications or
     // the enrolling transaction below. Held across those, as it was, one approval

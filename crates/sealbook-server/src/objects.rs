@@ -26,6 +26,7 @@ pub(crate) async fn put_object(
     Json(body): Json<PutObjectRequest>,
 ) -> Result<Json<PutObjectResponse>, (StatusCode, Json<ErrorBody>)> {
     let session = require_session(&state, &headers).await?;
+    crate::recovery::require_rotation_not_owed(&state, &session.account_id).await?;
     // Authenticated routes were unmetered, so a stolen token could write until the
     // disk filled. High enough that a first full sync of a large vault is not
     // throttled, low enough to bound what one token can do in a minute.

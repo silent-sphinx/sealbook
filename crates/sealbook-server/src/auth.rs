@@ -512,6 +512,8 @@ pub(crate) async fn login_finish(
     .await
     .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
 
+    let recovery_pending = crate::recovery::rotation_owed(&state.db, &account_id).await?;
+
     Ok(Json(LoginFinishResponse {
         account_id: Uuid::parse_str(&account_id).unwrap(),
         collection_id: Uuid::parse_str(&collection_id).unwrap(),
@@ -519,5 +521,6 @@ pub(crate) async fn login_finish(
         kdf_salt,
         key_wraps,
         key_epoch: key_epoch as u64,
+        recovery_pending,
     }))
 }

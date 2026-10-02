@@ -131,7 +131,13 @@ async fn migrate_to_v1(db: &Pool<Sqlite>) -> anyhow::Result<()> {
                 phrase_mldsa_pk BLOB,
                 phrase_ed25519_pk BLOB,
                 phrase_lookup_id BLOB,
-                phrase_scheme TEXT
+                phrase_scheme TEXT,
+                -- When a recovery enrolled a device and left the collection key
+                -- unrotated: 0 for none, otherwise the time it was recorded.
+                -- Recovery cannot rotate on the server's side, because only a
+                -- client can re-encrypt, so the obligation is written down here
+                -- and the account is held to it.
+                recovery_pending INTEGER NOT NULL DEFAULT 0
             )",
         )
         .execute(&mut *db)

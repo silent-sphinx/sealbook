@@ -371,6 +371,15 @@ pub struct LoginFinishResponse {
     /// The epoch these wraps belong to, so a client starts in sync and only
     /// re-fetches its wrap when a rotation actually happens.
     pub key_epoch: u64,
+    /// True when a recovery enrolled a device and the collection key has still
+    /// not been rotated, so the phrase used then — and any other copy of it —
+    /// can still open this vault. The client must finish that rotation before
+    /// the account can be written to again.
+    ///
+    /// `#[serde(default)]` so a client built before this field existed still
+    /// deserializes a response carrying it.
+    #[serde(default)]
+    pub recovery_pending: bool,
 }
 
 /// One object as the manifest commits to it.

@@ -3648,3 +3648,215 @@ async fn a_paired_device_pins_the_manifest_it_syncs() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Bug #3: a recovery enrols a device but cannot rotate the collection key, so
+/// until a client does, the phrase it used still opens the vault. The server
+/// records the debt and holds the account to it.
+#[tokio::test]
+async fn an_interrupted_recovery_blocks_writes_until_the_key_is_rotated() {
+    let dir = std::env::temp_dir().join(format!("sealbook-owed-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let password = "correct horse battery";
+    let mut owner = SealbookClient::plaintext_http();
+    owner.register(&base, "owedalice", password).await.unwrap();
+    owner
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"Ada Lovelace"}}"#,
+        )
+        .await
+        .expect("a write before the recovery");
+
+    // The state a recovery leaves behind when the client dies before rotating.
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    sqlx::query("UPDATE accounts SET recovery_pending = 1 WHERE username = 'owedalice'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let error = owner
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"Grace Hopper"}}"#,
+        )
+        .await
+        .expect_err("writing with a rotation owed must be refused")
+        .to_string();
+    assert!(
+        error.contains("unfinished recovery"),
+        "the refusal should say what is owed, got: {error}"
+    );
+
+    // Reading has to keep working, because a rotation re-encrypts what it reads.
+    assert_eq!(owner.list_contacts().await.expect("read").len(), 1);
+
+    let phrase = owner
+        .complete_recovery_rotation(password)
+        .await
+        .expect("finishing the recovery");
+    assert_eq!(phrase.split_whitespace().count(), 24);
+
+    let pending: i64 =
+        sqlx::query_scalar("SELECT recovery_pending FROM accounts WHERE username = 'owedalice'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(pending, 0, "the rotation must settle the debt");
+    pool.close().await;
+
+    owner
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"Grace Hopper"}}"#,
+        )
+        .await
+        .expect("writing again once the key has been rotated");
+    assert_eq!(owner.list_contacts().await.expect("read").len(), 2);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The same interruption, driven through the real recovery endpoints: enrol a
+/// device and stop, exactly where a crashed client would. The phrase used stays
+/// live until the rotation, so the next login must refuse to carry on quietly.
+#[tokio::test]
+async fn a_recovery_that_never_rotated_is_caught_at_the_next_login() {
+    let dir = std::env::temp_dir().join(format!("sealbook-owed-e2e-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let password = "correct horse battery";
+    let mut owner = SealbookClient::plaintext_http();
+    let first_phrase = owner.register(&base, "owedbob", password).await.unwrap();
+    owner
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"Ada Lovelace"}}"#,
+        )
+        .await
+        .unwrap();
+    let entropy = entropy_from_phrase(&first_phrase).unwrap();
+
+    // Recover onto a new device and go no further.
+    let http = reqwest::Client::new();
+    let start: RecoverStartResponse = http
+        .post(format!("{base}/v1/recover/start"))
+        .json(&RecoverStartRequest {
+            username: "owedbob".into(),
+            lookup_id: phrase_lookup_id(&entropy).unwrap().to_vec(),
+        })
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let (hpke_sk, hpke_pk) = generate_device_hpke().unwrap();
+    let (sign_sk, sign_pk) = generate_device_signing().unwrap();
+    let device_id = Uuid::new_v4();
+    let device = sealbook_protocol::DevicePublicKeys {
+        device_id,
+        mldsa_pk: sign_pk.mldsa_pk.clone(),
+        ed25519_pk: sign_pk.ed25519_pk.clone(),
+        xwing_hpke_pk: hpke_pk.0.clone(),
+    };
+    let enrollment = sign(
+        &sign_sk,
+        &enrollment_transcript(
+            device_id,
+            &sign_pk.mldsa_pk,
+            &sign_pk.ed25519_pk,
+            &hpke_pk.0,
+        ),
+    )
+    .unwrap();
+    let wrap = wrap_for_device(&hpke_pk, owner.collection_key().unwrap()).unwrap();
+    let proof = sign_phrase_recovery(
+        &entropy,
+        &phrase_recovery_transcript(
+            "owedbob",
+            start.recovery_id,
+            &start.challenge,
+            device_id,
+            &sign_pk.mldsa_pk,
+            &sign_pk.ed25519_pk,
+            &hpke_pk.0,
+        ),
+    )
+    .unwrap();
+    let roster = recovery_roster(&start, &entropy, &device, owner.collection_key().unwrap());
+    http.post(format!("{base}/v1/recover/finish"))
+        .json(&RecoverFinishRequest {
+            username: "owedbob".into(),
+            recovery_id: start.recovery_id,
+            challenge: start.challenge.clone(),
+            phrase_proof: DualSignatureBody {
+                mldsa: proof.mldsa,
+                ed25519: proof.ed25519,
+            },
+            device,
+            enrollment_signature: DualSignatureBody {
+                mldsa: enrollment.mldsa,
+                ed25519: enrollment.ed25519,
+            },
+            wrap: KeyWrapBody {
+                recipient_kind: "device".into(),
+                recipient_id: device_id.to_string(),
+                hpke_enc: wrap.enc,
+                wrapped_ck: wrap.ciphertext,
+                ciphersuite: XWING_CIPHERSUITE.into(),
+            },
+            roster,
+        })
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .expect("the recovery itself must succeed");
+    drop(hpke_sk);
+    drop(sign_sk);
+
+    // This is the crash point. The key is untouched, so the phrase still opens it.
+    let error = owner
+        .login(password)
+        .await
+        .expect_err("a login must not quietly continue with a recovery outstanding")
+        .to_string();
+    assert!(
+        error.contains("unfinished recovery"),
+        "wrong error: {error}"
+    );
+
+    let second_phrase = owner
+        .complete_recovery_rotation(password)
+        .await
+        .expect("finishing the recovery");
+    assert_ne!(second_phrase, first_phrase);
+    assert_eq!(owner.list_contacts().await.expect("read").len(), 1);
+
+    // The phrase that was used, and every copy of it, is now dead.
+    let mut stale = SealbookClient::plaintext_http();
+    assert!(
+        stale
+            .recover(&base, "owedbob", &first_phrase, password)
+            .await
+            .is_err(),
+        "the phrase used for the interrupted recovery must stop working"
+    );
+
+    let mut fresh = SealbookClient::plaintext_http();
+    fresh
+        .recover(&base, "owedbob", &second_phrase, password)
+        .await
+        .expect("the phrase the rotation issued must work");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

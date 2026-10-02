@@ -207,6 +207,16 @@ pub(crate) async fn recover_finish(
         &body.roster,
     )
     .await?;
+    // The phrase that was just used still unwraps the current collection key, and
+    // so does every other copy of it. Only a client can rotate, so the debt is
+    // recorded here and `rotate` is what clears it; until then this account is
+    // held to it by `require_rotation_not_owed`.
+    sqlx::query("UPDATE accounts SET recovery_pending = ? WHERE id = ?")
+        .bind(now())
+        .bind(&account_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
     sqlx::query("DELETE FROM sessions WHERE account_id = ?")
         .bind(&account_id)
         .execute(&mut *tx)
@@ -219,4 +229,44 @@ pub(crate) async fn recover_finish(
         account_id: Uuid::parse_str(&account_id).unwrap(),
         collection_id: Uuid::parse_str(&collection_id).unwrap(),
     }))
+}
+
+/// Whether a recovery has left this account owing a key rotation.
+pub(crate) async fn rotation_owed<'e, E>(
+    db: E,
+    account_id: &str,
+) -> Result<bool, (StatusCode, Json<ErrorBody>)>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
+    let pending: i64 = sqlx::query_scalar("SELECT recovery_pending FROM accounts WHERE id = ?")
+        .bind(account_id)
+        .fetch_optional(db)
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
+        .unwrap_or(0);
+    Ok(pending != 0)
+}
+
+/// Refuses an operation while a recovery's rotation is still outstanding.
+///
+/// A recovery enrols a device without replacing the collection key, so until the
+/// rotation lands the phrase just used — and any other copy of it — still opens
+/// the vault. Letting the account carry on as normal is what turned "the client
+/// crashed before it rotated" into a phrase that stayed valid for ever.
+///
+/// Reading is deliberately still allowed: a rotation has to re-encrypt every
+/// object, so it has to be able to read them first.
+pub(crate) async fn require_rotation_not_owed(
+    state: &AppState,
+    account_id: &str,
+) -> Result<(), (StatusCode, Json<ErrorBody>)> {
+    if rotation_owed(&state.db, account_id).await? {
+        return Err(err(
+            StatusCode::CONFLICT,
+            "this account has an unfinished recovery: the collection key must be rotated \
+             before it can be used again, which issues a new recovery phrase",
+        ));
+    }
+    Ok(())
 }

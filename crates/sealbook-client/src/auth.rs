@@ -170,7 +170,40 @@ impl SealbookClient {
         Ok(phrase)
     }
 
+    /// Signs this device in.
+    ///
+    /// Fails with [`ClientError::RecoveryRotationPending`] if a recovery left the
+    /// collection key unrotated, because carrying on as though the account were
+    /// healthy is what left a used recovery phrase working. The session is live
+    /// by then, so a caller that means to deal with it calls
+    /// [`Self::complete_recovery_rotation`].
     pub async fn login(&mut self, password: &str) -> Result<(), ClientError> {
+        self.login_inner(password, false).await
+    }
+
+    /// Finishes the rotation an interrupted recovery left owing.
+    ///
+    /// Returns the replacement recovery phrase, which the caller must show to the
+    /// user: the rotation retires the old one. Safe to call when nothing is owed,
+    /// in which case it rotates anyway and still issues a new phrase.
+    pub async fn complete_recovery_rotation(
+        &mut self,
+        password: &str,
+    ) -> Result<String, ClientError> {
+        self.login_inner(password, true).await?;
+        self.rotate(None, password).await
+    }
+
+    /// True when the last login found a recovery's rotation still outstanding.
+    pub fn recovery_rotation_pending(&self) -> bool {
+        self.recovery_pending
+    }
+
+    async fn login_inner(
+        &mut self,
+        password: &str,
+        allow_recovery_pending: bool,
+    ) -> Result<(), ClientError> {
         let (server, username, device_id) = {
             let state = self.state.as_ref().ok_or(ClientError::NoState)?;
             (
@@ -280,7 +313,11 @@ impl SealbookClient {
             &finish.key_wraps,
         )?);
         self.key_epoch = finish.key_epoch;
+        self.recovery_pending = finish.recovery_pending;
         self.sync_roster().await?;
+        if finish.recovery_pending && !allow_recovery_pending {
+            return Err(ClientError::RecoveryRotationPending);
+        }
         Ok(())
     }
 
@@ -432,7 +469,7 @@ impl SealbookClient {
             roster_transcript: Vec::new(),
         });
         self.pin_roster(&next_roster)?;
-        self.login(password).await?;
+        self.login_inner(password, true).await?;
         // The phrase that was just used stays valid otherwise, and so does anyone
         // else's copy of it, because enrolling a device does not change the key it
         // unwraps. Rotate, which issues a fresh phrase and leaves the old one

@@ -15,6 +15,8 @@ pub struct SealbookClient {
     /// Epoch the cached `collection_key` belongs to, as of the last login or
     /// refresh. A rotation elsewhere moves the server's epoch past this.
     pub(crate) key_epoch: u64,
+    /// Whether the last login found a recovery's rotation still owing.
+    pub(crate) recovery_pending: bool,
 }
 
 impl SealbookClient {
@@ -28,6 +30,7 @@ impl SealbookClient {
             state: None,
             collection_key: None,
             key_epoch: 0,
+            recovery_pending: false,
         })
     }
 
@@ -37,6 +40,7 @@ impl SealbookClient {
             state: None,
             collection_key: None,
             key_epoch: 0,
+            recovery_pending: false,
         }
     }
 
@@ -58,6 +62,7 @@ impl SealbookClient {
             state: Some(state),
             collection_key: None,
             key_epoch: 0,
+            recovery_pending: false,
         })
     }
 

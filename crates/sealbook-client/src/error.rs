@@ -27,6 +27,15 @@ pub enum ClientError {
     Nonce,
     #[error("pairing is still waiting")]
     PairPending,
+    /// A recovery enrolled this device but never rotated the collection key, so
+    /// the phrase used to recover still opens the vault. Call
+    /// `complete_recovery_rotation` to finish it; the server refuses writes until
+    /// it is done.
+    #[error(
+        "this account has an unfinished recovery: the collection key must be rotated, which \
+         issues a new recovery phrase"
+    )]
+    RecoveryRotationPending,
     #[error("tls: {0}")]
     Tls(String),
 }

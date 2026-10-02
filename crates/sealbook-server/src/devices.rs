@@ -439,6 +439,15 @@ pub(crate) async fn rotate(
     .await
     .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
 
+    // A rotation is exactly what an unfinished recovery owes: a new collection
+    // key, a new phrase, and every object re-encrypted. Whatever prompted it, it
+    // settles the debt.
+    sqlx::query("UPDATE accounts SET recovery_pending = 0 WHERE id = ?")
+        .bind(&session.account_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+
     sqlx::query("UPDATE collections SET key_epoch = ? WHERE id = ?")
         .bind(body.key_epoch as i64)
         .bind(&collection_id_text)
