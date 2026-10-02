@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 /// Absorbs a length-prefixed field, so that concatenating different field
 /// splits cannot produce the same digest.
-fn absorb(h: &mut Sha256, field: &[u8]) {
+pub(crate) fn absorb(h: &mut Sha256, field: &[u8]) {
     h.update((field.len() as u64).to_be_bytes());
     h.update(field);
 }

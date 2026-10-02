@@ -18,6 +18,8 @@ use sealbook_crypto::{
     ManifestDigestEntry, ObjectDigestEntry, RecoveryWrap, WrapDigestEntry, PHRASE_CIPHERSUITE,
     PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
 };
+use sealbook_crypto::{phrase_recovery_keys, RosterPin};
+use sealbook_protocol::{DevicePublicKeys, RosterBody, RosterSignerBody};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
@@ -955,6 +957,127 @@ pub fn account_op_sign(
     serde_json::to_string(&serde_json::json!({
         "mldsa": b64(&sig.mldsa),
         "ed25519": b64(&sig.ed25519),
+    }))
+    .map_err(js_err)
+}
+
+fn pin_from(seq: u64, transcript_b64: &str) -> Result<Option<RosterPin>, JsError> {
+    if seq == 0 {
+        return Ok(None);
+    }
+    Ok(Some(RosterPin {
+        roster_seq: seq,
+        transcript: digest32(transcript_b64)?,
+    }))
+}
+
+fn devices_from(devices_json: &str) -> Result<Vec<DevicePublicKeys>, JsError> {
+    serde_json::from_str(devices_json).map_err(js_err)
+}
+
+/// Signs a device roster with this device's keys and MACs it under `ck`.
+///
+/// `devices_json` is the full device list in wire format. Returns the roster to
+/// send with a registration, pairing approval or rotation.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn roster_seal_device(
+    collection_id: &str,
+    roster_seq: u64,
+    key_epoch: u64,
+    devices_json: &str,
+    phrase_mldsa_pk_b64: &str,
+    phrase_ed25519_pk_b64: &str,
+    signer_device_id: &str,
+    mldsa_seed_b64: &str,
+    ed25519_sk_b64: &str,
+    ck_b64: &str,
+) -> Result<String, JsError> {
+    let roster = RosterBody::seal(
+        parse_uuid(collection_id)?,
+        roster_seq,
+        key_epoch,
+        devices_from(devices_json)?,
+        unb64(phrase_mldsa_pk_b64)?,
+        unb64(phrase_ed25519_pk_b64)?,
+        RosterSignerBody::Device {
+            device_id: parse_uuid(signer_device_id)?,
+        },
+        &DeviceSigningSecrets {
+            mldsa_seed: unb64(mldsa_seed_b64)?,
+            ed25519_sk: unb64(ed25519_sk_b64)?,
+        },
+        &ck_from_b64(ck_b64)?,
+    )
+    .map_err(js_err)?;
+    serde_json::to_string(&roster).map_err(js_err)
+}
+
+/// Signs a device roster with the recovery phrase's key, for a recovery.
+#[wasm_bindgen]
+pub fn roster_seal_phrase(
+    collection_id: &str,
+    roster_seq: u64,
+    key_epoch: u64,
+    devices_json: &str,
+    phrase: &str,
+    ck_b64: &str,
+) -> Result<String, JsError> {
+    let entropy = entropy_from_phrase(phrase).map_err(js_err)?;
+    let (secrets, public) = phrase_recovery_keys(&entropy).map_err(js_err)?;
+    let roster = RosterBody::seal(
+        parse_uuid(collection_id)?,
+        roster_seq,
+        key_epoch,
+        devices_from(devices_json)?,
+        public.mldsa_pk,
+        public.ed25519_pk,
+        RosterSignerBody::Phrase,
+        &secrets,
+        &ck_from_b64(ck_b64)?,
+    )
+    .map_err(js_err)?;
+    serde_json::to_string(&roster).map_err(js_err)
+}
+
+/// Verifies a served roster history from this device's pin.
+///
+/// `pin_seq` 0 means nothing is pinned yet, in which case `ck_b64` and
+/// `key_epoch` must be the current collection key and its epoch. Throws on any
+/// failure. Returns `{ roster, pin_seq, pin_transcript }`: the verified roster,
+/// whose devices are the only ones to wrap for or accept signatures from, and the
+/// pin to store in place of the old one.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn roster_verify(
+    collection_id: &str,
+    pin_seq: u64,
+    pin_transcript_b64: &str,
+    rosters_json: &str,
+    ck_b64: &str,
+    key_epoch: u64,
+    self_device_id: &str,
+) -> Result<String, JsError> {
+    let collection = parse_uuid(collection_id)?;
+    let chain: Vec<RosterBody> = serde_json::from_str(rosters_json).map_err(js_err)?;
+    let key = if ck_b64.is_empty() {
+        None
+    } else {
+        Some(ck_from_b64(ck_b64)?)
+    };
+    let latest = RosterBody::verify_chain(
+        collection,
+        pin_from(pin_seq, pin_transcript_b64)?,
+        chain,
+        key.as_ref().map(|key| (key, key_epoch)),
+        parse_uuid(self_device_id)?,
+    )
+    .map_err(js_err)?;
+    let pin = latest.pin(collection);
+    serde_json::to_string(&serde_json::json!({
+        "roster": latest,
+        "pin_seq": pin.roster_seq,
+        "pin_transcript": b64(&pin.transcript),
     }))
     .map_err(js_err)
 }

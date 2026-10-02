@@ -6,6 +6,7 @@ pub mod hpke_wrap;
 pub mod opaque;
 pub mod phrase;
 pub mod recovery;
+pub mod roster;
 pub mod sign;
 pub mod transcript;
 
@@ -29,6 +30,10 @@ pub use recovery::{
     generate_kdf_salt, is_supported_recovery_ciphersuite, unwrap_collection_key,
     wrap_collection_key, RecoveryWrap, KDF_SALT_LEN, RECOVERY_CIPHERSUITE,
     SUPPORTED_RECOVERY_CIPHERSUITES,
+};
+pub use roster::{
+    roster_mac, roster_transcript, verify_roster_chain, verify_roster_mac, verify_roster_step,
+    Roster, RosterDevice, RosterPin, RosterSigner, ROSTER_MAC_LEN,
 };
 pub use sign::{
     generate_device_signing, sign, signing_from_seeds, verify, DeviceSigningPublic,

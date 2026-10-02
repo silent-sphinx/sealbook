@@ -19,6 +19,7 @@ use sealbook_protocol::{
 };
 
 use crate::pairing::{insert_device, verify_enroll};
+use crate::roster;
 use crate::*;
 
 pub(crate) async fn recover_start(
@@ -56,6 +57,19 @@ pub(crate) async fn recover_start(
     .fetch_optional(&state.db)
     .await
     .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let collection_id: Option<String> = row.as_ref().map(|r| r.get("id"));
+    // Served without the phrase key, which is never handed out before a proof.
+    // The recovering device derives it from the phrase and the roster's MAC and
+    // signature bind it, so nothing is lost by leaving it out.
+    let roster = match &collection_id {
+        Some(id) => roster::latest(&state.db, id).await?.map(|mut roster| {
+            roster.phrase_mldsa_pk.clear();
+            roster.phrase_ed25519_pk.clear();
+            roster
+        }),
+        None => None,
+    };
+    let collection_id = collection_id.and_then(|id| Uuid::parse_str(&id).ok());
     let wrap = row
         .map(|r| KeyWrapBody {
             recipient_kind: "phrase".into(),
@@ -83,6 +97,8 @@ pub(crate) async fn recover_start(
         wrap,
         recovery_id,
         challenge: challenge.to_vec(),
+        roster,
+        collection_id,
     }))
 }
 
@@ -178,6 +194,17 @@ pub(crate) async fn recover_finish(
         &collection_id,
         &body.device,
         &body.wrap,
+    )
+    .await?;
+    roster::verify_and_store(
+        &mut tx,
+        roster::Expected {
+            collection_id: &collection_id,
+            account_id: &account_id,
+            signer: roster::Signer::Phrase,
+            genesis: false,
+        },
+        &body.roster,
     )
     .await?;
     sqlx::query("DELETE FROM sessions WHERE account_id = ?")

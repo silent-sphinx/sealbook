@@ -20,6 +20,8 @@ pub enum CryptoError {
     Signature(String),
     #[error("invalid key encoding")]
     Encoding,
+    #[error("device roster: {0}")]
+    Roster(String),
 }
 
 impl From<hpke::HpkeError> for CryptoError {

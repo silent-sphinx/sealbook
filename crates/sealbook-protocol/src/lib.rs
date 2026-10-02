@@ -89,6 +89,180 @@ pub struct DualSignatureBody {
     pub ed25519: Vec<u8>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RosterSignerBody {
+    Device { device_id: Uuid },
+    Phrase,
+}
+
+/// The account's device set and phrase recovery key at one sequence number.
+///
+/// Signed by a member of the previous roster and MAC'd under the collection key,
+/// so a client never has to take the server's word for which devices exist. See
+/// `sealbook_crypto::roster`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RosterBody {
+    pub roster_seq: u64,
+    pub key_epoch: u64,
+    pub devices: Vec<DevicePublicKeys>,
+    #[serde(with = "b64")]
+    pub phrase_mldsa_pk: Vec<u8>,
+    #[serde(with = "b64")]
+    pub phrase_ed25519_pk: Vec<u8>,
+    pub signer: RosterSignerBody,
+    pub signature: DualSignatureBody,
+    #[serde(with = "b64")]
+    pub mac: Vec<u8>,
+}
+
+impl RosterBody {
+    pub fn to_roster(&self) -> sealbook_crypto::Roster {
+        sealbook_crypto::Roster {
+            roster_seq: self.roster_seq,
+            key_epoch: self.key_epoch,
+            devices: self
+                .devices
+                .iter()
+                .map(|device| sealbook_crypto::RosterDevice {
+                    device_id: device.device_id,
+                    mldsa_pk: device.mldsa_pk.clone(),
+                    ed25519_pk: device.ed25519_pk.clone(),
+                    xwing_hpke_pk: device.xwing_hpke_pk.clone(),
+                })
+                .collect(),
+            phrase_mldsa_pk: self.phrase_mldsa_pk.clone(),
+            phrase_ed25519_pk: self.phrase_ed25519_pk.clone(),
+            signer: match self.signer {
+                RosterSignerBody::Device { device_id } => {
+                    sealbook_crypto::RosterSigner::Device(device_id)
+                }
+                RosterSignerBody::Phrase => sealbook_crypto::RosterSigner::Phrase,
+            },
+            signature: sealbook_crypto::DualSignature {
+                mldsa: self.signature.mldsa.clone(),
+                ed25519: self.signature.ed25519.clone(),
+            },
+            mac: self.mac.clone(),
+        }
+    }
+
+    /// Signs and MACs a roster over `devices`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn seal(
+        collection_id: Uuid,
+        roster_seq: u64,
+        key_epoch: u64,
+        devices: Vec<DevicePublicKeys>,
+        phrase_mldsa_pk: Vec<u8>,
+        phrase_ed25519_pk: Vec<u8>,
+        signer: RosterSignerBody,
+        secrets: &sealbook_crypto::DeviceSigningSecrets,
+        key: &sealbook_crypto::CollectionKey,
+    ) -> Result<Self, sealbook_crypto::CryptoError> {
+        let mut body = Self {
+            roster_seq,
+            key_epoch,
+            devices,
+            phrase_mldsa_pk,
+            phrase_ed25519_pk,
+            signer,
+            signature: DualSignatureBody {
+                mldsa: Vec::new(),
+                ed25519: Vec::new(),
+            },
+            mac: Vec::new(),
+        };
+        let transcript = body.to_roster().transcript(collection_id);
+        let signature = sealbook_crypto::sign(secrets, &transcript)?;
+        body.signature = DualSignatureBody {
+            mldsa: signature.mldsa,
+            ed25519: signature.ed25519,
+        };
+        body.mac = sealbook_crypto::roster_mac(key, &transcript)?.to_vec();
+        Ok(body)
+    }
+
+    /// Verifies a served roster history and returns the newest, which must list
+    /// `self_device`. See `sealbook_crypto::verify_roster_chain` for the rules.
+    pub fn verify_chain(
+        collection_id: Uuid,
+        pin: Option<sealbook_crypto::RosterPin>,
+        chain: Vec<RosterBody>,
+        key: Option<(&sealbook_crypto::CollectionKey, u64)>,
+        self_device: Uuid,
+    ) -> Result<RosterBody, sealbook_crypto::CryptoError> {
+        let rosters: Vec<sealbook_crypto::Roster> =
+            chain.iter().map(RosterBody::to_roster).collect();
+        sealbook_crypto::verify_roster_chain(collection_id, pin, &rosters, key)?;
+        let latest = chain
+            .into_iter()
+            .last()
+            .expect("verified chain is non-empty");
+        if !latest
+            .devices
+            .iter()
+            .any(|device| device.device_id == self_device)
+        {
+            return Err(sealbook_crypto::CryptoError::Roster(
+                "this device is not in the account's roster".into(),
+            ));
+        }
+        Ok(latest)
+    }
+
+    /// The pin a client keeps once it has accepted this roster.
+    pub fn pin(&self, collection_id: Uuid) -> sealbook_crypto::RosterPin {
+        sealbook_crypto::RosterPin {
+            roster_seq: self.roster_seq,
+            transcript: self.to_roster().transcript(collection_id),
+        }
+    }
+
+    pub fn from_roster(roster: sealbook_crypto::Roster) -> Self {
+        Self {
+            roster_seq: roster.roster_seq,
+            key_epoch: roster.key_epoch,
+            devices: roster
+                .devices
+                .into_iter()
+                .map(|device| DevicePublicKeys {
+                    device_id: device.device_id,
+                    mldsa_pk: device.mldsa_pk,
+                    ed25519_pk: device.ed25519_pk,
+                    xwing_hpke_pk: device.xwing_hpke_pk,
+                })
+                .collect(),
+            phrase_mldsa_pk: roster.phrase_mldsa_pk,
+            phrase_ed25519_pk: roster.phrase_ed25519_pk,
+            signer: match roster.signer {
+                sealbook_crypto::RosterSigner::Device(device_id) => {
+                    RosterSignerBody::Device { device_id }
+                }
+                sealbook_crypto::RosterSigner::Phrase => RosterSignerBody::Phrase,
+            },
+            signature: DualSignatureBody {
+                mldsa: roster.signature.mldsa,
+                ed25519: roster.signature.ed25519,
+            },
+            mac: roster.mac,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RosterQuery {
+    /// Return every roster from this sequence on, inclusive. Omitted, only the
+    /// newest is returned.
+    pub from: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RosterResponse {
+    /// Oldest first.
+    pub rosters: Vec<RosterBody>,
+}
+
 /// Hybrid recovery-phrase material.
 ///
 /// `lookup_id` is an opaque handle derived from the phrase; it is what a client
@@ -123,6 +297,8 @@ pub struct RegisterFinishRequest {
     /// from the moment it exists and a client never has to accept an unsigned
     /// "your vault is empty" from the server.
     pub manifest: ManifestBody,
+    /// Genesis roster: this device alone, signed by itself.
+    pub roster: RosterBody,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -380,6 +556,9 @@ pub struct RotateRequest {
     pub objects: Vec<RotatedObject>,
     pub manifest: ManifestBody,
     pub rotation_signature: DualSignatureBody,
+    /// The remaining devices and the new phrase key, at the new epoch, signed by
+    /// the rotating device.
+    pub roster: RosterBody,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -423,6 +602,8 @@ pub struct PairApproveRequest {
     pub wrap: KeyWrapBody,
     pub grant: DualSignatureBody,
     pub confirmation: String,
+    /// The current roster plus the new device, signed by the approver.
+    pub roster: RosterBody,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -438,6 +619,11 @@ pub struct RecoverStartResponse {
     pub recovery_id: Uuid,
     #[serde(with = "b64")]
     pub challenge: Vec<u8>,
+    /// The current roster and the collection it belongs to, present only when the
+    /// lookup id matched. A recovering device checks it with the collection key
+    /// the phrase wrap opens.
+    pub roster: Option<RosterBody>,
+    pub collection_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -450,6 +636,8 @@ pub struct RecoverFinishRequest {
     pub device: DevicePublicKeys,
     pub enrollment_signature: DualSignatureBody,
     pub wrap: KeyWrapBody,
+    /// The current roster plus the recovering device, signed by the phrase key.
+    pub roster: RosterBody,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

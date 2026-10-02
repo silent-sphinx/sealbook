@@ -9,6 +9,7 @@ argon2.workspace = true
 chacha20poly1305.workspace = true
 ed25519-dalek.workspace = true
 hkdf.workspace = true
+hmac.workspace = true
 hpke.workspace = true
 ml-dsa.workspace = true
 opaque-ke.workspace = true

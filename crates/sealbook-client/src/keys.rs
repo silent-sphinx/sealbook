@@ -13,17 +13,16 @@ use sealbook_crypto::{
 };
 use sealbook_protocol::{
     CollectionKeysResponse, DevicePublicKeys, DualSignatureBody, KeyWrapBody, ManifestEntry,
-    PhraseRecoveryBody, RotateRequest, RotatedObject,
+    PhraseRecoveryBody, RosterBody, RosterSignerBody, RotateRequest, RotatedObject,
 };
 
 use crate::{ClientError, SealbookClient};
 
 impl SealbookClient {
+    /// The account's devices, from the verified roster rather than the server's
+    /// unsigned device list.
     pub async fn list_devices(&self) -> Result<Vec<DevicePublicKeys>, ClientError> {
-        let state = self.state.as_ref().ok_or(ClientError::NoState)?;
-        let token = state.session_token.as_deref().ok_or(ClientError::NoState)?;
-        self.get_json(&format!("{}/v1/account/devices", state.server), Some(token))
-            .await
+        Ok(self.verified_roster().await?.devices)
     }
 
     /// Revokes a device and rotates the collection key.
@@ -93,8 +92,11 @@ impl SealbookClient {
         // Read everything under the current key before replacing it.
         let plaintexts = self.list_stored_objects().await?;
         let (manifest_seq, epoch, latest_revision, _) = self.manifest_state().await?;
-        let devices = self.list_devices().await?;
-        let remaining: Vec<DevicePublicKeys> = devices
+        // Wraps go only to devices the verified roster lists. Taken from the
+        // server's device list, a device the server added would be handed the key.
+        let roster = self.verified_roster().await?;
+        let remaining: Vec<DevicePublicKeys> = roster
+            .devices
             .into_iter()
             .filter(|device| Some(device.device_id) != revoke_device_id)
             .collect();
@@ -205,6 +207,19 @@ impl SealbookClient {
             })
             .collect();
         let phrase_recovery = phrase_recovery_body(&phrase_entropy)?;
+        let new_roster = RosterBody::seal(
+            collection_id,
+            roster.roster_seq + 1,
+            key_epoch,
+            remaining.clone(),
+            phrase_recovery.mldsa_pk.clone(),
+            phrase_recovery.ed25519_pk.clone(),
+            RosterSignerBody::Device {
+                device_id: self_device_id,
+            },
+            &secrets,
+            &new_ck,
+        )?;
         let transcript = key_rotation_transcript(
             collection_id,
             revoke_device_id,
@@ -237,6 +252,7 @@ impl SealbookClient {
                         mldsa: signature.mldsa,
                         ed25519: signature.ed25519,
                     },
+                    roster: new_roster.clone(),
                 },
                 Some(&token),
             )
@@ -248,6 +264,7 @@ impl SealbookClient {
             state.kdf_salt = salt.to_vec();
             state.manifest_seq = manifest_seq + 1;
         }
+        self.pin_roster(&new_roster)?;
         Ok(phrase)
     }
 

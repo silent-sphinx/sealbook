@@ -20,6 +20,7 @@ use sealbook_protocol::{
     PairApproveRequest, PairJoinRequest, PairJoinResponse, PairStatusResponse,
 };
 
+use crate::roster;
 use crate::session::require_session;
 use crate::*;
 
@@ -355,6 +356,17 @@ pub(crate) async fn pair_approve(
         &collection_id,
         pair.device,
         &body.wrap,
+    )
+    .await?;
+    roster::verify_and_store(
+        &mut tx,
+        roster::Expected {
+            collection_id: &collection_id,
+            account_id: &session.account_id,
+            signer: roster::Signer::Device(&session.device_id),
+            genesis: false,
+        },
+        &body.roster,
     )
     .await?;
     tx.commit()

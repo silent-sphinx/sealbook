@@ -2254,6 +2254,7 @@ dependencies = [
  "reqwest",
  "sealbook-client",
  "sealbook-crypto",
+ "sealbook-protocol",
  "serde",
  "serde_json",
  "thiserror",
@@ -2309,6 +2310,7 @@ dependencies = [
  "ed25519-dalek",
  "getrandom 0.2.17",
  "hkdf 0.12.4",
+ "hmac 0.12.1",
  "hpke",
  "ml-dsa",
  "opaque-ke",
@@ -2325,6 +2327,7 @@ name = "sealbook-protocol"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "sealbook-crypto",
  "serde",
  "serde_json",
  "uuid",
@@ -2371,6 +2374,7 @@ dependencies = [
  "getrandom 0.4.3",
  "js-sys",
  "sealbook-crypto",
+ "sealbook-protocol",
  "serde",
  "serde_json",
  "uuid",

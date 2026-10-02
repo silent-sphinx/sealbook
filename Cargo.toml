@@ -26,6 +26,7 @@ ed25519-dalek = { version = "2", features = ["rand_core", "zeroize"] }
 hex = "0.4"
 keyring = "3"
 hkdf = "0.12"
+hmac = "0.12"
 hpke = { version = "0.14", default-features = false, features = ["x25519", "mlkem", "hkdfsha2", "getrandom", "chacha", "alloc"] }
 ml-dsa = { version = "0.1", features = ["getrandom"] }
 opaque-ke = { version = "4", features = ["argon2", "ristretto255"] }

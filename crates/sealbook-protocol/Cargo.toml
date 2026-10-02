@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 base64.workspace = true
+sealbook-crypto = { path = "../sealbook-crypto" }
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true

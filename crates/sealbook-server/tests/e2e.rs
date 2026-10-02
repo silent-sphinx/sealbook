@@ -22,6 +22,75 @@ use sealbook_protocol::{
 use sqlx::Row;
 use uuid::Uuid;
 
+/// Signs and MACs the roster a hand-built request has to carry.
+#[allow(clippy::too_many_arguments)]
+fn hand_roster(
+    collection_id: Uuid,
+    roster_seq: u64,
+    key_epoch: u64,
+    devices: Vec<sealbook_protocol::DevicePublicKeys>,
+    phrase_mldsa_pk: Vec<u8>,
+    phrase_ed25519_pk: Vec<u8>,
+    signer: sealbook_crypto::RosterSigner,
+    secrets: &DeviceSigningSecrets,
+    key: &CollectionKey,
+) -> sealbook_protocol::RosterBody {
+    let mut roster = sealbook_crypto::Roster {
+        roster_seq,
+        key_epoch,
+        devices: devices
+            .into_iter()
+            .map(|device| sealbook_crypto::RosterDevice {
+                device_id: device.device_id,
+                mldsa_pk: device.mldsa_pk,
+                ed25519_pk: device.ed25519_pk,
+                xwing_hpke_pk: device.xwing_hpke_pk,
+            })
+            .collect(),
+        phrase_mldsa_pk,
+        phrase_ed25519_pk,
+        signer,
+        signature: sealbook_crypto::DualSignature {
+            mldsa: Vec::new(),
+            ed25519: Vec::new(),
+        },
+        mac: Vec::new(),
+    };
+    let transcript = roster.transcript(collection_id);
+    roster.signature = sign(secrets, &transcript).unwrap();
+    roster.mac = sealbook_crypto::roster_mac(key, &transcript)
+        .unwrap()
+        .to_vec();
+    sealbook_protocol::RosterBody::from_roster(roster)
+}
+
+/// The roster a phrase-signed recovery of `device` onto the account would carry.
+fn recovery_roster(
+    start: &RecoverStartResponse,
+    entropy: &[u8; 32],
+    device: &sealbook_protocol::DevicePublicKeys,
+    key: &CollectionKey,
+) -> sealbook_protocol::RosterBody {
+    let current = start
+        .roster
+        .clone()
+        .expect("a matched recovery serves the roster");
+    let mut devices = current.devices.clone();
+    devices.push(device.clone());
+    let (phrase_secrets, phrase_public) = sealbook_crypto::phrase_recovery_keys(entropy).unwrap();
+    hand_roster(
+        start.collection_id.expect("and the collection"),
+        current.roster_seq + 1,
+        current.key_epoch,
+        devices,
+        phrase_public.mldsa_pk,
+        phrase_public.ed25519_pk,
+        sealbook_crypto::RosterSigner::Phrase,
+        &phrase_secrets,
+        key,
+    )
+}
+
 async fn spawn_http(db_path: &str) -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -210,6 +279,18 @@ async fn recovery_challenge_cannot_be_replayed() {
         &sign_pk.ed25519_pk,
         &hpke_pk.0,
     );
+    let device = sealbook_protocol::DevicePublicKeys {
+        device_id,
+        mldsa_pk: sign_pk.mldsa_pk.clone(),
+        ed25519_pk: sign_pk.ed25519_pk.clone(),
+        xwing_hpke_pk: hpke_pk.0.clone(),
+    };
+    let roster = recovery_roster(
+        &response,
+        &entropy,
+        &device,
+        owner.collection_key().unwrap(),
+    );
     let finish = RecoverFinishRequest {
         username: "replayalice".into(),
         recovery_id: response.recovery_id,
@@ -238,6 +319,7 @@ async fn recovery_challenge_cannot_be_replayed() {
             wrapped_ck: wrap.ciphertext,
             ciphersuite: XWING_CIPHERSUITE.into(),
         },
+        roster,
     };
     let http = reqwest::Client::new();
     let first = http
@@ -983,6 +1065,17 @@ async fn recovery_rejects_a_proof_with_a_foreign_mldsa_signature() {
         &sign_pk.ed25519_pk,
         &hpke_pk.0,
     );
+    let roster = recovery_roster(
+        &start,
+        &entropy,
+        &sealbook_protocol::DevicePublicKeys {
+            device_id,
+            mldsa_pk: sign_pk.mldsa_pk.clone(),
+            ed25519_pk: sign_pk.ed25519_pk.clone(),
+            xwing_hpke_pk: hpke_pk.0.clone(),
+        },
+        owner.collection_key().unwrap(),
+    );
     let genuine = sign_phrase_recovery(&entropy, &transcript).unwrap();
     // Swap in an ML-DSA signature derived from a different phrase.
     let foreign = sign_phrase_recovery(&[9u8; 32], &transcript).unwrap();
@@ -1014,6 +1107,7 @@ async fn recovery_rejects_a_proof_with_a_foreign_mldsa_signature() {
                 wrapped_ck: wrap.ciphertext,
                 ciphersuite: XWING_CIPHERSUITE.into(),
             },
+            roster,
         })
         .send()
         .await
@@ -2340,6 +2434,20 @@ async fn a_rotation_that_tombstones_a_live_object_is_refused() {
             mldsa: Vec::new(),
             ed25519: Vec::new(),
         },
+        roster: hand_roster(
+            collection_id,
+            2,
+            key_epoch,
+            vec![device.clone()],
+            phrase_public.mldsa_pk.clone(),
+            phrase_public.ed25519_pk.clone(),
+            sealbook_crypto::RosterSigner::Device(device_id),
+            &DeviceSigningSecrets {
+                mldsa_seed: owner.state.as_ref().unwrap().mldsa_seed.clone(),
+                ed25519_sk: owner.state.as_ref().unwrap().ed25519_sk.clone(),
+            },
+            &new_ck,
+        ),
     };
 
     let response = http
@@ -2526,6 +2634,17 @@ async fn a_rotation_whose_recovery_material_was_modified_after_signing_is_refuse
         ),
     )
     .unwrap();
+    let roster = hand_roster(
+        collection_id,
+        2,
+        key_epoch,
+        vec![device.clone()],
+        phrase_recovery.mldsa_pk.clone(),
+        phrase_recovery.ed25519_pk.clone(),
+        sealbook_crypto::RosterSigner::Device(device_id),
+        &secrets,
+        &new_ck,
+    );
     let valid = RotateRequest {
         key_epoch,
         revoke_device_id: None,
@@ -2538,6 +2657,7 @@ async fn a_rotation_whose_recovery_material_was_modified_after_signing_is_refuse
             mldsa: signature.mldsa,
             ed25519: signature.ed25519,
         },
+        roster,
     };
     let url = format!("{base}/v1/collections/{collection_id}/rotate");
 
@@ -2761,6 +2881,53 @@ async fn an_account_cannot_enrol_devices_without_limit() {
         .await
         .unwrap();
     }
+    // Devices written straight into the table have to be in the signed roster
+    // too, or the next pairing's roster could not match the server's.
+    let enrolled: Vec<sealbook_protocol::DevicePublicKeys> = sqlx::query(
+        "SELECT id, mldsa_pk, ed25519_pk, xwing_hpke_pk FROM devices WHERE account_id = ?",
+    )
+    .bind(&account_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|row| sealbook_protocol::DevicePublicKeys {
+        device_id: Uuid::parse_str(&row.get::<String, _>("id")).unwrap(),
+        mldsa_pk: row.get("mldsa_pk"),
+        ed25519_pk: row.get("ed25519_pk"),
+        xwing_hpke_pk: row.get("xwing_hpke_pk"),
+    })
+    .collect();
+    let (collection_id, phrase_mldsa_pk, phrase_ed25519_pk): (String, Vec<u8>, Vec<u8>) =
+        sqlx::query_as(
+            "SELECT c.id, a.phrase_mldsa_pk, a.phrase_ed25519_pk
+             FROM accounts a JOIN collections c ON c.account_id = a.id WHERE a.id = ?",
+        )
+        .bind(&account_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let owner_state = owner.state.as_ref().unwrap();
+    let filled = hand_roster(
+        Uuid::parse_str(&collection_id).unwrap(),
+        2,
+        1,
+        enrolled,
+        phrase_mldsa_pk,
+        phrase_ed25519_pk,
+        sealbook_crypto::RosterSigner::Device(owner_device),
+        &DeviceSigningSecrets {
+            mldsa_seed: owner_state.mldsa_seed.clone(),
+            ed25519_sk: owner_state.ed25519_sk.clone(),
+        },
+        owner.collection_key().unwrap(),
+    );
+    sqlx::query("INSERT INTO device_rosters (collection_id, roster_seq, body) VALUES (?, 2, ?)")
+        .bind(&collection_id)
+        .bind(serde_json::to_string(&filled).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
     pool.close().await;
 
     // The sixteenth is accepted; it is the last slot.
@@ -3063,4 +3230,261 @@ async fn deleting_an_account_leaves_nothing_in_any_table() {
 
     pool.close().await;
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Writes a device the server controls straight into the account, as a malicious
+/// or compromised server would. Returns its id.
+async fn inject_device(db: &std::path::Path, username: &str) -> Uuid {
+    let (_, hpke_pk) = generate_device_hpke().unwrap();
+    let (_, sign_pk) = generate_device_signing().unwrap();
+    let device_id = Uuid::new_v4();
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO devices (id, account_id, mldsa_pk, ed25519_pk, xwing_hpke_pk, created_at)
+         SELECT ?, id, ?, ?, ?, 0 FROM accounts WHERE username = ?",
+    )
+    .bind(device_id.to_string())
+    .bind(&sign_pk.mldsa_pk)
+    .bind(&sign_pk.ed25519_pk)
+    .bind(&hpke_pk.0)
+    .bind(username)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+    device_id
+}
+
+/// The finding this roster exists for: a device the server adds on its own is
+/// never handed the collection key, and its manifests are not believed.
+#[tokio::test]
+async fn a_device_the_server_injects_never_receives_the_collection_key() {
+    let dir = std::env::temp_dir().join(format!("sealbook-inject-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let password = "correct horse battery";
+    let mut owner = SealbookClient::plaintext_http();
+    owner
+        .register(&base, "injectalice", password)
+        .await
+        .unwrap();
+    owner
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"Ada Lovelace"}}"#,
+        )
+        .await
+        .unwrap();
+
+    let injected = inject_device(&db, "injectalice").await;
+    let unsigned: Vec<sealbook_protocol::DevicePublicKeys> = reqwest::Client::new()
+        .get(format!("{base}/v1/account/devices"))
+        .bearer_auth(owner.state.as_ref().unwrap().session_token.clone().unwrap())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        unsigned.iter().any(|device| device.device_id == injected),
+        "the server's own list does show the injected device"
+    );
+    let verified = owner.list_devices().await.unwrap();
+    assert!(
+        verified.iter().all(|device| device.device_id != injected),
+        "the verified roster must not"
+    );
+
+    // A rotation wraps only for the roster, so the server, which expects a wrap
+    // for its device too, refuses it. Refusing is the safe failure: no key left.
+    assert!(owner.change_phrase(password).await.is_err());
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    let wraps: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM key_wraps WHERE recipient_kind = 'device' AND recipient_id = ?",
+    )
+    .bind(injected.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        wraps, 0,
+        "the injected device was wrapped the collection key"
+    );
+    pool.close().await;
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// With a device of its own it can sign for, a server could otherwise withhold
+/// the whole vault behind a manifest that matches what it serves.
+#[tokio::test]
+async fn a_manifest_signed_by_an_injected_device_is_rejected() {
+    let dir = std::env::temp_dir().join(format!("sealbook-inject-mf-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut owner = SealbookClient::plaintext_http();
+    owner
+        .register(&base, "withholdalice", "correct horse battery")
+        .await
+        .unwrap();
+    owner
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"Ada Lovelace"}}"#,
+        )
+        .await
+        .unwrap();
+    assert_eq!(owner.list_contacts().await.unwrap().len(), 1);
+
+    let (secrets, public) = generate_device_signing().unwrap();
+    let (_, hpke_pk) = generate_device_hpke().unwrap();
+    let injected = Uuid::new_v4();
+    let collection_id = owner.state.as_ref().unwrap().collection_id;
+    let empty = sealbook_crypto::manifest_digest(&[]);
+    let signature = sign(
+        &secrets,
+        &sealbook_crypto::manifest_transcript(collection_id, 99, 1, 2, 0, &empty),
+    )
+    .unwrap();
+
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO devices (id, account_id, mldsa_pk, ed25519_pk, xwing_hpke_pk, created_at)
+         SELECT ?, id, ?, ?, ?, 0 FROM accounts WHERE username = 'withholdalice'",
+    )
+    .bind(injected.to_string())
+    .bind(&public.mldsa_pk)
+    .bind(&public.ed25519_pk)
+    .bind(&hpke_pk.0)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM objects WHERE collection_id = ?")
+        .bind(collection_id.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE manifests SET manifest_seq = 99, latest_revision = 2, object_count = 0,
+             digest = ?, device_id = ?, mldsa_sig = ?, ed25519_sig = ?
+         WHERE collection_id = ?",
+    )
+    .bind(empty.to_vec())
+    .bind(injected.to_string())
+    .bind(&signature.mldsa)
+    .bind(&signature.ed25519)
+    .bind(collection_id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let error = owner
+        .list_contacts()
+        .await
+        .expect_err("an empty vault signed by the server's device must not be believed")
+        .to_string();
+    assert!(
+        error.contains("does not have"),
+        "expected the signer to be unknown, got: {error}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Forging the roster history itself fails both ways: a pinned device sees a step
+/// no member signed, and a device with no pin sees a MAC it cannot verify.
+#[tokio::test]
+async fn a_forged_roster_is_rejected_with_or_without_a_pin() {
+    let dir = std::env::temp_dir().join(format!("sealbook-roster-forge-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let password = "correct horse battery";
+    let mut owner = SealbookClient::plaintext_http();
+    owner.register(&base, "forgealice", password).await.unwrap();
+    let state = owner.state.clone().unwrap();
+
+    let (attacker_secrets, attacker_public) = generate_device_signing().unwrap();
+    let (_, attacker_hpke) = generate_device_hpke().unwrap();
+    let attacker = sealbook_protocol::DevicePublicKeys {
+        device_id: Uuid::new_v4(),
+        mldsa_pk: attacker_public.mldsa_pk.clone(),
+        ed25519_pk: attacker_public.ed25519_pk.clone(),
+        xwing_hpke_pk: attacker_hpke.0.clone(),
+    };
+    let mut devices = owner.list_devices().await.unwrap();
+    devices.push(attacker.clone());
+
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    let (phrase_mldsa_pk, phrase_ed25519_pk): (Vec<u8>, Vec<u8>) = sqlx::query_as(
+        "SELECT phrase_mldsa_pk, phrase_ed25519_pk FROM accounts WHERE username = 'forgealice'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    // Signed by the server's own device and MAC'd under a key it made up, since
+    // it has neither a member's signing key nor the collection key.
+    let forged = hand_roster(
+        state.collection_id,
+        2,
+        1,
+        devices,
+        phrase_mldsa_pk,
+        phrase_ed25519_pk,
+        sealbook_crypto::RosterSigner::Device(attacker.device_id),
+        &attacker_secrets,
+        &CollectionKey::generate(),
+    );
+    sqlx::query(
+        "INSERT INTO devices (id, account_id, mldsa_pk, ed25519_pk, xwing_hpke_pk, created_at)
+         SELECT ?, id, ?, ?, ?, 0 FROM accounts WHERE username = 'forgealice'",
+    )
+    .bind(attacker.device_id.to_string())
+    .bind(&attacker.mldsa_pk)
+    .bind(&attacker.ed25519_pk)
+    .bind(&attacker.xwing_hpke_pk)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO device_rosters (collection_id, roster_seq, body) VALUES (?, 2, ?)")
+        .bind(state.collection_id.to_string())
+        .bind(serde_json::to_string(&forged).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    assert!(
+        owner.list_devices().await.is_err(),
+        "a pinned device accepted a roster step no member signed"
+    );
+    assert!(owner.change_phrase(password).await.is_err());
+
+    let mut unpinned_state = state.clone();
+    unpinned_state.roster_seq = 0;
+    unpinned_state.roster_transcript.clear();
+    let mut unpinned = SealbookClient::with_state(unpinned_state);
+    let error = unpinned
+        .login(password)
+        .await
+        .expect_err("a device with no pin accepted a roster the server made up")
+        .to_string();
+    assert!(error.contains("roster"), "got: {error}");
+
+    let _ = std::fs::remove_dir_all(&dir);
 }

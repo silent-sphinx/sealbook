@@ -8,18 +8,20 @@ use sealbook_crypto::opaque::{
 use sealbook_crypto::{
     enrollment_transcript, entropy_from_phrase, generate_device_hpke, generate_device_signing,
     generate_kdf_salt, generate_phrase, login_start_transcript, login_transcript, manifest_digest,
-    manifest_transcript, open_login_challenge, phrase_lookup_id, phrase_recovery_transcript, sign,
-    sign_phrase_recovery, unwrap_for_phrase, wrap_collection_key, wrap_for_device, wrap_for_phrase,
-    CollectionKey, DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets, RecoveryWrap,
-    PHRASE_CIPHERSUITE, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
+    manifest_transcript, open_login_challenge, phrase_lookup_id, phrase_recovery_keys,
+    phrase_recovery_transcript, sign, sign_phrase_recovery, unwrap_for_phrase, verify_roster_chain,
+    wrap_collection_key, wrap_for_device, wrap_for_phrase, CollectionKey, DeviceHpkeSecret,
+    DeviceHpkeWrap, DeviceSigningSecrets, RecoveryWrap, PHRASE_CIPHERSUITE, RECOVERY_CIPHERSUITE,
+    XWING_CIPHERSUITE,
 };
 use sealbook_protocol::{
     DevicePublicKeys, DualSignatureBody, KeyWrapBody, LoginChallengeRequest, LoginFinishRequest,
     LoginStartRequest, ManifestBody, RecoverStartRequest, RegisterFinishRequest,
-    RegisterStartRequest,
+    RegisterStartRequest, RosterBody, RosterSignerBody,
 };
 
 use crate::keys::{phrase_recovery_body, unwrap_ck};
+use crate::roster::roster_error;
 use crate::{ClientError, LocalState, SealbookClient};
 
 impl SealbookClient {
@@ -53,6 +55,24 @@ impl SealbookClient {
         let device_wrap = wrap_for_device(&hpke_pk, &ck)?;
         let device_id = Uuid::new_v4();
         let collection_id = Uuid::new_v4();
+        let phrase_recovery = phrase_recovery_body(&phrase_entropy)?;
+        let device = DevicePublicKeys {
+            device_id,
+            mldsa_pk: sign_pk.mldsa_pk.clone(),
+            ed25519_pk: sign_pk.ed25519_pk.clone(),
+            xwing_hpke_pk: hpke_pk.0.clone(),
+        };
+        let genesis = RosterBody::seal(
+            collection_id,
+            1,
+            1,
+            vec![device.clone()],
+            phrase_recovery.mldsa_pk.clone(),
+            phrase_recovery.ed25519_pk.clone(),
+            RosterSignerBody::Device { device_id },
+            &sign_sk,
+            &ck,
+        )?;
 
         // Signed before the account exists, so the collection has a manifest from
         // the moment it does.
@@ -83,12 +103,7 @@ impl SealbookClient {
                     username: username.to_string(),
                     upload,
                     kdf_salt: salt.to_vec(),
-                    device: DevicePublicKeys {
-                        device_id,
-                        mldsa_pk: sign_pk.mldsa_pk.clone(),
-                        ed25519_pk: sign_pk.ed25519_pk.clone(),
-                        xwing_hpke_pk: hpke_pk.0.clone(),
-                    },
+                    device,
                     collection_id,
                     enrollment_signature: {
                         let t = enrollment_transcript(
@@ -126,8 +141,9 @@ impl SealbookClient {
                             ciphersuite: PHRASE_CIPHERSUITE.into(),
                         },
                     ],
-                    phrase_recovery: phrase_recovery_body(&phrase_entropy)?,
+                    phrase_recovery,
                     manifest: initial_manifest,
+                    roster: genesis.clone(),
                 },
                 None,
             )
@@ -146,7 +162,10 @@ impl SealbookClient {
             mldsa_seed: sign_sk.mldsa_seed.clone(),
             ed25519_sk: sign_sk.ed25519_sk.clone(),
             manifest_seq: 1,
+            roster_seq: 0,
+            roster_transcript: Vec::new(),
         });
+        self.pin_roster(&genesis)?;
         self.login(password).await?;
         Ok(phrase)
     }
@@ -261,6 +280,7 @@ impl SealbookClient {
             &finish.key_wraps,
         )?);
         self.key_epoch = finish.key_epoch;
+        self.sync_roster().await?;
         Ok(())
     }
 
@@ -305,6 +325,26 @@ impl SealbookClient {
                 ciphersuite: PHRASE_CIPHERSUITE.to_string(),
             },
         )?;
+        // The server leaves the phrase key out of this roster; it is filled in
+        // from the phrase.
+        let (mut current, collection_id) = match (start.roster, start.collection_id) {
+            (Some(roster), Some(collection_id)) => (roster, collection_id),
+            _ => {
+                return Err(roster_error(
+                    "the server sent no device roster to recover onto",
+                ))
+            }
+        };
+        let (phrase_secrets, phrase_public) = phrase_recovery_keys(&entropy)?;
+        current.phrase_mldsa_pk = phrase_public.mldsa_pk;
+        current.phrase_ed25519_pk = phrase_public.ed25519_pk;
+        verify_roster_chain(
+            collection_id,
+            None,
+            std::slice::from_ref(&current.to_roster()),
+            Some((&ck, current.key_epoch)),
+        )?;
+
         let (hpke_sk, hpke_pk) = generate_device_hpke()?;
         let (sign_sk, sign_pk) = generate_device_signing()?;
         let device_id = Uuid::new_v4();
@@ -316,6 +356,25 @@ impl SealbookClient {
         );
         let sig = sign(&sign_sk, &transcript)?;
         let device_wrap = wrap_for_device(&hpke_pk, &ck)?;
+        let device = DevicePublicKeys {
+            device_id,
+            mldsa_pk: sign_pk.mldsa_pk.clone(),
+            ed25519_pk: sign_pk.ed25519_pk.clone(),
+            xwing_hpke_pk: hpke_pk.0.clone(),
+        };
+        let mut devices = current.devices.clone();
+        devices.push(device.clone());
+        let next_roster = RosterBody::seal(
+            collection_id,
+            current.roster_seq + 1,
+            current.key_epoch,
+            devices,
+            current.phrase_mldsa_pk.clone(),
+            current.phrase_ed25519_pk.clone(),
+            RosterSignerBody::Phrase,
+            &phrase_secrets,
+            &ck,
+        )?;
         let transcript = phrase_recovery_transcript(
             username,
             start.recovery_id,
@@ -339,12 +398,7 @@ impl SealbookClient {
                             ed25519: proof.ed25519,
                         }
                     },
-                    device: DevicePublicKeys {
-                        device_id,
-                        mldsa_pk: sign_pk.mldsa_pk,
-                        ed25519_pk: sign_pk.ed25519_pk,
-                        xwing_hpke_pk: hpke_pk.0,
-                    },
+                    device,
                     enrollment_signature: DualSignatureBody {
                         mldsa: sig.mldsa,
                         ed25519: sig.ed25519,
@@ -356,6 +410,7 @@ impl SealbookClient {
                         wrapped_ck: device_wrap.ciphertext,
                         ciphersuite: XWING_CIPHERSUITE.into(),
                     },
+                    roster: next_roster.clone(),
                 },
                 None,
             )
@@ -373,7 +428,10 @@ impl SealbookClient {
             mldsa_seed: sign_sk.mldsa_seed.clone(),
             ed25519_sk: sign_sk.ed25519_sk.clone(),
             manifest_seq: 0,
+            roster_seq: 0,
+            roster_transcript: Vec::new(),
         });
+        self.pin_roster(&next_roster)?;
         self.login(password).await?;
         // The phrase that was just used stays valid otherwise, and so does anyone
         // else's copy of it, because enrolling a device does not change the key it

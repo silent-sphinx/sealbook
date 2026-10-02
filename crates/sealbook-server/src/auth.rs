@@ -27,6 +27,7 @@ use sealbook_protocol::{
 };
 
 use crate::manifest;
+use crate::roster;
 use crate::validate::{validate_phrase_recovery, validate_wraps};
 use crate::*;
 
@@ -205,6 +206,18 @@ pub(crate) async fn register_finish(
             latest_revision: 0,
         },
         &body.manifest,
+    )
+    .await?;
+
+    roster::verify_and_store(
+        &mut tx,
+        roster::Expected {
+            collection_id: &collection_id.to_string(),
+            account_id: &account_id.to_string(),
+            signer: roster::Signer::Device(&body.device.device_id.to_string()),
+            genesis: true,
+        },
+        &body.roster,
     )
     .await?;
 

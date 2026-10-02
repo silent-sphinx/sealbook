@@ -282,6 +282,20 @@ async fn migrate_to_v1(db: &Pool<Sqlite>) -> anyhow::Result<()> {
         .execute(&mut *db)
         .await?;
 
+        // The signed device roster history. Only ever appended to, and read back
+        // by clients, which verify it; the server cannot write one of its own.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS device_rosters (
+                collection_id TEXT NOT NULL,
+                roster_seq INTEGER NOT NULL,
+                body TEXT NOT NULL,
+                PRIMARY KEY (collection_id, roster_seq),
+                FOREIGN KEY (collection_id) REFERENCES collections (id) ON DELETE CASCADE
+            )",
+        )
+        .execute(&mut *db)
+        .await?;
+
         // The retention sweep scans created_at, which nothing else indexes.
         // The change feed pages on (account_id, revision), which is already
         // `object_revisions`' primary key, so the implicit index serves it and an

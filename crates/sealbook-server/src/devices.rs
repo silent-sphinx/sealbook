@@ -16,6 +16,7 @@ use sealbook_crypto::{
 use sealbook_protocol::{DevicePublicKeys, ErrorBody, RotateRequest, RotateResponse};
 
 use crate::manifest;
+use crate::roster;
 use crate::session::{require_recent_session, require_session};
 use crate::validate::{validate_phrase_recovery, validate_rotated_object, validate_rotation_wraps};
 use crate::*;
@@ -460,6 +461,18 @@ pub(crate) async fn rotate(
             latest_revision: revision.saturating_sub(1),
         },
         &body.manifest,
+    )
+    .await?;
+
+    roster::verify_and_store(
+        &mut tx,
+        roster::Expected {
+            collection_id: &collection_id_text,
+            account_id: &session.account_id,
+            signer: roster::Signer::Device(&session.device_id),
+            genesis: false,
+        },
+        &body.roster,
     )
     .await?;
 

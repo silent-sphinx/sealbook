@@ -10,7 +10,7 @@ use sealbook_crypto::{
 };
 use sealbook_protocol::{
     DevicePublicKeys, DualSignatureBody, KeyWrapBody, PairApproveRequest, PairJoinRequest,
-    PairJoinResponse, PairStatusResponse,
+    PairJoinResponse, PairStatusResponse, RosterBody, RosterSignerBody,
 };
 
 use crate::{ClientError, LocalState, SealbookClient};
@@ -65,6 +65,8 @@ impl SealbookClient {
             mldsa_seed: sign_sk.mldsa_seed.clone(),
             ed25519_sk: sign_sk.ed25519_sk.clone(),
             manifest_seq: 0,
+            roster_seq: 0,
+            roster_transcript: Vec::new(),
         });
         let expected_confirm = pair_confirmation(
             start.pair_id,
@@ -141,6 +143,23 @@ impl SealbookClient {
         if normalize_confirmation(confirmation) != confirm {
             return Err(ClientError::Server("pair confirmation mismatch".into()));
         }
+        let current = self.verified_roster().await?;
+        if current.key_epoch != self.key_epoch {
+            return Err(ClientError::Server(
+                "the collection key has been rotated since this device fetched it; refresh it \
+                 and approve again"
+                    .into(),
+            ));
+        }
+        if current
+            .devices
+            .iter()
+            .any(|d| d.device_id == device.device_id)
+        {
+            return Err(ClientError::Server(
+                "that device is already enrolled".into(),
+            ));
+        }
         let state = self.state.as_ref().ok_or(ClientError::NoState)?;
         let ck = self
             .collection_key
@@ -162,6 +181,21 @@ impl SealbookClient {
             ed25519_sk: state.ed25519_sk.clone(),
         };
         let sig = sign(&secrets, &grant_t)?;
+        let mut devices = current.devices.clone();
+        devices.push(device.clone());
+        let roster = RosterBody::seal(
+            state.collection_id,
+            current.roster_seq + 1,
+            current.key_epoch,
+            devices,
+            current.phrase_mldsa_pk.clone(),
+            current.phrase_ed25519_pk.clone(),
+            RosterSignerBody::Device {
+                device_id: state.device_id,
+            },
+            &secrets,
+            ck,
+        )?;
         let _: PairStatusResponse = self
             .post_json(
                 &format!(
@@ -182,6 +216,7 @@ impl SealbookClient {
                         ed25519: sig.ed25519,
                     },
                     confirmation: confirm.clone(),
+                    roster,
                 },
                 Some(token),
             )

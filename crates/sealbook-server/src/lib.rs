@@ -35,6 +35,7 @@ mod http;
 mod objects;
 mod pairing;
 mod recovery;
+mod roster;
 mod session;
 mod validate;
 
@@ -644,6 +645,10 @@ fn router(state: Shared) -> Router<Shared> {
         .route("/v1/collections/{id}/changes", get(changes))
         .route("/v1/collections/{id}/keys", get(collection_keys))
         .route("/v1/collections/{id}/manifest", get(collection_manifest))
+        .route(
+            "/v1/collections/{id}/roster",
+            get(roster::collection_roster),
+        )
         .route("/v1/pair/join", post(pair_join))
         .route("/v1/pair/{id}", get(pair_status))
         .route("/v1/pair/{id}/approve", post(pair_approve))

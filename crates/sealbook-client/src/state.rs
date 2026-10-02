@@ -24,6 +24,15 @@ pub struct LocalState {
     /// freeze a device at a real past state, just not rewind it.
     #[serde(default)]
     pub manifest_seq: u64,
+    /// The last device roster this device accepted, by sequence and transcript.
+    ///
+    /// Every later roster has to be reached from this one along device-signed
+    /// steps, so a server cannot slip a device of its own into the set. 0 means
+    /// nothing is pinned yet.
+    #[serde(default)]
+    pub roster_seq: u64,
+    #[serde(default)]
+    pub roster_transcript: Vec<u8>,
 }
 
 impl Drop for LocalState {

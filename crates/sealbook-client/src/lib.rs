@@ -15,6 +15,7 @@ mod keys;
 mod manifest;
 mod objects;
 mod pairing;
+mod roster;
 mod state;
 mod tls;
 
