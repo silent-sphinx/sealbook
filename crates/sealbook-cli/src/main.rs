@@ -345,6 +345,7 @@ async fn main() -> Result<()> {
                 let id = Uuid::new_v4();
                 let revision = client.put_contact(id, &contact).await.context("put")?;
                 println!("stored encrypted contact {id} at revision {revision}");
+                save_state(&cli.state, client.state.as_ref().unwrap())?;
             }
             ContactsCommand::Update {
                 id,
@@ -368,6 +369,7 @@ async fn main() -> Result<()> {
                 let contact = jscontact(&name, email.as_deref(), book_id);
                 let revision = client.put_contact(id, &contact).await.context("update")?;
                 println!("updated encrypted contact {id} at revision {revision}");
+                save_state(&cli.state, client.state.as_ref().unwrap())?;
             }
             ContactsCommand::Delete { id } => {
                 let state = load_state(&cli.state)?;
@@ -378,6 +380,7 @@ async fn main() -> Result<()> {
                 client.login(&password).await.context("login")?;
                 let revision = client.delete_contact(id).await.context("delete")?;
                 println!("deleted encrypted contact {id} at revision {revision}");
+                save_state(&cli.state, client.state.as_ref().unwrap())?;
             }
             ContactsCommand::List { book } => {
                 let state = load_state(&cli.state)?;
@@ -407,6 +410,7 @@ async fn main() -> Result<()> {
                     let book_name = book_name_for(&books, contact_book_id(&json));
                     println!("{id} [{book_name}] {json}");
                 }
+                save_state(&cli.state, client.state.as_ref().unwrap())?;
             }
         },
         Command::Book { command } => {
@@ -436,6 +440,7 @@ async fn main() -> Result<()> {
                     println!("created address book {id} {name}");
                 }
             }
+            save_state(&cli.state, client.state.as_ref().unwrap())?;
         }
         Command::Devices { command } => {
             let state = load_state(&cli.state)?;
@@ -471,6 +476,7 @@ async fn main() -> Result<()> {
                     println!("{phrase}");
                 }
             }
+            save_state(&cli.state, client.state.as_ref().unwrap())?;
         }
         Command::Calendar { command } => {
             let state = load_state(&cli.state)?;
@@ -511,6 +517,7 @@ async fn main() -> Result<()> {
                     }
                 }
             }
+            save_state(&cli.state, client.state.as_ref().unwrap())?;
         }
         Command::Notebook { command } => {
             let state = load_state(&cli.state)?;
@@ -545,6 +552,7 @@ async fn main() -> Result<()> {
                     println!("deleted notebook {id} at revision {revision}");
                 }
             }
+            save_state(&cli.state, client.state.as_ref().unwrap())?;
         }
         Command::Notes { command } => {
             let state = load_state(&cli.state)?;
@@ -581,7 +589,7 @@ async fn main() -> Result<()> {
                     // Only a client knows when a note was created: the server keeps
                     // no user timestamps, so an update that does not carry the
                     // original forward loses it.
-                    let existing = find_note(&client, id).await?;
+                    let existing = find_note(&mut client, id).await?;
                     let created = note_created_at(&existing);
                     let note = note_json(
                         &title,
@@ -614,7 +622,7 @@ async fn main() -> Result<()> {
                     }
                 }
                 NotesCommand::Show { id } => {
-                    let note = find_note(&client, id).await?;
+                    let note = find_note(&mut client, id).await?;
                     print!("{}", note_body(&note));
                 }
                 NotesCommand::Delete { id } => {
@@ -622,6 +630,7 @@ async fn main() -> Result<()> {
                     println!("deleted encrypted note {id} at revision {revision}");
                 }
             }
+            save_state(&cli.state, client.state.as_ref().unwrap())?;
         }
     }
     Ok(())
@@ -651,7 +660,7 @@ fn read_note_body(body: Option<String>, file: Option<PathBuf>) -> Result<String>
     Ok(buf)
 }
 
-async fn find_note(client: &SealbookClient, id: Uuid) -> Result<String> {
+async fn find_note(client: &mut SealbookClient, id: Uuid) -> Result<String> {
     client
         .list_notes()
         .await
@@ -767,6 +776,13 @@ fn resolve_book(books: &[(Uuid, String)], spec: Option<&str>) -> Result<Option<U
     }
 }
 
+/// Writes the device's local state back, encrypted.
+///
+/// Every command that signs in has to call this, not just the ones that change
+/// the account. The state carries this device's manifest and roster pins, both of
+/// which advance as soon as a manifest or roster is accepted, and both of which
+/// are what make a server's rollback detectable. A command that skips the write
+/// throws its pins away and leaves the next run trusting an older state again.
 fn save_state(path: &Path, state: &LocalState) -> Result<()> {
     let key = state_key(path)?;
     let cipher = XChaCha20Poly1305::new(Key::from_slice(&key));

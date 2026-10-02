@@ -42,22 +42,33 @@ impl SealbookClient {
         Ok(out)
     }
 
-    /// Checks a served manifest against the entry set it is supposed to describe.
-    ///
-    /// The signature says an enrolled device vouched for this shape of the
-    /// collection; the digest says the shape is the one being served. Both are
-    /// needed: a valid signature over a different state is exactly what a rollback
-    /// looks like.
+    pub(crate) fn accept_manifest_seq(&mut self, seq: u64) -> Result<(), ClientError> {
+        let state = self.state.as_mut().ok_or(ClientError::NoState)?;
+        state.manifest_seq = state.manifest_seq.max(seq);
+        Ok(())
+    }
+
+    /// Checks a served manifest against the entry set it is supposed to describe,
+    /// and pins its sequence number.
     pub(crate) fn verify_manifest(
-        &self,
+        &mut self,
         manifest: &ManifestBody,
         entries: &[ManifestEntry],
         devices: &[DevicePublicKeys],
     ) -> Result<(), ManifestError> {
-        let state = self
-            .state
-            .as_ref()
-            .ok_or_else(|| ManifestError("no local state to verify a manifest against".into()))?;
+        let (collection_id, pinned_seq) = {
+            let state = self.state.as_ref().ok_or_else(|| {
+                ManifestError("no local state to verify a manifest against".into())
+            })?;
+            (state.collection_id, state.manifest_seq)
+        };
+        if manifest.manifest_seq < pinned_seq {
+            return Err(ManifestError(format!(
+                "manifest went backwards: this device has already seen sequence {} but was \
+                 served {}",
+                pinned_seq, manifest.manifest_seq
+            )));
+        }
         if manifest.object_count != entries.len() as u64 {
             return Err(ManifestError(format!(
                 "server sent {} objects but the manifest commits to {}",
@@ -73,8 +84,6 @@ impl SealbookClient {
                     .into(),
             ));
         }
-        // The signing device is normally this one; after a pairing or a rotation it
-        // may be another of the account's devices.
         let signer = devices
             .iter()
             .find(|device| device.device_id == manifest.device_id)
@@ -87,7 +96,7 @@ impl SealbookClient {
                 ed25519_pk: signer.ed25519_pk.clone(),
             },
             &manifest_transcript(
-                state.collection_id,
+                collection_id,
                 manifest.manifest_seq,
                 manifest.key_epoch,
                 manifest.latest_revision,
@@ -100,12 +109,9 @@ impl SealbookClient {
             },
         )
         .map_err(|_| ManifestError("manifest signature does not verify".into()))?;
-        if manifest.manifest_seq < state.manifest_seq {
-            return Err(ManifestError(format!(
-                "manifest went backwards: this device has already seen sequence {} but was \
-                 served {}",
-                state.manifest_seq, manifest.manifest_seq
-            )));
+        // Verified, so this is now the oldest manifest this device will accept.
+        if let Some(state) = self.state.as_mut() {
+            state.manifest_seq = state.manifest_seq.max(manifest.manifest_seq);
         }
         Ok(())
     }
@@ -117,7 +123,7 @@ impl SealbookClient {
     /// once, and only while this device has never seen one, so a server cannot
     /// pretend a vault is unmanifested to hide its contents.
     pub(crate) async fn manifest_state(
-        &self,
+        &mut self,
     ) -> Result<(u64, u64, u64, Vec<ManifestEntry>), ClientError> {
         let (server, collection_id, token) = {
             let state = self.state.as_ref().ok_or(ClientError::NoState)?;

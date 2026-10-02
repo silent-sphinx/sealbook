@@ -47,12 +47,16 @@ struct StoredEnvelope {
 }
 
 impl SealbookClient {
-    pub async fn put_contact(&self, object_id: Uuid, jscontact: &str) -> Result<u64, ClientError> {
+    pub async fn put_contact(
+        &mut self,
+        object_id: Uuid,
+        jscontact: &str,
+    ) -> Result<u64, ClientError> {
         self.put_sealed(object_id, jscontact.as_bytes(), JSCONTACT_CONTENT_TYPE)
             .await
     }
 
-    pub async fn delete_contact(&self, object_id: Uuid) -> Result<u64, ClientError> {
+    pub async fn delete_contact(&mut self, object_id: Uuid) -> Result<u64, ClientError> {
         self.write_object(
             object_id,
             Vec::new(),
@@ -64,7 +68,11 @@ impl SealbookClient {
         .await
     }
 
-    pub async fn put_address_book(&self, object_id: Uuid, name: &str) -> Result<u64, ClientError> {
+    pub async fn put_address_book(
+        &mut self,
+        object_id: Uuid,
+        name: &str,
+    ) -> Result<u64, ClientError> {
         let plaintext = serde_json::json!({
             "@type": "AddressBook",
             "version": "1.0",
@@ -75,7 +83,7 @@ impl SealbookClient {
             .await
     }
 
-    pub async fn ensure_default_address_book(&self) -> Result<Uuid, ClientError> {
+    pub async fn ensure_default_address_book(&mut self) -> Result<Uuid, ClientError> {
         let books = self.list_address_books().await?;
         if books.iter().any(|(id, _)| *id == DEFAULT_ADDRESS_BOOK_ID) {
             return Ok(DEFAULT_ADDRESS_BOOK_ID);
@@ -85,7 +93,7 @@ impl SealbookClient {
         Ok(DEFAULT_ADDRESS_BOOK_ID)
     }
 
-    pub async fn list_address_books(&self) -> Result<Vec<(Uuid, String)>, ClientError> {
+    pub async fn list_address_books(&mut self) -> Result<Vec<(Uuid, String)>, ClientError> {
         let mut out = Vec::new();
         for obj in self.list_objects().await? {
             if obj.content_type != ADDRESS_BOOK_CONTENT_TYPE {
@@ -105,7 +113,7 @@ impl SealbookClient {
         Ok(out)
     }
 
-    pub async fn list_contacts(&self) -> Result<Vec<(Uuid, String)>, ClientError> {
+    pub async fn list_contacts(&mut self) -> Result<Vec<(Uuid, String)>, ClientError> {
         let mut out = Vec::new();
         for obj in self.list_objects().await? {
             if obj.content_type != JSCONTACT_CONTENT_TYPE {
@@ -117,7 +125,7 @@ impl SealbookClient {
     }
 
     pub async fn put_calendar_event(
-        &self,
+        &mut self,
         object_id: Uuid,
         event: &str,
     ) -> Result<u64, ClientError> {
@@ -126,7 +134,7 @@ impl SealbookClient {
     }
 
     pub async fn put_calendar(
-        &self,
+        &mut self,
         object_id: Uuid,
         name: &str,
         color: &str,
@@ -145,7 +153,7 @@ impl SealbookClient {
         .await
     }
 
-    pub async fn list_calendars(&self) -> Result<Vec<(Uuid, String)>, ClientError> {
+    pub async fn list_calendars(&mut self) -> Result<Vec<(Uuid, String)>, ClientError> {
         let mut out = Vec::new();
         for obj in self.list_objects().await? {
             if obj.content_type == CALENDAR_CONTENT_TYPE {
@@ -155,7 +163,7 @@ impl SealbookClient {
         Ok(out)
     }
 
-    pub async fn list_calendar_events(&self) -> Result<Vec<(Uuid, String)>, ClientError> {
+    pub async fn list_calendar_events(&mut self) -> Result<Vec<(Uuid, String)>, ClientError> {
         let mut out = Vec::new();
         for obj in self.list_objects().await? {
             if obj.content_type == CALENDAR_EVENT_CONTENT_TYPE {
@@ -165,7 +173,7 @@ impl SealbookClient {
         Ok(out)
     }
 
-    pub async fn delete_calendar(&self, object_id: Uuid) -> Result<u64, ClientError> {
+    pub async fn delete_calendar(&mut self, object_id: Uuid) -> Result<u64, ClientError> {
         self.write_object(
             object_id,
             Vec::new(),
@@ -177,7 +185,7 @@ impl SealbookClient {
         .await
     }
 
-    pub async fn delete_calendar_event(&self, object_id: Uuid) -> Result<u64, ClientError> {
+    pub async fn delete_calendar_event(&mut self, object_id: Uuid) -> Result<u64, ClientError> {
         self.write_object(
             object_id,
             Vec::new(),
@@ -189,12 +197,12 @@ impl SealbookClient {
         .await
     }
 
-    pub async fn put_note(&self, object_id: Uuid, note: &str) -> Result<u64, ClientError> {
+    pub async fn put_note(&mut self, object_id: Uuid, note: &str) -> Result<u64, ClientError> {
         self.put_sealed(object_id, note.as_bytes(), NOTE_CONTENT_TYPE)
             .await
     }
 
-    pub async fn delete_note(&self, object_id: Uuid) -> Result<u64, ClientError> {
+    pub async fn delete_note(&mut self, object_id: Uuid) -> Result<u64, ClientError> {
         self.write_object(
             object_id,
             Vec::new(),
@@ -206,7 +214,7 @@ impl SealbookClient {
         .await
     }
 
-    pub async fn put_notebook(&self, object_id: Uuid, name: &str) -> Result<u64, ClientError> {
+    pub async fn put_notebook(&mut self, object_id: Uuid, name: &str) -> Result<u64, ClientError> {
         let plaintext = serde_json::json!({
             "@type": "Notebook",
             "version": "1.0",
@@ -217,7 +225,7 @@ impl SealbookClient {
             .await
     }
 
-    pub async fn delete_notebook(&self, object_id: Uuid) -> Result<u64, ClientError> {
+    pub async fn delete_notebook(&mut self, object_id: Uuid) -> Result<u64, ClientError> {
         self.write_object(
             object_id,
             Vec::new(),
@@ -229,7 +237,7 @@ impl SealbookClient {
         .await
     }
 
-    pub async fn ensure_default_notebook(&self) -> Result<Uuid, ClientError> {
+    pub async fn ensure_default_notebook(&mut self) -> Result<Uuid, ClientError> {
         let notebooks = self.list_notebooks().await?;
         if notebooks.iter().any(|(id, _)| *id == DEFAULT_NOTEBOOK_ID) {
             return Ok(DEFAULT_NOTEBOOK_ID);
@@ -239,7 +247,7 @@ impl SealbookClient {
         Ok(DEFAULT_NOTEBOOK_ID)
     }
 
-    pub async fn list_notebooks(&self) -> Result<Vec<(Uuid, String)>, ClientError> {
+    pub async fn list_notebooks(&mut self) -> Result<Vec<(Uuid, String)>, ClientError> {
         let mut out = Vec::new();
         for obj in self.list_objects().await? {
             if obj.content_type != NOTEBOOK_CONTENT_TYPE {
@@ -259,7 +267,7 @@ impl SealbookClient {
         Ok(out)
     }
 
-    pub async fn list_notes(&self) -> Result<Vec<(Uuid, String)>, ClientError> {
+    pub async fn list_notes(&mut self) -> Result<Vec<(Uuid, String)>, ClientError> {
         let mut out = Vec::new();
         for obj in self.list_objects().await? {
             if obj.content_type == NOTE_CONTENT_TYPE {
@@ -270,7 +278,7 @@ impl SealbookClient {
     }
 
     async fn put_sealed(
-        &self,
+        &mut self,
         object_id: Uuid,
         plaintext: &[u8],
         content_type: &str,
@@ -306,18 +314,19 @@ impl SealbookClient {
     /// commits to every row. Leaving them out made the manifest disagree with the
     /// server's view, and a rotation over a vault with any deletion in it was
     /// refused.
-    pub(crate) async fn list_stored_objects(&self) -> Result<VaultContents, ClientError> {
+    pub(crate) async fn list_stored_objects(&mut self) -> Result<VaultContents, ClientError> {
         let collection_id = self
             .state
             .as_ref()
             .ok_or(ClientError::NoState)?
             .collection_id;
+        let objects = self.fetch_verified_objects().await?;
         let key = self
             .collection_key
             .as_ref()
             .ok_or(ClientError::NoCollectionKey)?;
         let mut contents = VaultContents::default();
-        for obj in self.fetch_verified_objects().await? {
+        for obj in objects {
             if obj.tombstone {
                 contents.tombstones.push(ManifestEntry {
                     id: obj.id,
@@ -348,18 +357,19 @@ impl SealbookClient {
         Ok(contents)
     }
 
-    async fn list_objects(&self) -> Result<Vec<PlainObject>, ClientError> {
+    async fn list_objects(&mut self) -> Result<Vec<PlainObject>, ClientError> {
         let collection_id = self
             .state
             .as_ref()
             .ok_or(ClientError::NoState)?
             .collection_id;
+        let objects = self.fetch_verified_objects().await?;
         let key = self
             .collection_key
             .as_ref()
             .ok_or(ClientError::NoCollectionKey)?;
         let mut out = Vec::new();
-        for obj in self.fetch_verified_objects().await? {
+        for obj in objects {
             if obj.tombstone {
                 continue;
             }
@@ -397,7 +407,7 @@ impl SealbookClient {
 
     /// Writes one object, signing a manifest for the state the write produces.
     async fn write_object(
-        &self,
+        &mut self,
         object_id: Uuid,
         nonce: Vec<u8>,
         ciphertext: Vec<u8>,
@@ -426,6 +436,7 @@ impl SealbookClient {
             None => entries.push(entry),
         }
         let manifest = self.sign_manifest(seq + 1, key_epoch, revision, &entries)?;
+        let written_seq = seq + 1;
 
         let resp: sealbook_protocol::PutObjectResponse = self
             .put_json(
@@ -443,6 +454,9 @@ impl SealbookClient {
                 Some(&token),
             )
             .await?;
+        // The server stored the manifest this device signed, so that sequence is
+        // now the floor: anything older served back is a rollback.
+        self.accept_manifest_seq(written_seq)?;
         Ok(resp.revision)
     }
 
@@ -452,7 +466,7 @@ impl SealbookClient {
     /// once — a page on its own cannot be checked, since the manifest commits to
     /// the collection rather than to any page of it.
     async fn fetch_verified_objects(
-        &self,
+        &mut self,
     ) -> Result<Vec<sealbook_protocol::ObjectChange>, ClientError> {
         let (server, collection_id, token) = {
             let state = self.state.as_ref().ok_or(ClientError::NoState)?;

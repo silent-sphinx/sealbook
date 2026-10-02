@@ -262,8 +262,9 @@ impl SealbookClient {
         self.key_epoch = response.key_epoch;
         if let Some(state) = self.state.as_mut() {
             state.kdf_salt = salt.to_vec();
-            state.manifest_seq = manifest_seq + 1;
         }
+        // The rotation carried a manifest at this sequence, like any other write.
+        self.accept_manifest_seq(manifest_seq + 1)?;
         self.pin_roster(&new_roster)?;
         Ok(phrase)
     }

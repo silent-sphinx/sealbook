@@ -1579,7 +1579,7 @@ async fn account_with_contacts(
 /// The manifest commits to the object count and to every id, so the client notices.
 #[tokio::test]
 async fn a_withheld_object_is_detected() {
-    let (db, _base, client) = account_with_contacts("withhold", 3).await;
+    let (db, _base, mut client) = account_with_contacts("withhold", 3).await;
     assert_eq!(client.list_contacts().await.expect("list").len(), 3);
 
     let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
@@ -1605,7 +1605,7 @@ async fn a_withheld_object_is_detected() {
 /// the content digest exists to catch: the revision still matches, the bytes do not.
 #[tokio::test]
 async fn a_substituted_ciphertext_is_detected() {
-    let (db, _base, client) = account_with_contacts("rollback", 2).await;
+    let (db, _base, mut client) = account_with_contacts("rollback", 2).await;
 
     let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
         .await
@@ -1642,7 +1642,7 @@ async fn a_substituted_ciphertext_is_detected() {
 /// manifest committed to, so it is caught as well.
 #[tokio::test]
 async fn a_rolled_back_revision_is_detected() {
-    let (db, _base, client) = account_with_contacts("revision", 2).await;
+    let (db, _base, mut client) = account_with_contacts("revision", 2).await;
 
     let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
         .await
@@ -2140,7 +2140,7 @@ async fn a_deleted_object_frees_its_quota_slot() {
 
 #[tokio::test]
 async fn the_change_feed_paginates() {
-    let (_db, base, client) = account_with_contacts("paginate", 5).await;
+    let (_db, base, mut client) = account_with_contacts("paginate", 5).await;
     let state = client.state.as_ref().unwrap();
     let token = state.session_token.clone().unwrap();
     let collection = state.collection_id;
@@ -3485,6 +3485,166 @@ async fn a_forged_roster_is_rejected_with_or_without_a_pin() {
         .expect_err("a device with no pin accepted a roster the server made up")
         .to_string();
     assert!(error.contains("roster"), "got: {error}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Bug #2: the pin that makes a rollback detectable has to actually advance.
+///
+/// Rolls the server back to an *earlier manifest it really signed*, with the
+/// objects that match it. Everything a client checks within a single response
+/// agrees: the digest covers the entries served, the signature verifies, and the
+/// signer is enrolled. The only thing that can catch it is the device
+/// remembering a higher sequence, so this is the test that fails if the pin
+/// stops advancing.
+#[tokio::test]
+async fn a_genuine_but_older_manifest_is_refused_once_a_newer_one_was_seen() {
+    let dir = std::env::temp_dir().join(format!("sealbook-pin-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "pinalice", "correct horse battery")
+        .await
+        .expect("register");
+    // Registration signs the collection's first manifest.
+    assert_eq!(client.state.as_ref().unwrap().manifest_seq, 1);
+
+    client
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"Ada Lovelace"}}"#,
+        )
+        .await
+        .expect("first put");
+    assert_eq!(
+        client.state.as_ref().unwrap().manifest_seq,
+        2,
+        "a write must pin the manifest sequence it signed"
+    );
+
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    // The collection exactly as it stands at manifest 2.
+    let saved_objects = sqlx::query(
+        "SELECT id, collection_id, account_id, revision, tombstone, ciphertext, nonce,
+                padded_size, content_type, content_digest FROM objects",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let saved_manifest = sqlx::query(
+        "SELECT manifest_seq, key_epoch, latest_revision, object_count, digest, device_id,
+                mldsa_sig, ed25519_sig, collection_id FROM manifests",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    client
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"Grace Hopper"}}"#,
+        )
+        .await
+        .expect("second put");
+    assert_eq!(client.state.as_ref().unwrap().manifest_seq, 3);
+    // A read of the current state leaves the pin where it is.
+    assert_eq!(client.list_contacts().await.expect("list").len(), 2);
+    assert_eq!(client.state.as_ref().unwrap().manifest_seq, 3);
+
+    // Now wind the vault back to manifest 2, Grace Hopper and all.
+    sqlx::query("DELETE FROM objects")
+        .execute(&pool)
+        .await
+        .unwrap();
+    for row in &saved_objects {
+        sqlx::query(
+            "INSERT INTO objects (id, collection_id, account_id, revision, tombstone, ciphertext,
+                 nonce, padded_size, content_type, content_digest)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(row.get::<String, _>("id"))
+        .bind(row.get::<String, _>("collection_id"))
+        .bind(row.get::<String, _>("account_id"))
+        .bind(row.get::<i64, _>("revision"))
+        .bind(row.get::<i64, _>("tombstone"))
+        .bind(row.get::<Vec<u8>, _>("ciphertext"))
+        .bind(row.get::<Vec<u8>, _>("nonce"))
+        .bind(row.get::<i64, _>("padded_size"))
+        .bind(row.get::<String, _>("content_type"))
+        .bind(row.get::<Vec<u8>, _>("content_digest"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    sqlx::query(
+        "UPDATE manifests SET manifest_seq = ?, key_epoch = ?, latest_revision = ?,
+             object_count = ?, digest = ?, device_id = ?, mldsa_sig = ?, ed25519_sig = ?
+         WHERE collection_id = ?",
+    )
+    .bind(saved_manifest.get::<i64, _>("manifest_seq"))
+    .bind(saved_manifest.get::<i64, _>("key_epoch"))
+    .bind(saved_manifest.get::<i64, _>("latest_revision"))
+    .bind(saved_manifest.get::<i64, _>("object_count"))
+    .bind(saved_manifest.get::<Vec<u8>, _>("digest"))
+    .bind(saved_manifest.get::<String, _>("device_id"))
+    .bind(saved_manifest.get::<Vec<u8>, _>("mldsa_sig"))
+    .bind(saved_manifest.get::<Vec<u8>, _>("ed25519_sig"))
+    .bind(saved_manifest.get::<String, _>("collection_id"))
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let error = client
+        .list_contacts()
+        .await
+        .expect_err("a manifest older than the one this device has seen must be refused")
+        .to_string();
+    assert!(
+        error.contains("went backwards"),
+        "expected a rollback to be named as such, got: {error}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A fresh device, with no pin of its own yet, still has to end up pinned by the
+/// state it is handed, or the first thing it does is trust a replay.
+#[tokio::test]
+async fn a_paired_device_pins_the_manifest_it_syncs() {
+    let dir = std::env::temp_dir().join(format!("sealbook-pin-pair-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let password = "correct horse battery";
+    let mut owner = SealbookClient::plaintext_http();
+    owner.register(&base, "pinbob", password).await.unwrap();
+    owner
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"Ada Lovelace"}}"#,
+        )
+        .await
+        .unwrap();
+
+    let mut joiner = SealbookClient::plaintext_http();
+    let (pair_code, confirm) = joiner.pair_join(&base, "pinbob").await.unwrap();
+    owner.pair_approve(&pair_code, &confirm).await.unwrap();
+    joiner.login(password).await.unwrap();
+    assert_eq!(joiner.state.as_ref().unwrap().manifest_seq, 0);
+
+    assert_eq!(joiner.list_contacts().await.expect("list").len(), 1);
+    assert_eq!(
+        joiner.state.as_ref().unwrap().manifest_seq,
+        2,
+        "reading the vault must pin the manifest the server served"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
