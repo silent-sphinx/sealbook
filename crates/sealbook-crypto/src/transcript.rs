@@ -3,6 +3,11 @@ use uuid::Uuid;
 
 /// Absorbs a length-prefixed field, so that concatenating different field
 /// splits cannot produce the same digest.
+///
+/// Every transcript in this module uses this for each field whose length can
+/// vary, and plain `update` only for fields the type fixes: a `Uuid`, a `u64`, a
+/// `[u8; 32]`. Keeping to that is what stops a field added next to a variable one
+/// from reintroducing an ambiguity.
 pub(crate) fn absorb(h: &mut Sha256, field: &[u8]) {
     h.update((field.len() as u64).to_be_bytes());
     h.update(field);
@@ -261,6 +266,13 @@ pub fn key_rotation_transcript(
     h.finalize().into()
 }
 
+/// Signed by a device over the keys it is enrolling.
+///
+/// The three public keys are length-prefixed. They are adjacent and all three
+/// are typed as variable, so raw concatenation left the only thing fixing their
+/// boundaries outside the digest: that an ML-DSA-65 key is 1952 bytes and an
+/// Ed25519 key is 32, which `verify` enforces incidentally rather than this
+/// transcript stating it.
 pub fn enrollment_transcript(
     device_id: Uuid,
     mldsa_pk: &[u8],
@@ -268,14 +280,19 @@ pub fn enrollment_transcript(
     xwing_hpke_pk: &[u8],
 ) -> [u8; 32] {
     let mut h = Sha256::new();
-    h.update(b"sealbook-enroll-v1");
+    h.update(b"sealbook-enroll-v2");
     h.update(device_id.as_bytes());
-    h.update(mldsa_pk);
-    h.update(ed25519_pk);
-    h.update(xwing_hpke_pk);
+    absorb(&mut h, mldsa_pk);
+    absorb(&mut h, ed25519_pk);
+    absorb(&mut h, xwing_hpke_pk);
     h.finalize().into()
 }
 
+/// Signed by the approving device over the device a pairing enrols.
+///
+/// Length-prefixed for the same reason as `enrollment_transcript`, with one more
+/// variable field after the keys.
+#[allow(clippy::too_many_arguments)]
 pub fn pair_grant_transcript(
     pair_id: Uuid,
     approver_device_id: Uuid,
@@ -286,14 +303,14 @@ pub fn pair_grant_transcript(
     confirm: &str,
 ) -> [u8; 32] {
     let mut h = Sha256::new();
-    h.update(b"sealbook-pair-v1");
+    h.update(b"sealbook-pair-v2");
     h.update(pair_id.as_bytes());
     h.update(approver_device_id.as_bytes());
     h.update(new_device_id.as_bytes());
-    h.update(mldsa_pk);
-    h.update(ed25519_pk);
-    h.update(xwing_hpke_pk);
-    h.update(confirm.as_bytes());
+    absorb(&mut h, mldsa_pk);
+    absorb(&mut h, ed25519_pk);
+    absorb(&mut h, xwing_hpke_pk);
+    absorb(&mut h, confirm.as_bytes());
     h.finalize().into()
 }
 
@@ -356,12 +373,12 @@ pub fn login_start_transcript(
     opaque_request: &[u8],
 ) -> [u8; 32] {
     let mut h = Sha256::new();
-    h.update(b"sealbook-login-start-v1");
+    h.update(b"sealbook-login-start-v2");
     h.update(challenge_id.as_bytes());
-    h.update(username.as_bytes());
+    absorb(&mut h, username.as_bytes());
     h.update(device_id.as_bytes());
     h.update(challenge);
-    h.update(opaque_request);
+    absorb(&mut h, opaque_request);
     h.finalize().into()
 }
 
@@ -373,11 +390,11 @@ pub fn login_transcript(
     challenge: &[u8; 32],
 ) -> [u8; 32] {
     let mut h = Sha256::new();
-    h.update(b"sealbook-login-v1");
+    h.update(b"sealbook-login-v2");
     h.update(login_id.as_bytes());
-    h.update(username.as_bytes());
+    absorb(&mut h, username.as_bytes());
     h.update(device_id.as_bytes());
-    h.update(finalization);
+    absorb(&mut h, finalization);
     h.update(challenge);
     h.finalize().into()
 }
@@ -702,6 +719,52 @@ mod tests {
         assert_ne!(
             rotation_recovery_payload(b"ab", b"c", b"d", b"e", "f"),
             rotation_recovery_payload(b"a", b"bc", b"d", b"e", "f"),
+        );
+    }
+
+    /// Bug #10. Every transcript length-prefixes its variable fields, so a byte
+    /// moved across a field boundary is a different digest. Of these,
+    /// `enrollment_transcript` and `pair_grant_transcript` were the ones with a
+    /// real ambiguity: three or four adjacent variable fields, held apart only by
+    /// `verify` happening to reject a key of the wrong length. The two login
+    /// transcripts interleave theirs with fixed-size fields, so they could not be
+    /// shifted even before this; they are uniform now so that the next field
+    /// added to one of them does not have to be the one that notices.
+    #[test]
+    fn every_transcript_binds_its_field_boundaries() {
+        let one = Uuid::new_v4();
+        let two = Uuid::new_v4();
+        let three = Uuid::new_v4();
+        let challenge = [7u8; 32];
+
+        assert_ne!(
+            enrollment_transcript(one, b"ab", b"c", b"d"),
+            enrollment_transcript(one, b"a", b"bc", b"d"),
+            "the enrolled signing keys must not be able to borrow bytes from each other"
+        );
+        assert_ne!(
+            enrollment_transcript(one, b"a", b"bc", b"d"),
+            enrollment_transcript(one, b"a", b"b", b"cd"),
+            "the hpke key boundary must bind"
+        );
+
+        assert_ne!(
+            pair_grant_transcript(one, two, three, b"ab", b"c", b"d", "e"),
+            pair_grant_transcript(one, two, three, b"a", b"bc", b"d", "e"),
+        );
+        assert_ne!(
+            pair_grant_transcript(one, two, three, b"a", b"b", b"cd", "e"),
+            pair_grant_transcript(one, two, three, b"a", b"b", b"c", "de"),
+            "the confirmation code boundary must bind"
+        );
+
+        assert_ne!(
+            login_start_transcript(one, "ab", two, &challenge, b"c"),
+            login_start_transcript(one, "a", two, &challenge, b"bc"),
+        );
+        assert_ne!(
+            login_transcript(one, "ab", two, b"c", &challenge),
+            login_transcript(one, "a", two, b"bc", &challenge),
         );
     }
 
