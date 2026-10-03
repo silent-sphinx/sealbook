@@ -20,7 +20,8 @@ use sealbook_crypto::{
     XWING_CIPHERSUITE,
 };
 use sealbook_crypto::{phrase_recovery_keys, RosterPin};
-use sealbook_protocol::{DevicePublicKeys, RosterBody, RosterSignerBody};
+use sealbook_protocol::envelope::{open_envelope, seal_envelope, Unsealed};
+use sealbook_protocol::{DevicePublicKeys, RosterBody, RosterSignerBody, SEALED_CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
@@ -370,6 +371,24 @@ pub fn decrypt_contact(
     ciphertext_b64: &str,
     padded_size: usize,
 ) -> Result<String, JsError> {
+    text(decrypt_contact_bytes(
+        ck_b64,
+        object_id,
+        collection_id,
+        nonce_b64,
+        ciphertext_b64,
+        padded_size,
+    )?)
+}
+
+fn decrypt_contact_bytes(
+    ck_b64: &str,
+    object_id: &str,
+    collection_id: &str,
+    nonce_b64: &str,
+    ciphertext_b64: &str,
+    padded_size: usize,
+) -> Result<Vec<u8>, JsError> {
     let object_id = parse_uuid(object_id)?;
     let collection_id = parse_uuid(collection_id)?;
     let nonce_bytes = unb64(nonce_b64)?;
@@ -389,7 +408,140 @@ pub fn decrypt_contact(
         &aad,
     )
     .map_err(js_err)?;
-    String::from_utf8(plain).map_err(|err| JsError::new(&err.to_string()))
+    Ok(plain)
+}
+
+#[wasm_bindgen]
+pub fn sealed_content_type() -> String {
+    SEALED_CONTENT_TYPE.to_string()
+}
+
+#[derive(Serialize)]
+struct OpenedOut {
+    sealed: bool,
+    #[serde(rename = "contentType")]
+    content_type: Option<String>,
+    tombstone: bool,
+    payload: String,
+}
+
+#[wasm_bindgen]
+pub fn seal_object(
+    ck_b64: &str,
+    object_id: &str,
+    collection_id: &str,
+    content_type: &str,
+    payload: &str,
+) -> Result<String, JsError> {
+    let object_id = parse_uuid(object_id)?;
+    let collection_id = parse_uuid(collection_id)?;
+    let aad = object_aad(object_id.as_bytes(), collection_id.as_bytes());
+    let plain = seal_envelope(content_type, payload.as_bytes());
+    let enc = encrypt_object(&ck_from_b64(ck_b64)?, &plain, &aad).map_err(js_err)?;
+    serde_json::to_string(&EncryptedOut {
+        nonce: b64(&enc.nonce),
+        ciphertext: b64(&enc.ciphertext),
+        padded_size: enc.padded_size,
+    })
+    .map_err(js_err)
+}
+
+/// Decrypts an object and opens its envelope.
+#[wasm_bindgen]
+pub fn open_object(
+    ck_b64: &str,
+    object_id: &str,
+    collection_id: &str,
+    nonce_b64: &str,
+    ciphertext_b64: &str,
+    padded_size: usize,
+) -> Result<String, JsError> {
+    let plain = decrypt_contact_bytes(
+        ck_b64,
+        object_id,
+        collection_id,
+        nonce_b64,
+        ciphertext_b64,
+        padded_size,
+    )?;
+    let opened = match open_envelope(&plain) {
+        Unsealed::Envelope {
+            content_type,
+            tombstone,
+            payload,
+        } => OpenedOut {
+            sealed: true,
+            content_type: Some(content_type),
+            tombstone,
+            payload: text(payload)?,
+        },
+        Unsealed::Legacy => OpenedOut {
+            sealed: false,
+            content_type: None,
+            tombstone: false,
+            payload: text(plain)?,
+        },
+        Unsealed::Unreadable => {
+            return Err(JsError::new(
+                "object has an envelope this build cannot read",
+            ))
+        }
+    };
+    serde_json::to_string(&opened).map_err(js_err)
+}
+
+fn text(bytes: Vec<u8>) -> Result<String, JsError> {
+    String::from_utf8(bytes).map_err(|_| JsError::new("object payload is not valid UTF-8"))
+}
+
+/// Re-encrypts one stored object from the old collection key to the new one,
+/// for a rotation.
+///
+/// The plaintext never becomes a JavaScript string: a rotation that decoded it
+/// as text would rewrite any payload that is not valid UTF-8, and a rotation
+/// touches the whole vault at once. `served_content_type` is only used for an
+/// object stored before the envelope existed, which is sealed under that type
+/// here so the collection stops depending on the server's label.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn reseal_object(
+    old_ck_b64: &str,
+    new_ck_b64: &str,
+    object_id: &str,
+    collection_id: &str,
+    nonce_b64: &str,
+    ciphertext_b64: &str,
+    padded_size: usize,
+    served_content_type: &str,
+) -> Result<String, JsError> {
+    let plain = decrypt_contact_bytes(
+        old_ck_b64,
+        object_id,
+        collection_id,
+        nonce_b64,
+        ciphertext_b64,
+        padded_size,
+    )?;
+    let stored = match open_envelope(&plain) {
+        Unsealed::Envelope { .. } => plain,
+        Unsealed::Legacy => seal_envelope(served_content_type, &plain),
+        Unsealed::Unreadable => {
+            return Err(JsError::new(
+                "object has an envelope this build cannot read",
+            ))
+        }
+    };
+    let aad = object_aad(
+        parse_uuid(object_id)?.as_bytes(),
+        parse_uuid(collection_id)?.as_bytes(),
+    );
+    let enc = encrypt_object(&ck_from_b64(new_ck_b64)?, &stored, &aad).map_err(js_err)?;
+    serde_json::to_string(&EncryptedOut {
+        nonce: b64(&enc.nonce),
+        ciphertext: b64(&enc.ciphertext),
+        padded_size: enc.padded_size,
+    })
+    .map_err(js_err)
 }
 
 /// A fresh random collection key, for rotating the vault on device revocation.

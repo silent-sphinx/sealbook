@@ -14,6 +14,7 @@ use sealbook_crypto::{
 use sealbook_protocol::{
     CollectionKeysResponse, DevicePublicKeys, DualSignatureBody, KeyWrapBody, ManifestEntry,
     PhraseRecoveryBody, RosterBody, RosterSignerBody, RotateRequest, RotatedObject,
+    SEALED_CONTENT_TYPE,
 };
 
 use crate::{ClientError, SealbookClient};
@@ -155,7 +156,7 @@ impl SealbookClient {
                 nonce: enc.nonce.to_vec(),
                 ciphertext: enc.ciphertext,
                 padded_size: enc.padded_size,
-                content_type: stored.content_type.clone(),
+                content_type: SEALED_CONTENT_TYPE.into(),
                 tombstone: false,
             });
         }

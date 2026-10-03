@@ -1,17 +1,17 @@
 //! Reading and writing the collection's contents: the typed helpers callers
 //! use, and the sealed object I/O underneath them.
 
-use serde::Deserialize;
 use uuid::Uuid;
 
 use sealbook_crypto::{
     content_digest, decrypt_object, encrypt_object, object_aad, EncryptedObject,
 };
+use sealbook_protocol::envelope::{open_envelope, seal_envelope, Unsealed};
 use sealbook_protocol::{ChangesResponse, ManifestEntry, PutObjectRequest};
 use sealbook_protocol::{
     ADDRESS_BOOK_CONTENT_TYPE, CALENDAR_CONTENT_TYPE, CALENDAR_EVENT_CONTENT_TYPE,
     DEFAULT_ADDRESS_BOOK_ID, DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_NOTEBOOK_ID, DEFAULT_NOTEBOOK_NAME,
-    JSCONTACT_CONTENT_TYPE, NOTEBOOK_CONTENT_TYPE, NOTE_CONTENT_TYPE,
+    JSCONTACT_CONTENT_TYPE, NOTEBOOK_CONTENT_TYPE, NOTE_CONTENT_TYPE, SEALED_CONTENT_TYPE,
 };
 
 use crate::{ClientError, ManifestError, SealbookClient};
@@ -19,7 +19,6 @@ use crate::{ClientError, ManifestError, SealbookClient};
 /// An object as stored, still wrapped in its envelope.
 pub(crate) struct StoredObject {
     pub(crate) id: Uuid,
-    pub(crate) content_type: String,
     pub(crate) stored: Vec<u8>,
 }
 
@@ -44,15 +43,6 @@ impl PlainObject {
     }
 }
 
-#[derive(Deserialize)]
-struct StoredEnvelope {
-    version: u8,
-    #[serde(rename = "contentType")]
-    content_type: String,
-    tombstone: bool,
-    payload: String,
-}
-
 impl SealbookClient {
     pub async fn put_contact(
         &mut self,
@@ -64,15 +54,8 @@ impl SealbookClient {
     }
 
     pub async fn delete_contact(&mut self, object_id: Uuid) -> Result<u64, ClientError> {
-        self.write_object(
-            object_id,
-            Vec::new(),
-            Vec::new(),
-            0,
-            JSCONTACT_CONTENT_TYPE,
-            true,
-        )
-        .await
+        self.write_object(object_id, Vec::new(), Vec::new(), 0, true)
+            .await
     }
 
     pub async fn put_address_book(
@@ -181,27 +164,13 @@ impl SealbookClient {
     }
 
     pub async fn delete_calendar(&mut self, object_id: Uuid) -> Result<u64, ClientError> {
-        self.write_object(
-            object_id,
-            Vec::new(),
-            Vec::new(),
-            0,
-            CALENDAR_CONTENT_TYPE,
-            true,
-        )
-        .await
+        self.write_object(object_id, Vec::new(), Vec::new(), 0, true)
+            .await
     }
 
     pub async fn delete_calendar_event(&mut self, object_id: Uuid) -> Result<u64, ClientError> {
-        self.write_object(
-            object_id,
-            Vec::new(),
-            Vec::new(),
-            0,
-            CALENDAR_EVENT_CONTENT_TYPE,
-            true,
-        )
-        .await
+        self.write_object(object_id, Vec::new(), Vec::new(), 0, true)
+            .await
     }
 
     pub async fn put_note(&mut self, object_id: Uuid, note: &str) -> Result<u64, ClientError> {
@@ -210,15 +179,8 @@ impl SealbookClient {
     }
 
     pub async fn delete_note(&mut self, object_id: Uuid) -> Result<u64, ClientError> {
-        self.write_object(
-            object_id,
-            Vec::new(),
-            Vec::new(),
-            0,
-            NOTE_CONTENT_TYPE,
-            true,
-        )
-        .await
+        self.write_object(object_id, Vec::new(), Vec::new(), 0, true)
+            .await
     }
 
     pub async fn put_notebook(&mut self, object_id: Uuid, name: &str) -> Result<u64, ClientError> {
@@ -233,15 +195,8 @@ impl SealbookClient {
     }
 
     pub async fn delete_notebook(&mut self, object_id: Uuid) -> Result<u64, ClientError> {
-        self.write_object(
-            object_id,
-            Vec::new(),
-            Vec::new(),
-            0,
-            NOTEBOOK_CONTENT_TYPE,
-            true,
-        )
-        .await
+        self.write_object(object_id, Vec::new(), Vec::new(), 0, true)
+            .await
     }
 
     pub async fn ensure_default_notebook(&mut self) -> Result<Uuid, ClientError> {
@@ -300,20 +255,20 @@ impl SealbookClient {
             .as_ref()
             .ok_or(ClientError::NoCollectionKey)?;
         let aad = object_aad(object_id.as_bytes(), collection_id.as_bytes());
-        let enc = encrypt_object(key, plaintext, &aad)?;
+        let enc = encrypt_object(key, &seal_envelope(content_type, plaintext), &aad)?;
         self.write_object(
             object_id,
             enc.nonce.to_vec(),
             enc.ciphertext,
             enc.padded_size,
-            content_type,
             false,
         )
         .await
     }
 
-    /// Objects exactly as stored, without unwrapping the envelope, so they can
-    /// be re-encrypted verbatim under a new key.
+    /// Objects as stored, without opening the envelope, so they can be
+    /// re-encrypted under a new key with their contents untouched. The one
+    /// exception is an object with no envelope, which gets one here.
     ///
     /// Tombstones come back alongside the live objects rather than being dropped.
     /// A rotation does not re-encrypt them, since there is no plaintext left to
@@ -355,11 +310,18 @@ impl SealbookClient {
             };
             let aad = object_aad(obj.id.as_bytes(), collection_id.as_bytes());
             let plain = decrypt_object(key, &encrypted, &aad)?;
-            contents.live.push(StoredObject {
-                id: obj.id,
-                content_type: obj.content_type,
-                stored: plain,
-            });
+            // A rotation is where a vault stops depending on the server's label.
+            // An object written before the envelope existed is wrapped in one
+            // here, from the only type on offer for it, so what goes back under
+            // the new key carries its own type. After one rotation nothing in
+            // the collection needs the label, and the server is told none.
+            let unsealed = open_envelope(&plain);
+            let stored = match unsealed {
+                Unsealed::Envelope { .. } => plain,
+                Unsealed::Legacy => seal_envelope(&obj.content_type, &plain),
+                Unsealed::Unreadable => return Err(ClientError::Envelope(obj.id)),
+            };
+            contents.live.push(StoredObject { id: obj.id, stored });
         }
         Ok(contents)
     }
@@ -392,8 +354,23 @@ impl SealbookClient {
             };
             let aad = object_aad(obj.id.as_bytes(), collection_id.as_bytes());
             let plain = decrypt_object(key, &encrypted, &aad)?;
-            let Some((content_type, plaintext)) = unwrap_envelope(plain, obj.content_type) else {
-                continue;
+            let unsealed = open_envelope(&plain);
+            let (content_type, plaintext) = match unsealed {
+                // A sealed tombstone, which `sealbook-web` writes: a row with a
+                // body but nothing to read.
+                Unsealed::Envelope {
+                    tombstone: true, ..
+                } => continue,
+                Unsealed::Envelope {
+                    content_type,
+                    payload,
+                    ..
+                } => (content_type, payload),
+                // Written before the envelope existed, so the server's label is
+                // the only type on offer and nothing authenticates it. The next
+                // rotation seals it in and this stops being reachable.
+                Unsealed::Legacy => (obj.content_type, plain),
+                Unsealed::Unreadable => return Err(ClientError::Envelope(obj.id)),
             };
             out.push(PlainObject {
                 id: obj.id,
@@ -411,7 +388,6 @@ impl SealbookClient {
         nonce: Vec<u8>,
         ciphertext: Vec<u8>,
         padded_size: usize,
-        content_type: &str,
         tombstone: bool,
     ) -> Result<u64, ClientError> {
         let (server, collection_id, token) = {
@@ -446,7 +422,7 @@ impl SealbookClient {
                     nonce,
                     ciphertext,
                     padded_size,
-                    content_type: content_type.into(),
+                    content_type: SEALED_CONTENT_TYPE.into(),
                     tombstone,
                     manifest,
                 },
@@ -540,25 +516,6 @@ impl SealbookClient {
     }
 }
 
-/// Splits a stored plaintext into its content type and payload.
-///
-/// `sealbook-web` wraps objects in a JSON envelope; `put_sealed` writes the
-/// payload raw and the server's label is the only type on offer for those. The
-/// envelope is JSON, so it only parses out of valid UTF-8, and a payload that is
-/// not text takes the raw path with its bytes intact. Returns `None` for an
-/// envelope marked as a tombstone, which has no payload to read.
-fn unwrap_envelope(plain: Vec<u8>, served_content_type: String) -> Option<(String, Vec<u8>)> {
-    match serde_json::from_slice::<StoredEnvelope>(&plain) {
-        Ok(envelope) if envelope.version == 1 => {
-            if envelope.tombstone {
-                return None;
-            }
-            Some((envelope.content_type, envelope.payload.into_bytes()))
-        }
-        _ => Some((served_content_type, plain)),
-    }
-}
-
 /// The `name` of any container object: address book or notebook.
 pub(crate) fn container_name(plaintext: &str) -> String {
     serde_json::from_str::<serde_json::Value>(plaintext)
@@ -576,43 +533,17 @@ pub(crate) fn container_name(plaintext: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{unwrap_envelope, PlainObject};
+    use super::PlainObject;
     use uuid::Uuid;
 
-    const RAW_TYPE: &str = "application/jscontact+json";
-
-    #[test]
-    fn a_raw_payload_keeps_bytes_that_are_not_utf8() {
-        let plain = vec![0x00, 0xff, 0xfe, b'{'];
-        let (content_type, payload) =
-            unwrap_envelope(plain.clone(), RAW_TYPE.to_string()).expect("not a tombstone");
-        assert_eq!(content_type, RAW_TYPE);
-        assert_eq!(
-            payload, plain,
-            "rotation would re-encrypt a mangled payload"
-        );
-    }
-
-    #[test]
-    fn an_envelope_supplies_the_content_type() {
-        let plain = br#"{"version":1,"contentType":"text/vnd.sealbook.note","tombstone":false,"payload":"hi"}"#;
-        let (content_type, payload) =
-            unwrap_envelope(plain.to_vec(), RAW_TYPE.to_string()).expect("not a tombstone");
-        assert_eq!(content_type, "text/vnd.sealbook.note");
-        assert_eq!(payload, b"hi");
-    }
-
-    #[test]
-    fn an_envelope_tombstone_has_no_payload() {
-        let plain = br#"{"version":1,"contentType":"text/vnd.sealbook.note","tombstone":true,"payload":""}"#;
-        assert!(unwrap_envelope(plain.to_vec(), RAW_TYPE.to_string()).is_none());
-    }
+    // The envelope format itself is covered in `sealbook_protocol::envelope`,
+    // which is where all three clients read it from.
 
     #[test]
     fn into_text_refuses_bytes_that_are_not_utf8() {
         let obj = PlainObject {
             id: Uuid::nil(),
-            content_type: RAW_TYPE.to_string(),
+            content_type: "application/jscontact+json".to_string(),
             plaintext: vec![0xff, 0xfe],
         };
         assert!(obj.into_text().is_err());

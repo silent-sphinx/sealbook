@@ -1,4 +1,5 @@
 mod b64;
+pub mod envelope;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -8,6 +9,7 @@ use uuid::Uuid;
 /// Clients and servers must agree exactly. There has been one released protocol,
 /// so a client that sees anything else is talking to a build it does not know.
 pub const PROTOCOL_VERSION: &str = "sealbook-v1";
+pub const SEALED_CONTENT_TYPE: &str = "application/vnd.sealbook.sealed";
 
 pub const JSCONTACT_CONTENT_TYPE: &str = "application/jscontact+json";
 pub const ADDRESS_BOOK_CONTENT_TYPE: &str = "application/sealbook.addressbook+json";

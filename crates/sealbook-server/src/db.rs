@@ -224,7 +224,7 @@ async fn migrate_to_v1(db: &Pool<Sqlite>) -> anyhow::Result<()> {
                 ciphertext BLOB NOT NULL DEFAULT X'',
                 nonce BLOB NOT NULL DEFAULT X'',
                 padded_size INTEGER NOT NULL DEFAULT 0,
-                content_type TEXT NOT NULL DEFAULT 'application/jscontact+json',
+                content_type TEXT NOT NULL DEFAULT 'application/vnd.sealbook.sealed',
                 content_digest BLOB NOT NULL DEFAULT X'',
                 created_at INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (account_id, revision),
@@ -510,7 +510,7 @@ mod tests {
              (id, collection_id, account_id, revision, tombstone, ciphertext, nonce,
               padded_size, content_type, content_digest)
              VALUES ('object-one', 'collection', 'account', 1, 0, X'00', X'01', 256,
-                     'application/jscontact+json', X'02')",
+                     'application/vnd.sealbook.sealed', X'02')",
         )
         .execute(&db)
         .await

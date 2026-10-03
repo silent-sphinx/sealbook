@@ -19,7 +19,8 @@ use sealbook_crypto::{
     PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
 };
 use sealbook_crypto::{phrase_recovery_keys, RosterPin};
-use sealbook_protocol::{DevicePublicKeys, RosterBody, RosterSignerBody};
+use sealbook_protocol::envelope::{open_envelope, seal_envelope, Unsealed};
+use sealbook_protocol::{DevicePublicKeys, RosterBody, RosterSignerBody, SEALED_CONTENT_TYPE};
 use uuid::Uuid;
 
 uniffi::setup_scaffolding!();
@@ -420,9 +421,27 @@ pub fn decrypt_contact(
     ciphertext_b64: String,
     padded_size: u64,
 ) -> Result<String, CryptoError> {
-    let oid = parse_uuid(&object_id)?;
-    let cid = parse_uuid(&collection_id)?;
-    let nonce_bytes = unb64(&nonce_b64)?;
+    text(decrypt_object_bytes(
+        &ck_b64,
+        &object_id,
+        &collection_id,
+        &nonce_b64,
+        &ciphertext_b64,
+        padded_size,
+    )?)
+}
+
+fn decrypt_object_bytes(
+    ck_b64: &str,
+    object_id: &str,
+    collection_id: &str,
+    nonce_b64: &str,
+    ciphertext_b64: &str,
+    padded_size: u64,
+) -> Result<Vec<u8>, CryptoError> {
+    let oid = parse_uuid(object_id)?;
+    let cid = parse_uuid(collection_id)?;
+    let nonce_bytes = unb64(nonce_b64)?;
     if nonce_bytes.len() != 24 {
         return Err(CryptoError::General {
             msg: "nonce must be 24 bytes".into(),
@@ -431,16 +450,104 @@ pub fn decrypt_contact(
     let mut nonce = [0u8; 24];
     nonce.copy_from_slice(&nonce_bytes);
     let aad = object_aad(oid.as_bytes(), cid.as_bytes());
-    let plain = decrypt_object(
-        &ck_from_b64(&ck_b64)?,
+    Ok(decrypt_object(
+        &ck_from_b64(ck_b64)?,
         &EncryptedObject {
             nonce,
-            ciphertext: unb64(&ciphertext_b64)?,
+            ciphertext: unb64(ciphertext_b64)?,
             padded_size: padded_size as usize,
         },
         &aad,
+    )?)
+}
+
+/// What `content_type` every object must be `PUT` under. The real type goes in
+/// the envelope instead, so the server is told the same thing about all of them.
+#[uniffi::export]
+pub fn sealed_content_type() -> String {
+    SEALED_CONTENT_TYPE.to_string()
+}
+
+#[derive(uniffi::Record)]
+pub struct OpenedObject {
+    /// False for an object stored before the envelope existed. Its type is only
+    /// the label the server serves, which nothing authenticates, and the next
+    /// rotation seals a type into it.
+    pub sealed: bool,
+    pub content_type: Option<String>,
+    pub tombstone: bool,
+    pub payload: String,
+}
+
+/// Seals `payload` under `content_type` and encrypts the envelope.
+///
+/// Callers use this rather than `encrypt_contact` plus an envelope of their own:
+/// one implementation of the format, shared with the Rust client.
+#[uniffi::export]
+pub fn seal_object(
+    ck_b64: String,
+    object_id: String,
+    collection_id: String,
+    content_type: String,
+    payload: String,
+) -> Result<EncryptedResult, CryptoError> {
+    let oid = parse_uuid(&object_id)?;
+    let cid = parse_uuid(&collection_id)?;
+    let aad = object_aad(oid.as_bytes(), cid.as_bytes());
+    let plain = seal_envelope(&content_type, payload.as_bytes());
+    let enc = encrypt_object(&ck_from_b64(&ck_b64)?, &plain, &aad)?;
+    Ok(EncryptedResult {
+        nonce: b64(&enc.nonce),
+        ciphertext: b64(&enc.ciphertext),
+        padded_size: enc.padded_size as u64,
+    })
+}
+
+/// Decrypts an object and opens its envelope.
+#[uniffi::export]
+pub fn open_object(
+    ck_b64: String,
+    object_id: String,
+    collection_id: String,
+    nonce_b64: String,
+    ciphertext_b64: String,
+    padded_size: u64,
+) -> Result<OpenedObject, CryptoError> {
+    let plain = decrypt_object_bytes(
+        &ck_b64,
+        &object_id,
+        &collection_id,
+        &nonce_b64,
+        &ciphertext_b64,
+        padded_size,
     )?;
-    String::from_utf8(plain).map_err(|e| CryptoError::General { msg: e.to_string() })
+    match open_envelope(&plain) {
+        Unsealed::Envelope {
+            content_type,
+            tombstone,
+            payload,
+        } => Ok(OpenedObject {
+            sealed: true,
+            content_type: Some(content_type),
+            tombstone,
+            payload: text(payload)?,
+        }),
+        Unsealed::Legacy => Ok(OpenedObject {
+            sealed: false,
+            content_type: None,
+            tombstone: false,
+            payload: text(plain)?,
+        }),
+        Unsealed::Unreadable => Err(CryptoError::General {
+            msg: "object has an envelope this build cannot read".into(),
+        }),
+    }
+}
+
+fn text(bytes: Vec<u8>) -> Result<String, CryptoError> {
+    String::from_utf8(bytes).map_err(|_| CryptoError::General {
+        msg: "object payload is not valid UTF-8".into(),
+    })
 }
 
 // ── Device Creation ──

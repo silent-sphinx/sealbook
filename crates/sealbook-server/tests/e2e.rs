@@ -20,6 +20,7 @@ use sealbook_crypto::{
 use sealbook_protocol::{
     DualSignatureBody, KeyWrapBody, LoginChallengeRequest, LoginChallengeResponse,
     LoginStartRequest, RecoverFinishRequest, RecoverStartRequest, RecoverStartResponse,
+    SEALED_CONTENT_TYPE,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -1765,7 +1766,7 @@ async fn a_replayed_manifest_sequence_is_refused() {
             "nonce": URL_SAFE_NO_PAD.encode([7u8; 24]),
             "ciphertext": URL_SAFE_NO_PAD.encode([0u8; 272]),
             "padded_size": 256,
-            "content_type": "application/jscontact+json",
+            "content_type": SEALED_CONTENT_TYPE,
             "tombstone": false,
             "manifest": {
                 "manifest_seq": row.get::<i64, _>("manifest_seq"),
@@ -1812,7 +1813,7 @@ async fn a_manifest_that_does_not_match_the_write_is_refused() {
             "nonce": URL_SAFE_NO_PAD.encode([7u8; 24]),
             "ciphertext": URL_SAFE_NO_PAD.encode([0u8; 272]),
             "padded_size": 256,
-            "content_type": "application/jscontact+json",
+            "content_type": SEALED_CONTENT_TYPE,
             "tombstone": false,
             "manifest": {
                 "manifest_seq": row.get::<i64, _>("manifest_seq") + 1,
@@ -2390,7 +2391,6 @@ async fn a_rotation_that_tombstones_a_live_object_is_refused() {
     };
     use sealbook_protocol::{
         DevicePublicKeys, ManifestBody, PhraseRecoveryBody, RotateRequest, RotatedObject,
-        JSCONTACT_CONTENT_TYPE,
     };
 
     let dir = std::env::temp_dir().join(format!("sealbook-rot-tomb-{}", Uuid::new_v4()));
@@ -2486,7 +2486,7 @@ async fn a_rotation_that_tombstones_a_live_object_is_refused() {
             nonce: Vec::new(),
             ciphertext: Vec::new(),
             padded_size: 0,
-            content_type: JSCONTACT_CONTENT_TYPE.into(),
+            content_type: SEALED_CONTENT_TYPE.into(),
             tombstone: true,
         }],
         manifest: ManifestBody {
@@ -4371,4 +4371,137 @@ async fn an_approval_is_refused_once_the_roster_has_moved_on() {
     );
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The server is told one content type for every object, so it cannot tell a
+/// contact from a calendar event from a note, and a tombstone does not say what
+/// kind of object it replaced. The real type is sealed inside the ciphertext.
+#[tokio::test]
+async fn the_server_never_learns_what_kind_of_object_it_holds() {
+    let dir = std::env::temp_dir().join(format!("sealbook-opaque-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "opaquealice", "correct horse battery")
+        .await
+        .expect("register");
+    client.ensure_default_address_book().await.expect("book");
+    client
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"Ada Lovelace"}}"#,
+        )
+        .await
+        .expect("contact");
+    client
+        .put_note(Uuid::new_v4(), r#"{"@type":"Note","title":"Okapi"}"#)
+        .await
+        .expect("note");
+    let doomed = Uuid::new_v4();
+    client
+        .put_calendar_event(doomed, r#"{"@type":"Event","title":"Standup"}"#)
+        .await
+        .expect("event");
+    client.delete_calendar_event(doomed).await.expect("delete");
+
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .expect("open db");
+    let types: Vec<String> = sqlx::query_scalar("SELECT DISTINCT content_type FROM objects")
+        .fetch_all(&pool)
+        .await
+        .expect("content types");
+    assert_eq!(
+        types,
+        vec![SEALED_CONTENT_TYPE.to_string()],
+        "the stored label must not distinguish the kinds"
+    );
+    let revision_types: Vec<String> =
+        sqlx::query_scalar("SELECT DISTINCT content_type FROM object_revisions")
+            .fetch_all(&pool)
+            .await
+            .expect("revision content types");
+    assert_eq!(
+        revision_types,
+        vec![SEALED_CONTENT_TYPE.to_string()],
+        "the change feed must not distinguish them either"
+    );
+    pool.close().await;
+
+    // The sealed types are not anywhere else in the file, so nothing recovers
+    // them from a stolen database.
+    let raw = std::fs::read(&db).expect("read sqlite");
+    let hay = String::from_utf8_lossy(&raw);
+    for leaked in [
+        "application/jscontact+json",
+        "application/sealbook.note+json",
+        "application/sealbook.calendar-event+json",
+    ] {
+        assert!(!hay.contains(leaked), "{leaked} leaked into the database");
+    }
+
+    // The client still reads each object back as its own kind.
+    assert_eq!(client.list_contacts().await.expect("contacts").len(), 1);
+    assert_eq!(client.list_notes().await.expect("notes").len(), 1);
+    assert!(client
+        .list_calendar_events()
+        .await
+        .expect("events")
+        .is_empty());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A per-kind label is refused rather than stored, so a client cannot put the
+/// type back in the clear by sending one.
+#[tokio::test]
+async fn a_per_kind_content_type_is_refused() {
+    let (db, base, client) = account_with_contacts("perkind", 1).await;
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    let state = client.state.as_ref().unwrap();
+    let token = state.session_token.clone().unwrap();
+    let collection = state.collection_id;
+    let row = sqlx::query(
+        "SELECT manifest_seq, key_epoch, latest_revision, object_count, digest, device_id,
+                mldsa_sig, ed25519_sig FROM manifests",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let response = reqwest::Client::new()
+        .put(format!("{base}/v1/collections/{collection}/objects"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "id": Uuid::new_v4(),
+            "revision": row.get::<i64, _>("latest_revision") + 1,
+            "nonce": URL_SAFE_NO_PAD.encode([7u8; 24]),
+            "ciphertext": URL_SAFE_NO_PAD.encode([0u8; 272]),
+            "padded_size": 256,
+            "content_type": "application/jscontact+json",
+            "tombstone": false,
+            "manifest": {
+                "manifest_seq": row.get::<i64, _>("manifest_seq") + 1,
+                "key_epoch": row.get::<i64, _>("key_epoch"),
+                "latest_revision": row.get::<i64, _>("latest_revision") + 1,
+                "object_count": row.get::<i64, _>("object_count"),
+                "digest": URL_SAFE_NO_PAD.encode(row.get::<Vec<u8>, _>("digest")),
+                "device_id": row.get::<String, _>("device_id"),
+                "signature": {
+                    "mldsa": URL_SAFE_NO_PAD.encode(row.get::<Vec<u8>, _>("mldsa_sig")),
+                    "ed25519": URL_SAFE_NO_PAD.encode(row.get::<Vec<u8>, _>("ed25519_sig")),
+                }
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    pool.close().await;
+    let _ = std::fs::remove_dir_all(db.parent().unwrap());
 }

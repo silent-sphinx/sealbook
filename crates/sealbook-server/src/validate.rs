@@ -11,9 +11,7 @@ use sealbook_crypto::{
 };
 use sealbook_protocol::{
     ErrorBody, KeyWrapBody, PhraseRecoveryBody, PutObjectRequest, RotatedObject,
-    ADDRESS_BOOK_CONTENT_TYPE, CALENDAR_CONTENT_TYPE, CALENDAR_EVENT_CONTENT_TYPE,
-    JSCONTACT_CONTENT_TYPE, MAX_PADDED_OBJECT_SIZE, MIN_PADDED_OBJECT_SIZE, NOTEBOOK_CONTENT_TYPE,
-    NOTE_CONTENT_TYPE,
+    MAX_PADDED_OBJECT_SIZE, MIN_PADDED_OBJECT_SIZE, SEALED_CONTENT_TYPE,
 };
 
 use crate::*;
@@ -176,20 +174,15 @@ fn validate_encrypted(
     padded_size: usize,
     tombstone: bool,
 ) -> Result<(), (StatusCode, Json<ErrorBody>)> {
-    // Also gates rotation, via `validate_rotated_object`. A rotation must re-send
-    // the current object set with each content type preserved, so a type missing
-    // here makes every future key rotation fail for any account that holds one,
-    // which means a revoked device keeps a working collection key.
-    let valid_content_type = matches!(
-        content_type,
-        JSCONTACT_CONTENT_TYPE
-            | ADDRESS_BOOK_CONTENT_TYPE
-            | CALENDAR_EVENT_CONTENT_TYPE
-            | CALENDAR_CONTENT_TYPE
-            | NOTE_CONTENT_TYPE
-            | NOTEBOOK_CONTENT_TYPE
-    );
-    if !valid_content_type || content_type.len() > 128 {
+    // One label for every object, because the real type is sealed inside the
+    // ciphertext. Refusing anything else is what keeps it that way: a client that
+    // sent a per-kind type would tell the server what each object is, and a
+    // tombstone's type would say what kind of object was deleted.
+    //
+    // This also gates rotation, via `validate_rotated_object`. A rotation re-sends
+    // the whole object set, and it seals a type into anything still stored without
+    // one, so it has no reason to send another label either.
+    if content_type != SEALED_CONTENT_TYPE {
         return Err(err(StatusCode::BAD_REQUEST, "invalid content type"));
     }
     if tombstone && nonce.is_empty() && ciphertext.is_empty() && padded_size == 0 {

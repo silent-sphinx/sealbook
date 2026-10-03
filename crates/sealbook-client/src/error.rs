@@ -30,6 +30,8 @@ pub enum ClientError {
     /// intact; only this accessor cannot represent it.
     #[error("object {0} is not valid UTF-8")]
     NonUtf8Object(uuid::Uuid),
+    #[error("object {0} has an envelope this build cannot read")]
+    Envelope(uuid::Uuid),
     #[error("pairing is still waiting")]
     PairPending,
     /// A recovery enrolled this device but never rotated the collection key, so
