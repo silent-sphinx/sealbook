@@ -20,7 +20,7 @@ use crate::{ClientError, ManifestError, SealbookClient};
 pub(crate) struct StoredObject {
     pub(crate) id: Uuid,
     pub(crate) content_type: String,
-    pub(crate) stored: String,
+    pub(crate) stored: Vec<u8>,
 }
 
 /// A collection as a rotation needs to see it: what can be re-encrypted, and the
@@ -34,7 +34,14 @@ pub(crate) struct VaultContents {
 struct PlainObject {
     id: Uuid,
     content_type: String,
-    plaintext: String,
+    plaintext: Vec<u8>,
+}
+
+impl PlainObject {
+    fn into_text(self) -> Result<String, ClientError> {
+        let id = self.id;
+        String::from_utf8(self.plaintext).map_err(|_| ClientError::NonUtf8Object(id))
+    }
 }
 
 #[derive(Deserialize)]
@@ -99,7 +106,7 @@ impl SealbookClient {
             if obj.content_type != ADDRESS_BOOK_CONTENT_TYPE {
                 continue;
             }
-            out.push((obj.id, container_name(&obj.plaintext)));
+            out.push((obj.id, container_name(&obj.into_text()?)));
         }
         out.sort_by(|a, b| {
             if a.0 == DEFAULT_ADDRESS_BOOK_ID {
@@ -119,7 +126,7 @@ impl SealbookClient {
             if obj.content_type != JSCONTACT_CONTENT_TYPE {
                 continue;
             }
-            out.push((obj.id, obj.plaintext));
+            out.push((obj.id, obj.into_text()?));
         }
         Ok(out)
     }
@@ -157,7 +164,7 @@ impl SealbookClient {
         let mut out = Vec::new();
         for obj in self.list_objects().await? {
             if obj.content_type == CALENDAR_CONTENT_TYPE {
-                out.push((obj.id, obj.plaintext));
+                out.push((obj.id, obj.into_text()?));
             }
         }
         Ok(out)
@@ -167,7 +174,7 @@ impl SealbookClient {
         let mut out = Vec::new();
         for obj in self.list_objects().await? {
             if obj.content_type == CALENDAR_EVENT_CONTENT_TYPE {
-                out.push((obj.id, obj.plaintext));
+                out.push((obj.id, obj.into_text()?));
             }
         }
         Ok(out)
@@ -253,7 +260,7 @@ impl SealbookClient {
             if obj.content_type != NOTEBOOK_CONTENT_TYPE {
                 continue;
             }
-            out.push((obj.id, container_name(&obj.plaintext)));
+            out.push((obj.id, container_name(&obj.into_text()?)));
         }
         out.sort_by(|a, b| {
             if a.0 == DEFAULT_NOTEBOOK_ID {
@@ -271,7 +278,7 @@ impl SealbookClient {
         let mut out = Vec::new();
         for obj in self.list_objects().await? {
             if obj.content_type == NOTE_CONTENT_TYPE {
-                out.push((obj.id, obj.plaintext));
+                out.push((obj.id, obj.into_text()?));
             }
         }
         Ok(out)
@@ -351,7 +358,7 @@ impl SealbookClient {
             contents.live.push(StoredObject {
                 id: obj.id,
                 content_type: obj.content_type,
-                stored: String::from_utf8_lossy(&plain).into_owned(),
+                stored: plain,
             });
         }
         Ok(contents)
@@ -385,16 +392,8 @@ impl SealbookClient {
             };
             let aad = object_aad(obj.id.as_bytes(), collection_id.as_bytes());
             let plain = decrypt_object(key, &encrypted, &aad)?;
-            let decrypted = String::from_utf8_lossy(&plain);
-            let (content_type, plaintext) = match serde_json::from_str::<StoredEnvelope>(&decrypted)
-            {
-                Ok(envelope) if envelope.version == 1 => {
-                    if envelope.tombstone {
-                        continue;
-                    }
-                    (envelope.content_type, envelope.payload)
-                }
-                _ => (obj.content_type, decrypted.into_owned()),
+            let Some((content_type, plaintext)) = unwrap_envelope(plain, obj.content_type) else {
+                continue;
             };
             out.push(PlainObject {
                 id: obj.id,
@@ -541,6 +540,25 @@ impl SealbookClient {
     }
 }
 
+/// Splits a stored plaintext into its content type and payload.
+///
+/// `sealbook-web` wraps objects in a JSON envelope; `put_sealed` writes the
+/// payload raw and the server's label is the only type on offer for those. The
+/// envelope is JSON, so it only parses out of valid UTF-8, and a payload that is
+/// not text takes the raw path with its bytes intact. Returns `None` for an
+/// envelope marked as a tombstone, which has no payload to read.
+fn unwrap_envelope(plain: Vec<u8>, served_content_type: String) -> Option<(String, Vec<u8>)> {
+    match serde_json::from_slice::<StoredEnvelope>(&plain) {
+        Ok(envelope) if envelope.version == 1 => {
+            if envelope.tombstone {
+                return None;
+            }
+            Some((envelope.content_type, envelope.payload.into_bytes()))
+        }
+        _ => Some((served_content_type, plain)),
+    }
+}
+
 /// The `name` of any container object: address book or notebook.
 pub(crate) fn container_name(plaintext: &str) -> String {
     serde_json::from_str::<serde_json::Value>(plaintext)
@@ -554,4 +572,49 @@ pub(crate) fn container_name(plaintext: &str) -> String {
                 .map(ToOwned::to_owned)
         })
         .unwrap_or_else(|| "Untitled".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{unwrap_envelope, PlainObject};
+    use uuid::Uuid;
+
+    const RAW_TYPE: &str = "application/jscontact+json";
+
+    #[test]
+    fn a_raw_payload_keeps_bytes_that_are_not_utf8() {
+        let plain = vec![0x00, 0xff, 0xfe, b'{'];
+        let (content_type, payload) =
+            unwrap_envelope(plain.clone(), RAW_TYPE.to_string()).expect("not a tombstone");
+        assert_eq!(content_type, RAW_TYPE);
+        assert_eq!(
+            payload, plain,
+            "rotation would re-encrypt a mangled payload"
+        );
+    }
+
+    #[test]
+    fn an_envelope_supplies_the_content_type() {
+        let plain = br#"{"version":1,"contentType":"text/vnd.sealbook.note","tombstone":false,"payload":"hi"}"#;
+        let (content_type, payload) =
+            unwrap_envelope(plain.to_vec(), RAW_TYPE.to_string()).expect("not a tombstone");
+        assert_eq!(content_type, "text/vnd.sealbook.note");
+        assert_eq!(payload, b"hi");
+    }
+
+    #[test]
+    fn an_envelope_tombstone_has_no_payload() {
+        let plain = br#"{"version":1,"contentType":"text/vnd.sealbook.note","tombstone":true,"payload":""}"#;
+        assert!(unwrap_envelope(plain.to_vec(), RAW_TYPE.to_string()).is_none());
+    }
+
+    #[test]
+    fn into_text_refuses_bytes_that_are_not_utf8() {
+        let obj = PlainObject {
+            id: Uuid::nil(),
+            content_type: RAW_TYPE.to_string(),
+            plaintext: vec![0xff, 0xfe],
+        };
+        assert!(obj.into_text().is_err());
+    }
 }

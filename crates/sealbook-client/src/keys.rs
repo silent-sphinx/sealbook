@@ -148,7 +148,7 @@ impl SealbookClient {
         let mut objects = Vec::with_capacity(plaintexts.live.len());
         for (index, stored) in plaintexts.live.iter().enumerate() {
             let aad = object_aad(stored.id.as_bytes(), collection_id.as_bytes());
-            let enc = encrypt_object(&new_ck, stored.stored.as_bytes(), &aad)?;
+            let enc = encrypt_object(&new_ck, &stored.stored, &aad)?;
             objects.push(RotatedObject {
                 id: stored.id,
                 revision: first_revision + index as u64,

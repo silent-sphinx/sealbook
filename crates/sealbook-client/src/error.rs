@@ -25,6 +25,11 @@ pub enum ClientError {
     NoCollectionKey,
     #[error("invalid nonce")]
     Nonce,
+    /// Read through a helper that returns `String`, of an object whose plaintext
+    /// is not text. Rotation carries bytes through untouched, so the object is
+    /// intact; only this accessor cannot represent it.
+    #[error("object {0} is not valid UTF-8")]
+    NonUtf8Object(uuid::Uuid),
     #[error("pairing is still waiting")]
     PairPending,
     /// A recovery enrolled this device but never rotated the collection key, so
