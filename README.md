@@ -183,7 +183,7 @@ Everything is set through environment variables in `docker-compose.yml`.
 | `SEALBOOK_MAX_OBJECTS` | `50000` | Most objects one account may store: contacts, events, notes, and the address books, calendars and notebooks holding them. |
 | `SEALBOOK_MAX_BYTES` | `134217728` | Most stored bytes one account may use (128 MiB of padded ciphertext). |
 | `SEALBOOK_MAX_ROTATION_BODY` | `268435456` | Largest key-rotation request (256 MiB). See [Storage limits](#storage-limits) before changing it. |
-| `SEALBOOK_REVISION_RETENTION_DAYS` | `30` | How long superseded object revisions are kept so clients can sync incrementally. |
+| `SEALBOOK_REVISION_RETENTION_DAYS` | `30` | How long a deleted object's tombstone has to be kept: a key rotation retires the ones older than this, so a longer window means deletions take longer to reclaim their quota. |
 | `SEALBOOK_FULL_INTEGRITY_CHECK` | unset | Set to `1` for an exhaustive SQLite check at startup instead of the quick one. Worth it after a crash or a restore. |
 | `RUST_LOG` | unset | Log level. `sealbook_server=info` is a good default; `=debug` when something is wrong. |
 

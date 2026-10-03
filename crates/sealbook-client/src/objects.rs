@@ -22,12 +22,18 @@ pub(crate) struct StoredObject {
     pub(crate) stored: Vec<u8>,
 }
 
-/// A collection as a rotation needs to see it: what can be re-encrypted, and the
-/// tombstones that cannot but still belong in the manifest.
+/// A collection as a rotation needs to see it: what can be re-encrypted, the
+/// tombstones that cannot but still belong in the manifest, and the ones the
+/// rotation can retire.
 #[derive(Default)]
 pub(crate) struct VaultContents {
     pub(crate) live: Vec<StoredObject>,
     pub(crate) tombstones: Vec<ManifestEntry>,
+    /// Tombstones below the collection's floor, which this rotation drops
+    /// instead of carrying. Nothing else compacts them: each is a row and a
+    /// manifest entry, and only a device can sign the manifest that leaves one
+    /// out, so a rotation is the only place they can go.
+    pub(crate) retired: Vec<Uuid>,
 }
 
 struct PlainObject {
@@ -282,14 +288,21 @@ impl SealbookClient {
             .as_ref()
             .ok_or(ClientError::NoState)?
             .collection_id;
-        let objects = self.fetch_verified_objects().await?;
+        let verified = self.fetch_verified_objects().await?;
         let key = self
             .collection_key
             .as_ref()
             .ok_or(ClientError::NoCollectionKey)?;
         let mut contents = VaultContents::default();
-        for obj in objects {
+        for obj in verified.objects {
             if obj.tombstone {
+                // Below the floor no incremental answer can still carry this
+                // delete, so the row has done its job and this rotation retires
+                // it rather than signing for it again.
+                if obj.revision < verified.tombstone_floor {
+                    contents.retired.push(obj.id);
+                    continue;
+                }
                 contents.tombstones.push(ManifestEntry {
                     id: obj.id,
                     revision: obj.revision,
@@ -332,7 +345,7 @@ impl SealbookClient {
             .as_ref()
             .ok_or(ClientError::NoState)?
             .collection_id;
-        let objects = self.fetch_verified_objects().await?;
+        let objects = self.fetch_verified_objects().await?.objects;
         let key = self
             .collection_key
             .as_ref()
@@ -440,9 +453,7 @@ impl SealbookClient {
     /// Walks the paginated change feed to the end, then verifies the whole set at
     /// once — a page on its own cannot be checked, since the manifest commits to
     /// the collection rather than to any page of it.
-    async fn fetch_verified_objects(
-        &mut self,
-    ) -> Result<Vec<sealbook_protocol::ObjectChange>, ClientError> {
+    async fn fetch_verified_objects(&mut self) -> Result<VerifiedObjects, ClientError> {
         let (server, collection_id, token) = {
             let state = self.state.as_ref().ok_or(ClientError::NoState)?;
             (
@@ -454,6 +465,7 @@ impl SealbookClient {
         let mut objects: Vec<sealbook_protocol::ObjectChange> = Vec::new();
         let mut after = 0u64;
         let mut manifest;
+        let mut tombstone_floor;
         loop {
             let page: ChangesResponse = self
                 .get_json(
@@ -470,6 +482,7 @@ impl SealbookClient {
                 )
                 .await?;
             manifest = page.manifest.clone();
+            tombstone_floor = page.tombstone_floor;
             let page_high = page.objects.iter().map(|object| object.revision).max();
             objects.extend(page.objects);
             match (page.has_more, page_high) {
@@ -512,8 +525,18 @@ impl SealbookClient {
                 }
             }
         }
-        Ok(latest)
+        Ok(VerifiedObjects {
+            objects: latest,
+            tombstone_floor,
+        })
     }
+}
+
+/// One verified walk of the collection: the latest revision of every row, and
+/// the floor that says which of its tombstones a rotation may retire.
+struct VerifiedObjects {
+    objects: Vec<sealbook_protocol::ObjectChange>,
+    tombstone_floor: u64,
 }
 
 /// The `name` of any container object: address book or notebook.

@@ -168,14 +168,19 @@ impl Limits {
     ///
     /// Checked on every write, so that a vault can never grow into a state where
     /// revoking a device is impossible.
-    fn rotation_fits(&self, objects: i64, padded_bytes: i64) -> bool {
-        rotation_body_estimate(objects, padded_bytes) <= self.max_rotation_body as i64
+    fn rotation_fits(&self, objects: i64, padded_bytes: i64, tombstones: i64) -> bool {
+        rotation_body_estimate(objects, padded_bytes, tombstones) <= self.max_rotation_body as i64
     }
 
     /// The largest vault, in padded bytes, that can still be rotated. Logged at
     /// startup so an operator sees the effective ceiling rather than inferring it.
     fn rotatable_bytes_ceiling(&self) -> i64 {
-        let budget = (self.max_rotation_body as i64).saturating_sub(ROTATION_ENVELOPE);
+        let retirements = self
+            .max_objects
+            .saturating_mul(ROTATION_PER_RETIREMENT_OVERHEAD);
+        let budget = (self.max_rotation_body as i64)
+            .saturating_sub(ROTATION_ENVELOPE)
+            .saturating_sub(retirements);
         (budget.max(0) * 3 / 4).saturating_sub(16)
     }
 }
@@ -189,6 +194,10 @@ const ROTATION_ENVELOPE: i64 = 128 * 1024;
 /// revision, padded size, content type and tombstone flag. Rounded up.
 const ROTATION_PER_OBJECT_OVERHEAD: i64 = 320;
 
+/// Bytes per tombstone a rotation retires: one quoted UUID and a comma in
+/// `drop_tombstones`. Rounded up from 39.
+const ROTATION_PER_RETIREMENT_OVERHEAD: i64 = 48;
+
 /// Bytes of JSON a rotation request would carry for a vault of this shape.
 ///
 /// A rotation re-encrypts the entire vault in one request body, so a vault that
@@ -200,11 +209,15 @@ const ROTATION_PER_OBJECT_OVERHEAD: i64 = 320;
 ///
 /// Deliberately an over-estimate. Each object's ciphertext is its padded
 /// plaintext plus a 16-byte AEAD tag, which base64url expands by four thirds.
-pub(crate) fn rotation_body_estimate(objects: i64, padded_bytes: i64) -> i64 {
+/// `tombstones` is counted because a rotation also names every tombstone it
+/// retires, and a vault at the tombstone ceiling carries as many of those ids as
+/// it has objects.
+pub(crate) fn rotation_body_estimate(objects: i64, padded_bytes: i64, tombstones: i64) -> i64 {
     let ciphertext = padded_bytes.saturating_add(objects.saturating_mul(16));
     let encoded = ciphertext.saturating_mul(4).saturating_add(2) / 3;
     ROTATION_ENVELOPE
         .saturating_add(objects.saturating_mul(ROTATION_PER_OBJECT_OVERHEAD))
+        .saturating_add(tombstones.saturating_mul(ROTATION_PER_RETIREMENT_OVERHEAD))
         .saturating_add(encoded)
 }
 
@@ -759,26 +772,37 @@ mod tests {
     #[test]
     fn the_default_quota_can_be_rotated() {
         let limits = Limits::default();
+        // Both ceilings at once *and* a full set of tombstones to retire, which
+        // is the largest rotation body an account can produce.
         assert!(
-            limits.rotation_fits(limits.max_objects, limits.max_bytes),
+            limits.rotation_fits(limits.max_objects, limits.max_bytes, limits.max_objects),
             "a vault at the default quota must still fit in one rotation: \
              {} bytes needed, {} allowed",
-            rotation_body_estimate(limits.max_objects, limits.max_bytes),
+            rotation_body_estimate(limits.max_objects, limits.max_bytes, limits.max_objects),
             limits.max_rotation_body
         );
         // And the object quota is reachable rather than decorative: the smallest
         // legal object is 256 padded bytes.
         let smallest = limits.max_objects * sealbook_protocol::MIN_PADDED_OBJECT_SIZE as i64;
         assert!(
-            limits.rotation_fits(limits.max_objects, smallest),
+            limits.rotation_fits(limits.max_objects, smallest, limits.max_objects),
             "max_objects must be reachable with minimum-size objects"
+        );
+        // The byte quota has to be reachable too, or writes are refused before
+        // the account ever gets near it. Retiring tombstones costs body bytes,
+        // so this is the invariant that narrows as `max_objects` grows.
+        assert!(
+            limits.max_bytes <= limits.rotatable_bytes_ceiling(),
+            "the byte quota {} is above the rotatable ceiling {}",
+            limits.max_bytes,
+            limits.rotatable_bytes_ceiling()
         );
     }
 
     #[test]
     fn a_vault_past_the_rotation_budget_does_not_fit() {
         let limits = Limits::default();
-        assert!(!limits.rotation_fits(limits.max_objects, limits.max_bytes * 4));
+        assert!(!limits.rotation_fits(limits.max_objects, limits.max_bytes * 4, 0));
     }
 
     /// The pairing `MAX_OBJECT_BODY` claims in prose, checked. Nothing held these
@@ -799,7 +823,7 @@ mod tests {
     #[test]
     fn the_rotation_estimate_covers_base64_expansion() {
         let raw = 3 * 1024 * 1024;
-        let estimate = rotation_body_estimate(1, raw);
+        let estimate = rotation_body_estimate(1, raw, 0);
         assert!(
             estimate > raw * 4 / 3,
             "estimate {estimate} does not cover {raw} bytes of base64"

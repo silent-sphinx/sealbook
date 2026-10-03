@@ -277,6 +277,44 @@ pub(crate) async fn rotate(
             .fetch_one(&mut *tx)
             .await
             .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+
+    let log_floor: i64 =
+        sqlx::query_scalar("SELECT MIN(revision) FROM object_revisions WHERE account_id = ?")
+            .bind(&session.account_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
+            .flatten()
+            .unwrap_or(first_revision);
+    // A set, not a list: a vault at the tombstone ceiling holds as many of these
+    // as it has objects, and a membership scan per id would be quadratic in that.
+    let retirable: std::collections::HashSet<String> = sqlx::query(
+        "SELECT id FROM objects
+         WHERE account_id = ? AND collection_id = ? AND tombstone = 1 AND revision < ?",
+    )
+    .bind(&session.account_id)
+    .bind(&collection_id_text)
+    .bind(log_floor)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
+    .into_iter()
+    .map(|row| row.get::<String, _>("id"))
+    .collect();
+    let mut dropped: Vec<String> = body
+        .drop_tombstones
+        .iter()
+        .map(|id| id.to_string())
+        .collect();
+    let before_dedup = dropped.len();
+    dropped.sort();
+    dropped.dedup();
+    if dropped.len() != before_dedup || !dropped.iter().all(|id| retirable.contains(id)) {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "a rotation may only retire tombstones below the collection's tombstone floor,              each named once",
+        ));
+    }
     for (index, object) in body.objects.iter().enumerate() {
         if object.revision != (first_revision as u64) + index as u64 {
             return Err(err(
@@ -370,6 +408,16 @@ pub(crate) async fn rotate(
     .await
     .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
 
+    for id in &dropped {
+        sqlx::query("DELETE FROM objects WHERE account_id = ? AND collection_id = ? AND id = ?")
+            .bind(&session.account_id)
+            .bind(&collection_id_text)
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    }
+
     let mut revision = first_revision;
     for (object, digest) in body.objects.iter().zip(&content_digests) {
         sqlx::query(
@@ -412,10 +460,11 @@ pub(crate) async fn rotate(
         revision += 1;
     }
     // A rotation re-encrypts exactly the live objects and cannot tombstone one,
-    // so neither count can change here, but padding can put each object in a
-    // different size bucket. All three are re-derived from the rows rather than
-    // adjusted, which also heals any drift a past bug left behind. The index
-    // covers every column read, so this is one index-only pass.
+    // so the live count cannot change here, but retiring tombstones drops rows
+    // and padding can put each object in a different size bucket. All three are
+    // re-derived from the rows rather than adjusted, which also heals any drift a
+    // past bug left behind. The index covers every column read, so this is one
+    // index-only pass.
     let totals: (i64, i64, i64) = sqlx::query_as(
         "SELECT COUNT(*), COALESCE(SUM(padded_size), 0), COALESCE(SUM(tombstone), 0)
          FROM objects WHERE account_id = ?",

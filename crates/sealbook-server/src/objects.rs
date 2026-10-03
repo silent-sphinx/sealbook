@@ -115,11 +115,14 @@ pub(crate) async fn put_object(
         ));
     }
     // Tombstones still cost a row and a manifest entry each, so they get their
-    // own ceiling rather than no ceiling.
+    // own ceiling rather than no ceiling. Reaching it is no longer permanent: a
+    // rotation retires every tombstone below the collection's floor, so the
+    // message says so rather than leaving the account with no way forward.
     if tombstones_after > max_objects {
         return Err(err(
             StatusCode::INSUFFICIENT_STORAGE,
-            "account storage quota exceeded: too many deleted objects",
+            "account storage quota exceeded: too many deleted objects. Rotating the \
+             collection key retires the ones no device can still be told about.",
         ));
     }
     // The vault also has to stay small enough to rotate. A rotation re-encrypts
@@ -127,7 +130,10 @@ pub(crate) async fn put_object(
     // rotated — and every operation that has to invalidate the collection key
     // goes through a rotation. Refusing the write is the only failure mode that
     // does not end with a revoked device still holding a working key.
-    if !state.limits.rotation_fits(live_after, bytes_after) {
+    if !state
+        .limits
+        .rotation_fits(live_after, bytes_after, tombstones_after)
+    {
         return Err(err(
             StatusCode::INSUFFICIENT_STORAGE,
             "account storage quota exceeded: the vault would grow past what one \
@@ -319,20 +325,20 @@ pub(crate) async fn changes(
             .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
             .ok_or_else(|| err(StatusCode::NOT_FOUND, "collection"))?;
 
+    // The oldest revision the log still holds, which is both what decides a
+    // resync below and which tombstones a rotation may retire. An empty log
+    // bridges nothing, so the floor sits above every revision assigned.
+    let log_floor: i64 =
+        sqlx::query_scalar("SELECT MIN(revision) FROM object_revisions WHERE account_id = ?")
+            .bind(&session.account_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
+            .flatten()
+            .unwrap_or(latest_assigned + 1);
+
     // Can the log bridge the gap between what the client has and now?
-    let needs_resync = !snapshot && after > 0 && after < latest_assigned && {
-        let floor: Option<i64> =
-            sqlx::query_scalar("SELECT MIN(revision) FROM object_revisions WHERE account_id = ?")
-                .bind(&session.account_id)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
-                .flatten();
-        match floor {
-            Some(floor) => after + 1 < floor,
-            None => true,
-        }
-    };
+    let needs_resync = !snapshot && after > 0 && after < latest_assigned && after + 1 < log_floor;
     if needs_resync {
         // Deliberately empty. Saying "restart from the beginning as a snapshot" in
         // one round trip is unambiguous; serving a partial snapshot from the
@@ -349,6 +355,7 @@ pub(crate) async fn changes(
             has_more: false,
             manifest,
             resync: true,
+            tombstone_floor: log_floor as u64,
         }));
     }
 
@@ -417,6 +424,7 @@ pub(crate) async fn changes(
         manifest,
         // A snapshot walk is itself the resync.
         resync: snapshot,
+        tombstone_floor: log_floor as u64,
     }))
 }
 

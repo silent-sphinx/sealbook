@@ -162,10 +162,15 @@ impl SealbookClient {
         }
 
         let key_epoch = epoch + 1;
-        // Tombstones are not re-encrypted, but they are still rows the manifest
-        // commits to, so they carry their stored revision and digest through
-        // unchanged. Omitting them left the manifest short and the rotation
-        // refused on any vault that had ever had a deletion.
+        // Tombstones are not re-encrypted, but the ones this rotation keeps are
+        // still rows the manifest commits to, so they carry their stored revision
+        // and digest through unchanged. Omitting them left the manifest short and
+        // the rotation refused on any vault that had ever had a deletion.
+        //
+        // The ones below the floor are left out on purpose, and the request names
+        // them in `drop_tombstones`. This manifest is what authorises that: the
+        // server retires exactly those rows and then recomputes the digest from
+        // what it holds, so a list that does not match this entry set is refused.
         let mut manifest_entries: Vec<ManifestEntry> = objects
             .iter()
             .map(|object| ManifestEntry {
@@ -254,6 +259,7 @@ impl SealbookClient {
                         ed25519: signature.ed25519,
                     },
                     roster: new_roster.clone(),
+                    drop_tombstones: plaintexts.retired.clone(),
                 },
                 Some(&token),
             )

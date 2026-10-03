@@ -515,6 +515,8 @@ pub struct ChangesResponse {
     /// deserializes a response carrying it.
     #[serde(default)]
     pub resync: bool,
+    #[serde(default)]
+    pub tombstone_floor: u64,
 }
 
 /// The requesting device's current collection-key wrap.
@@ -570,6 +572,16 @@ pub struct RotateRequest {
     /// The remaining devices and the new phrase key, at the new epoch, signed by
     /// the rotating device.
     pub roster: RosterBody,
+    /// Tombstones this rotation retires, which must each be below the
+    /// collection's `tombstone_floor`.
+    ///
+    /// Not covered by `rotation_signature` and it does not need to be: `manifest`
+    /// commits to the entry set the rotation leaves behind, and the server
+    /// recomputes that from its own rows afterwards. Adding an id here or taking
+    /// one away changes the rows and the manifest stops matching, so the signed
+    /// manifest is what pins this list.
+    #[serde(default)]
+    pub drop_tombstones: Vec<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

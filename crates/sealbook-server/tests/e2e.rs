@@ -2519,6 +2519,7 @@ async fn a_rotation_that_tombstones_a_live_object_is_refused() {
             },
             &new_ck,
         ),
+        drop_tombstones: Vec::new(),
     };
 
     let response = http
@@ -2729,6 +2730,7 @@ async fn a_rotation_whose_recovery_material_was_modified_after_signing_is_refuse
             ed25519: signature.ed25519,
         },
         roster,
+        drop_tombstones: Vec::new(),
     };
     let url = format!("{base}/v1/collections/{collection_id}/rotate");
 
@@ -4504,4 +4506,385 @@ async fn a_per_kind_content_type_is_refused() {
     assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
     pool.close().await;
     let _ = std::fs::remove_dir_all(db.parent().unwrap());
+}
+
+/// Tombstones are rows the manifest commits to, and only a device can sign a
+/// manifest, so nothing but a rotation can ever retire one. Before this, nothing
+/// did: an account that deleted `max_objects` distinct objects could never delete
+/// again. A rotation now drops the ones the change feed can no longer carry.
+#[tokio::test]
+async fn a_rotation_retires_tombstones_the_change_feed_can_no_longer_carry() {
+    let dir = std::env::temp_dir().join(format!("sealbook-tombstones-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let password = "correct horse battery";
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "tombalice", password)
+        .await
+        .expect("register");
+    let doomed: Vec<Uuid> = (0..3).map(|_| Uuid::new_v4()).collect();
+    for (index, id) in doomed.iter().enumerate() {
+        client
+            .put_contact(
+                *id,
+                &format!(r#"{{"@type":"Card","name":{{"full":"Gone {index}"}}}}"#),
+            )
+            .await
+            .expect("put");
+    }
+    for id in &doomed {
+        client.delete_contact(*id).await.expect("delete");
+    }
+    // A live write last, so the newest revision the sweep keeps is not itself a
+    // tombstone and all three fall below the floor.
+    let survivor = Uuid::new_v4();
+    client
+        .put_contact(survivor, r#"{"@type":"Card","name":{"full":"Still here"}}"#)
+        .await
+        .expect("put survivor");
+
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .expect("open db");
+    assert_eq!(
+        tombstone_rows(&pool).await,
+        3,
+        "three deletes should leave three tombstone rows"
+    );
+
+    // Age the revision log out from under them. A client behind this point is
+    // told to resync, and the live state it is then served already lacks the
+    // deleted objects, so the rows have nothing left to say.
+    sqlx::query("UPDATE object_revisions SET created_at = 0")
+        .execute(&pool)
+        .await
+        .expect("age the log");
+    sealbook_server::prune_old_revisions(&pool, std::time::Duration::from_secs(1))
+        .await
+        .expect("prune");
+
+    // Rotating is the only thing that can retire them, because it is the only
+    // thing that signs a new manifest over the whole collection.
+    client.change_phrase(password).await.expect("rotate");
+
+    assert_eq!(
+        tombstone_rows(&pool).await,
+        0,
+        "the rotation should have retired every tombstone below the floor"
+    );
+    let counted: i64 = sqlx::query_scalar("SELECT tombstone_count FROM revision_seq")
+        .fetch_one(&pool)
+        .await
+        .expect("tombstone_count");
+    assert_eq!(counted, 0, "the quota counter must follow the rows");
+    pool.close().await;
+
+    // The vault is still readable and still writable, including deletes, which is
+    // what the ceiling used to block for good.
+    let contacts = client.list_contacts().await.expect("list");
+    assert_eq!(
+        contacts.len(),
+        1,
+        "the surviving contact must still be there"
+    );
+    assert_eq!(contacts[0].0, survivor);
+    client.delete_contact(survivor).await.expect("delete again");
+    assert!(client.list_contacts().await.expect("list").is_empty());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The other direction: while the feed can still carry a delete, its row has to
+/// stay. Retiring it would leave a lagging device verifying a set the manifest no
+/// longer describes, which that device sees as tampering and refuses.
+#[tokio::test]
+async fn a_rotation_keeps_tombstones_the_change_feed_can_still_carry() {
+    let dir = std::env::temp_dir().join(format!("sealbook-tombkeep-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let password = "correct horse battery";
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "keepalice", password)
+        .await
+        .expect("register");
+    let doomed = Uuid::new_v4();
+    client
+        .put_contact(doomed, r#"{"@type":"Card","name":{"full":"Gone"}}"#)
+        .await
+        .expect("put");
+    client.delete_contact(doomed).await.expect("delete");
+
+    // No pruning, so the delete is still in the log and still reachable.
+    client.change_phrase(password).await.expect("rotate");
+
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .expect("open db");
+    assert_eq!(
+        tombstone_rows(&pool).await,
+        1,
+        "a tombstone the feed can still carry must survive the rotation"
+    );
+    pool.close().await;
+
+    // And the rotated collection still verifies against its manifest, which is
+    // what would break if the counts and the rows had drifted apart.
+    assert!(client.list_contacts().await.expect("list").is_empty());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+async fn tombstone_rows(pool: &sqlx::SqlitePool) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM objects WHERE tombstone = 1")
+        .fetch_one(pool)
+        .await
+        .expect("count tombstones")
+}
+
+/// The client decides which tombstones to retire, so the server checks the list
+/// against its own floor. Without that check a client could retire a delete the
+/// feed still carries, and every lagging device would then refuse to sync.
+#[tokio::test]
+async fn a_rotation_that_retires_a_tombstone_above_the_floor_is_refused() {
+    use sealbook_crypto::{
+        content_digest, generate_kdf_salt, generate_phrase, key_rotation_transcript,
+        key_wraps_digest, manifest_digest, manifest_transcript, phrase_lookup_id,
+        phrase_recovery_public, rotated_objects_digest, rotation_recovery_payload, sign,
+        wrap_collection_key, wrap_for_device, wrap_for_phrase, CollectionKey, DeviceHpkePublic,
+        DeviceSigningSecrets, ManifestDigestEntry, ObjectDigestEntry, WrapDigestEntry,
+        PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
+    };
+    use sealbook_protocol::{DevicePublicKeys, ManifestBody, PhraseRecoveryBody, RotateRequest};
+
+    let dir = std::env::temp_dir().join(format!("sealbook-tombfloor-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let password = "correct horse battery";
+    let mut owner = SealbookClient::plaintext_http();
+    owner.register(&base, "flooralice", password).await.unwrap();
+    // One delete and nothing live, so the rotation has no object to re-encrypt
+    // and the only entry in its manifest is the tombstone.
+    let doomed = Uuid::new_v4();
+    owner
+        .put_contact(doomed, r#"{"@type":"Card","name":{"full":"Gone"}}"#)
+        .await
+        .expect("put");
+    owner.delete_contact(doomed).await.expect("delete");
+
+    let state = owner.state.as_ref().unwrap();
+    let (collection_id, device_id, token) = (
+        state.collection_id,
+        state.device_id,
+        state.session_token.clone().unwrap(),
+    );
+    let secrets = DeviceSigningSecrets {
+        mldsa_seed: state.mldsa_seed.clone(),
+        ed25519_sk: state.ed25519_sk.clone(),
+    };
+    let http = reqwest::Client::new();
+
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    let tombstone_revision: i64 =
+        sqlx::query_scalar("SELECT revision FROM objects WHERE tombstone = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let next_revision: i64 = sqlx::query_scalar("SELECT next_revision FROM revision_seq")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let manifest_seq: i64 = sqlx::query_scalar("SELECT manifest_seq FROM manifests")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    let devices: Vec<DevicePublicKeys> = http
+        .get(format!("{base}/v1/account/devices"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let device = devices
+        .into_iter()
+        .find(|candidate| candidate.device_id == device_id)
+        .expect("the registering device must be enrolled");
+
+    let new_ck = CollectionKey::generate();
+    let salt = generate_kdf_salt();
+    let (_phrase, entropy) = generate_phrase().unwrap();
+    let device_wrap =
+        wrap_for_device(&DeviceHpkePublic(device.xwing_hpke_pk.clone()), &new_ck).unwrap();
+    let recovery_wrap = wrap_collection_key(password.as_bytes(), &salt, &new_ck).unwrap();
+    let phrase_wrap = wrap_for_phrase(&entropy, &new_ck).unwrap();
+    let key_wraps = vec![
+        KeyWrapBody {
+            recipient_kind: "device".into(),
+            recipient_id: device_id.to_string(),
+            hpke_enc: device_wrap.enc,
+            wrapped_ck: device_wrap.ciphertext,
+            ciphersuite: XWING_CIPHERSUITE.into(),
+        },
+        KeyWrapBody {
+            recipient_kind: "recovery".into(),
+            recipient_id: "flooralice".into(),
+            hpke_enc: recovery_wrap.nonce.to_vec(),
+            wrapped_ck: recovery_wrap.ciphertext,
+            ciphersuite: RECOVERY_CIPHERSUITE.into(),
+        },
+        KeyWrapBody {
+            recipient_kind: "phrase".into(),
+            recipient_id: "flooralice".into(),
+            hpke_enc: phrase_wrap.nonce.to_vec(),
+            wrapped_ck: phrase_wrap.ciphertext,
+            ciphersuite: PHRASE_CIPHERSUITE.into(),
+        },
+    ];
+    let phrase_public = phrase_recovery_public(&entropy).unwrap();
+    let phrase_recovery = PhraseRecoveryBody {
+        mldsa_pk: phrase_public.mldsa_pk.clone(),
+        ed25519_pk: phrase_public.ed25519_pk.clone(),
+        lookup_id: phrase_lookup_id(&entropy).unwrap().to_vec(),
+        scheme: PHRASE_SCHEME.into(),
+    };
+
+    // A tombstone row carries no ciphertext, so its content digest is the digest
+    // of two empty byte strings.
+    let kept = ManifestDigestEntry {
+        id: doomed,
+        revision: tombstone_revision as u64,
+        tombstone: true,
+        content_digest: content_digest(&[], &[]),
+    };
+    let digest = manifest_digest(&[kept]);
+    let key_epoch = owner.server_key_epoch().await.unwrap() + 1;
+    let latest_revision = (next_revision - 1) as u64;
+    let seq = (manifest_seq + 1) as u64;
+    let manifest_sig = sign(
+        &secrets,
+        &manifest_transcript(collection_id, seq, key_epoch, latest_revision, 1, &digest),
+    )
+    .unwrap();
+    let manifest = ManifestBody {
+        manifest_seq: seq,
+        key_epoch,
+        latest_revision,
+        object_count: 1,
+        digest: digest.to_vec(),
+        device_id,
+        signature: DualSignatureBody {
+            mldsa: manifest_sig.mldsa,
+            ed25519: manifest_sig.ed25519,
+        },
+    };
+
+    let wrap_entries: Vec<WrapDigestEntry<'_>> = key_wraps
+        .iter()
+        .map(|wrap| WrapDigestEntry {
+            recipient_kind: &wrap.recipient_kind,
+            recipient_id: &wrap.recipient_id,
+            hpke_enc: &wrap.hpke_enc,
+            wrapped_ck: &wrap.wrapped_ck,
+            ciphersuite: &wrap.ciphersuite,
+        })
+        .collect();
+    let no_objects: Vec<ObjectDigestEntry<'_>> = Vec::new();
+    let signature = sign(
+        &secrets,
+        &key_rotation_transcript(
+            collection_id,
+            None,
+            key_epoch,
+            &key_wraps_digest(&wrap_entries),
+            &rotated_objects_digest(&no_objects),
+            &digest,
+            &rotation_recovery_payload(
+                &salt,
+                &phrase_recovery.mldsa_pk,
+                &phrase_recovery.ed25519_pk,
+                &phrase_recovery.lookup_id,
+                &phrase_recovery.scheme,
+            ),
+        ),
+    )
+    .unwrap();
+    let roster = hand_roster(
+        collection_id,
+        2,
+        key_epoch,
+        vec![device.clone()],
+        phrase_recovery.mldsa_pk.clone(),
+        phrase_recovery.ed25519_pk.clone(),
+        sealbook_crypto::RosterSigner::Device(device_id),
+        &secrets,
+        &new_ck,
+    );
+    let valid = RotateRequest {
+        key_epoch,
+        revoke_device_id: None,
+        kdf_salt: salt.to_vec(),
+        key_wraps,
+        phrase_recovery,
+        objects: Vec::new(),
+        manifest,
+        rotation_signature: DualSignatureBody {
+            mldsa: signature.mldsa,
+            ed25519: signature.ed25519,
+        },
+        roster,
+        drop_tombstones: Vec::new(),
+    };
+    let url = format!("{base}/v1/collections/{collection_id}/rotate");
+
+    // The delete is still in the log, so this tombstone is above the floor and
+    // must not be retirable. Everything else about the request is valid.
+    let forged = RotateRequest {
+        drop_tombstones: vec![doomed],
+        ..valid.clone()
+    };
+    let response = http
+        .post(&url)
+        .bearer_auth(&token)
+        .json(&forged)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 400);
+    let body: sealbook_protocol::ErrorBody = response.json().await.unwrap();
+    assert!(
+        body.error.contains("tombstone floor"),
+        "the refusal should name the floor, got: {}",
+        body.error
+    );
+
+    // The control: the same rotation, retiring nothing, is accepted. Without it
+    // the assertion above would pass on any unrelated malformation.
+    let response = http
+        .post(&url)
+        .bearer_auth(&token)
+        .json(&valid)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        200,
+        "the same rotation without a retirement must be accepted: {}",
+        response.text().await.unwrap_or_default()
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
 }
