@@ -53,6 +53,25 @@ impl SealbookClient {
                 None,
             )
             .await?;
+
+        if start.roster_seq == 0 || start.roster_transcript.len() != 32 {
+            return Err(ClientError::Server(
+                "the server sent no roster for this account to anchor on".into(),
+            ));
+        }
+        let expected_confirm = pair_confirmation(
+            start.pair_id,
+            device_id,
+            &mldsa_pk,
+            &ed25519_pk,
+            &xwing_hpke_pk,
+            start.roster_seq,
+            &start.roster_transcript,
+        );
+        if start.confirm != expected_confirm {
+            return Err(ClientError::Server("pair confirmation mismatch".into()));
+        }
+
         self.state = Some(LocalState {
             server: server.trim_end_matches('/').to_string(),
             username: username.to_string(),
@@ -65,19 +84,9 @@ impl SealbookClient {
             mldsa_seed: sign_sk.mldsa_seed.clone(),
             ed25519_sk: sign_sk.ed25519_sk.clone(),
             manifest_seq: 0,
-            roster_seq: 0,
-            roster_transcript: Vec::new(),
+            roster_seq: start.roster_seq,
+            roster_transcript: start.roster_transcript,
         });
-        let expected_confirm = pair_confirmation(
-            start.pair_id,
-            device_id,
-            &mldsa_pk,
-            &ed25519_pk,
-            &xwing_hpke_pk,
-        );
-        if start.confirm != expected_confirm {
-            return Err(ClientError::Server("pair confirmation mismatch".into()));
-        }
         Ok((start.pair_code, expected_confirm))
     }
 
@@ -128,21 +137,6 @@ impl SealbookClient {
             .device
             .clone()
             .ok_or(ClientError::Server("pair".into()))?;
-        let confirm = pair_confirmation(
-            pair_id,
-            device.device_id,
-            &device.mldsa_pk,
-            &device.ed25519_pk,
-            &device.xwing_hpke_pk,
-        );
-        if preview.confirm != confirm {
-            return Err(ClientError::Server("pair confirmation mismatch".into()));
-        }
-        // Codes are 26 characters, so they are usually shown and typed in
-        // groups. Compare on the normalized form, but send the canonical one.
-        if normalize_confirmation(confirmation) != confirm {
-            return Err(ClientError::Server("pair confirmation mismatch".into()));
-        }
         let current = self.verified_roster().await?;
         if current.key_epoch != self.key_epoch {
             return Err(ClientError::Server(
@@ -161,6 +155,32 @@ impl SealbookClient {
             ));
         }
         let state = self.state.as_ref().ok_or(ClientError::NoState)?;
+
+        let anchor = current.pin(state.collection_id);
+        if let Some(seq) = preview.roster_seq.filter(|seq| *seq != anchor.roster_seq) {
+            return Err(ClientError::Server(format!(
+                "the joining device started pairing against roster {seq} but this account is \
+                 now on roster {}; start the pairing again",
+                anchor.roster_seq
+            )));
+        }
+        let confirm = pair_confirmation(
+            pair_id,
+            device.device_id,
+            &device.mldsa_pk,
+            &device.ed25519_pk,
+            &device.xwing_hpke_pk,
+            anchor.roster_seq,
+            &anchor.transcript,
+        );
+        if preview.confirm != confirm {
+            return Err(ClientError::Server("pair confirmation mismatch".into()));
+        }
+        // Codes are 26 characters, so they are usually shown and typed in
+        // groups. Compare on the normalized form, but send the canonical one.
+        if normalize_confirmation(confirmation) != confirm {
+            return Err(ClientError::Server("pair confirmation mismatch".into()));
+        }
         let ck = self
             .collection_key
             .as_ref()

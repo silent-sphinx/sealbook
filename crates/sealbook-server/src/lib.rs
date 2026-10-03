@@ -77,6 +77,11 @@ struct PendingPair {
     enrollment_signature: DualSignatureBody,
     confirm: String,
     pair_code: String,
+    /// The roster the joining device was served and anchored on, folded into
+    /// `confirm`. The approval has to extend exactly this roster, because it is
+    /// what the user confirmed.
+    roster_seq: u64,
+    roster_transcript: Vec<u8>,
     created: Instant,
     approved: bool,
 }

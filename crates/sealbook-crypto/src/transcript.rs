@@ -313,21 +313,26 @@ const _: () = assert!(
     "pairing confirmation code must fit in a SHA-256 digest"
 );
 
+/// The code both screens show during a pairing, which the user compares.
 pub fn pair_confirmation(
     pair_id: Uuid,
     device_id: Uuid,
     mldsa_pk: &[u8],
     ed25519_pk: &[u8],
     xwing_hpke_pk: &[u8],
+    roster_seq: u64,
+    roster_transcript: &[u8],
 ) -> String {
     const ALPH: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     let mut h = Sha256::new();
-    h.update(b"sealbook-pair-confirm-v1");
+    h.update(b"sealbook-pair-confirm-v2");
     h.update(pair_id.as_bytes());
     h.update(device_id.as_bytes());
-    h.update(mldsa_pk);
-    h.update(ed25519_pk);
-    h.update(xwing_hpke_pk);
+    absorb(&mut h, mldsa_pk);
+    absorb(&mut h, ed25519_pk);
+    absorb(&mut h, xwing_hpke_pk);
+    h.update(roster_seq.to_be_bytes());
+    absorb(&mut h, roster_transcript);
     let digest = h.finalize();
     let mut code = String::with_capacity(PAIR_CONFIRMATION_LEN);
     for index in 0..PAIR_CONFIRMATION_LEN {
@@ -481,13 +486,22 @@ mod tests {
     }
 
     #[test]
-    fn pair_confirmation_binds_joiner_keys() {
+    fn pair_confirmation_binds_joiner_keys_and_the_roster_anchor() {
         let pair_id = Uuid::new_v4();
         let device_id = Uuid::new_v4();
-        let first = pair_confirmation(pair_id, device_id, b"mldsa", b"ed", b"xwing");
-        let changed = pair_confirmation(pair_id, device_id, b"changed", b"ed", b"xwing");
+        let anchor = [9u8; 32];
+        let first = pair_confirmation(pair_id, device_id, b"mldsa", b"ed", b"xwing", 4, &anchor);
+        let keys = pair_confirmation(pair_id, device_id, b"changed", b"ed", b"xwing", 4, &anchor);
         assert_eq!(first.len(), PAIR_CONFIRMATION_LEN);
-        assert_ne!(first, changed);
+        assert_ne!(first, keys);
+        // Bug #9: the roster a joining device was told to anchor on has to change
+        // the code, or the user comparing two codes confirms only one direction.
+        let other_roster =
+            pair_confirmation(pair_id, device_id, b"mldsa", b"ed", b"xwing", 4, &[8u8; 32]);
+        assert_ne!(first, other_roster);
+        let other_seq =
+            pair_confirmation(pair_id, device_id, b"mldsa", b"ed", b"xwing", 5, &anchor);
+        assert_ne!(first, other_seq);
     }
 
     #[test]

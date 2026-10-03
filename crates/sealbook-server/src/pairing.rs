@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use axum::extract::{ConnectInfo, Path as AxumPath, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
+use rand::RngCore;
 use sqlx::{Row, Sqlite};
 use uuid::Uuid;
 
@@ -136,6 +137,48 @@ pub(crate) async fn insert_device(
     Ok(())
 }
 
+/// The roster a joining device is told to anchor on.
+struct RosterAnchor {
+    roster_seq: u64,
+    transcript: [u8; 32],
+}
+
+/// The collection's newest roster, as a sequence number and transcript.
+///
+/// `None` only if the collection somehow has no roster at all, which
+/// registration's one transaction rules out; a pairing that lands there gets a
+/// decoy, like an unknown username, and cannot be approved.
+async fn current_roster_anchor(
+    state: &Shared,
+    collection_id: String,
+) -> Result<Option<RosterAnchor>, (StatusCode, Json<ErrorBody>)> {
+    let collection_uuid = Uuid::parse_str(&collection_id)
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let Some(roster) = roster::latest(&state.db, &collection_id).await? else {
+        return Ok(None);
+    };
+    let pin = roster.pin(collection_uuid);
+    Ok(Some(RosterAnchor {
+        roster_seq: pin.roster_seq,
+        transcript: pin.transcript,
+    }))
+}
+
+/// A stand-in anchor for a username with no account.
+///
+/// `pair/join` answers the same way whether or not the account exists, so that it
+/// cannot be used to test usernames. An anchor is opaque to the joining device, so
+/// a random one keeps the two responses indistinguishable; the pairing simply has
+/// nothing that can ever approve it.
+fn decoy_roster_anchor() -> RosterAnchor {
+    let mut transcript = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut transcript);
+    RosterAnchor {
+        roster_seq: 1,
+        transcript,
+    }
+}
+
 pub(crate) async fn pair_join(
     State(state): State<Shared>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -157,11 +200,21 @@ pub(crate) async fn pair_join(
         return Err(err(StatusCode::TOO_MANY_REQUESTS, "rate limited"));
     }
     verify_enroll(&body.device, &body.enrollment_signature)?;
-    let account = sqlx::query("SELECT id FROM accounts WHERE username = ?")
-        .bind(&body.username)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let account = sqlx::query(
+        "SELECT a.id AS account_id, c.id AS collection_id FROM accounts a
+         JOIN collections c ON c.account_id = a.id
+         WHERE a.username = ?",
+    )
+    .bind(&body.username)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let account_id: Option<String> = account.as_ref().map(|row| row.get("account_id"));
+    let anchor = match &account {
+        Some(row) => current_roster_anchor(&state, row.get::<String, _>("collection_id")).await?,
+        None => None,
+    }
+    .unwrap_or_else(decoy_roster_anchor);
     let pair_id = Uuid::new_v4();
     let pair_code = generate_pair_code();
     let confirm = pair_confirmation(
@@ -170,6 +223,8 @@ pub(crate) async fn pair_join(
         &body.device.mldsa_pk,
         &body.device.ed25519_pk,
         &body.device.xwing_hpke_pk,
+        anchor.roster_seq,
+        &anchor.transcript,
     );
     let mut pending = state.pending_pairs.lock().await;
     admit(&mut pending, Duration::from_secs(180), |entry| {
@@ -179,11 +234,13 @@ pub(crate) async fn pair_join(
         pair_id,
         PendingPair {
             username: body.username,
-            account_id: account.map(|r| r.get("id")),
+            account_id,
             device: body.device,
             enrollment_signature: body.enrollment_signature,
             confirm: confirm.clone(),
             pair_code: pair_code.clone(),
+            roster_seq: anchor.roster_seq,
+            roster_transcript: anchor.transcript.to_vec(),
             created: Instant::now(),
             approved: false,
         },
@@ -192,6 +249,8 @@ pub(crate) async fn pair_join(
         pair_id,
         pair_code,
         confirm,
+        roster_seq: anchor.roster_seq,
+        roster_transcript: anchor.transcript.to_vec(),
     }))
 }
 
@@ -239,6 +298,7 @@ pub(crate) async fn pair_status(
                 confirm: pair.confirm.clone(),
                 username: Some(pair.username.clone()),
                 device: Some(pair.device.clone()),
+                roster_seq: Some(pair.roster_seq),
             }));
         }
     }
@@ -248,6 +308,7 @@ pub(crate) async fn pair_status(
         confirm: pair.confirm.clone(),
         username: None,
         device: None,
+        roster_seq: None,
     }))
 }
 
@@ -265,7 +326,14 @@ pub(crate) async fn pair_approve(
     // lookups needs, and is not held across the dual signature verifications or
     // the enrolling transaction below. Held across those, as it was, one approval
     // stalled every `pair_status` poll on the server.
-    let (pair_id, pair_device, pair_enrollment_signature, pair_username, pair_confirm) = {
+    let (
+        pair_id,
+        pair_device,
+        pair_enrollment_signature,
+        pair_username,
+        pair_confirm,
+        pair_anchor_seq,
+    ) = {
         let mut pending = state.pending_pairs.lock().await;
         pending.retain(|_, p| p.created.elapsed() < Duration::from_secs(180));
         let pair_id = pair_id_for_key(&pair_key, &pending)
@@ -282,6 +350,8 @@ pub(crate) async fn pair_approve(
             &pair.device.mldsa_pk,
             &pair.device.ed25519_pk,
             &pair.device.xwing_hpke_pk,
+            pair.roster_seq,
+            &pair.roster_transcript,
         );
         if pair.confirm != expected_confirm {
             return Err(err(StatusCode::BAD_REQUEST, "pair confirmation"));
@@ -296,6 +366,7 @@ pub(crate) async fn pair_approve(
                 confirm: pair.confirm.clone(),
                 username: Some(pair.username.clone()),
                 device: Some(pair.device.clone()),
+                roster_seq: Some(pair.roster_seq),
             }));
         }
         (
@@ -304,6 +375,7 @@ pub(crate) async fn pair_approve(
             pair.enrollment_signature.clone(),
             pair.username.clone(),
             pair.confirm.clone(),
+            pair.roster_seq,
         )
     };
     let pair = PairView {
@@ -313,6 +385,16 @@ pub(crate) async fn pair_approve(
         confirm: &pair_confirm,
     };
     verify_enroll(pair.device, pair.enrollment_signature)?;
+    // The code the user compared commits to the roster the joining device
+    // anchored on, so enrolling under any other roster would hand that device a
+    // device set nobody confirmed. A rotation or a second pairing landing in
+    // between is what gets refused here; the pairing is started again.
+    if body.roster.roster_seq != pair_anchor_seq + 1 {
+        return Err(err(
+            StatusCode::CONFLICT,
+            "the device roster has changed since this pairing started; start the pairing again",
+        ));
+    }
     let approver = sqlx::query(
         "SELECT mldsa_pk, ed25519_pk FROM devices WHERE id = ? AND account_id = ? AND revoked_at IS NULL",
     )
@@ -388,5 +470,6 @@ pub(crate) async fn pair_approve(
         confirm: pair.confirm.to_string(),
         username: Some(pair.username.to_string()),
         device: Some(pair.device.clone()),
+        roster_seq: Some(pair_anchor_seq),
     }))
 }

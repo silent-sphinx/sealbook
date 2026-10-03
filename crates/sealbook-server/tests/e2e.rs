@@ -4205,3 +4205,170 @@ async fn a_recovery_whose_new_password_was_modified_after_signing_is_refused() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn a_joining_device_refuses_a_roster_it_did_not_confirm() {
+    let dir = std::env::temp_dir().join(format!("sealbook-anchor-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let password = "correct horse battery";
+    let mut owner = SealbookClient::plaintext_http();
+    owner
+        .register(&base, "anchoralice", password)
+        .await
+        .unwrap();
+    owner
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"Ada Lovelace"}}"#,
+        )
+        .await
+        .unwrap();
+
+    let mut joiner = SealbookClient::plaintext_http();
+    let (pair_code, confirm) = joiner.pair_join(&base, "anchoralice").await.expect("join");
+    let anchored = joiner.state.as_ref().unwrap();
+    assert_eq!(
+        anchored.roster_seq, 1,
+        "pairing must anchor the joining device on the roster the code commits to"
+    );
+    assert_eq!(anchored.roster_transcript.len(), 32);
+    let joiner_device_id = anchored.device_id;
+    owner
+        .pair_approve(&pair_code, &confirm)
+        .await
+        .expect("approve");
+
+    // The vault a malicious server would rather the new device saw: its own
+    // collection key in the pairing wrap, and a roster under that key naming a
+    // device it holds the signing seed for.
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    let collection_id: String = sqlx::query_scalar("SELECT id FROM collections")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let collection_uuid = Uuid::parse_str(&collection_id).unwrap();
+    let joiner_hpke_pk: Vec<u8> =
+        sqlx::query_scalar("SELECT xwing_hpke_pk FROM devices WHERE id = ?")
+            .bind(joiner_device_id.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let account = sqlx::query("SELECT phrase_mldsa_pk, phrase_ed25519_pk FROM accounts")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let (server_secrets, server_public) = generate_device_signing().unwrap();
+    let (_, server_hpke_pk) = generate_device_hpke().unwrap();
+    let server_device = sealbook_protocol::DevicePublicKeys {
+        device_id: Uuid::new_v4(),
+        mldsa_pk: server_public.mldsa_pk.clone(),
+        ed25519_pk: server_public.ed25519_pk.clone(),
+        xwing_hpke_pk: server_hpke_pk.0.clone(),
+    };
+    let server_ck = CollectionKey::generate();
+    let forged = hand_roster(
+        collection_uuid,
+        1,
+        1,
+        vec![
+            server_device.clone(),
+            sealbook_protocol::DevicePublicKeys {
+                device_id: joiner_device_id,
+                mldsa_pk: sqlx::query_scalar("SELECT mldsa_pk FROM devices WHERE id = ?")
+                    .bind(joiner_device_id.to_string())
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap(),
+                ed25519_pk: sqlx::query_scalar("SELECT ed25519_pk FROM devices WHERE id = ?")
+                    .bind(joiner_device_id.to_string())
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap(),
+                xwing_hpke_pk: joiner_hpke_pk.clone(),
+            },
+        ],
+        account.get("phrase_mldsa_pk"),
+        account.get("phrase_ed25519_pk"),
+        sealbook_crypto::RosterSigner::Device(server_device.device_id),
+        &server_secrets,
+        &server_ck,
+    );
+    sqlx::query("DELETE FROM device_rosters WHERE collection_id = ?")
+        .bind(&collection_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO device_rosters (collection_id, roster_seq, body) VALUES (?, 1, ?)")
+        .bind(&collection_id)
+        .bind(serde_json::to_string(&forged).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let server_wrap = wrap_for_device(
+        &sealbook_crypto::DeviceHpkePublic(joiner_hpke_pk),
+        &server_ck,
+    )
+    .unwrap();
+    sqlx::query(
+        "UPDATE key_wraps SET hpke_enc = ?, wrapped_ck = ?
+         WHERE collection_id = ? AND recipient_kind = 'device' AND recipient_id = ?",
+    )
+    .bind(&server_wrap.enc)
+    .bind(&server_wrap.ciphertext)
+    .bind(&collection_id)
+    .bind(joiner_device_id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let error = joiner
+        .login(password)
+        .await
+        .expect_err("a roster the user never confirmed must not be accepted")
+        .to_string();
+    assert!(
+        error.contains("pinned"),
+        "the refusal should name the pin the pairing established, got: {error}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The confirmed code is good for one roster. If the device set changes between a
+/// joining device asking to pair and the approval, the user's comparison no longer
+/// covers what would be enrolled, so the pairing has to start again.
+#[tokio::test]
+async fn an_approval_is_refused_once_the_roster_has_moved_on() {
+    let dir = std::env::temp_dir().join(format!("sealbook-stale-anchor-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let password = "correct horse battery";
+    let mut owner = SealbookClient::plaintext_http();
+    owner.register(&base, "stalealice", password).await.unwrap();
+
+    let mut joiner = SealbookClient::plaintext_http();
+    let (pair_code, confirm) = joiner.pair_join(&base, "stalealice").await.expect("join");
+    // A new phrase rotates the key and advances the roster past the anchor the
+    // joining device was served.
+    owner.change_phrase(password).await.expect("rotate");
+
+    let error = owner
+        .pair_approve(&pair_code, &confirm)
+        .await
+        .expect_err("approving against a roster the user did not confirm must be refused")
+        .to_string();
+    assert!(
+        error.contains("start the pairing again"),
+        "the refusal should say what to do, got: {error}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -581,13 +581,17 @@ pub fn pair_grant_sign(
     .map_err(js_err)
 }
 
+/// The pairing code both screens show.
 #[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
 pub fn pair_confirmation_code(
     pair_id: &str,
     device_id: &str,
     mldsa_pk_b64: &str,
     ed25519_pk_b64: &str,
     hpke_pk_b64: &str,
+    roster_seq: u64,
+    roster_transcript_b64: &str,
 ) -> Result<String, JsError> {
     Ok(pair_confirmation(
         parse_uuid(pair_id)?,
@@ -595,6 +599,8 @@ pub fn pair_confirmation_code(
         &unb64(mldsa_pk_b64)?,
         &unb64(ed25519_pk_b64)?,
         &unb64(hpke_pk_b64)?,
+        roster_seq,
+        &digest32(roster_transcript_b64)?,
     ))
 }
 

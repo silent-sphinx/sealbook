@@ -595,6 +595,11 @@ pub struct PairJoinResponse {
     pub pair_id: Uuid,
     pub pair_code: String,
     pub confirm: String,
+    /// The roster the joining device must anchor on, and which `confirm` commits
+    /// to: the account's current roster sequence and its transcript.
+    pub roster_seq: u64,
+    #[serde(with = "b64")]
+    pub roster_transcript: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -604,6 +609,10 @@ pub struct PairStatusResponse {
     pub confirm: String,
     pub username: Option<String>,
     pub device: Option<DevicePublicKeys>,
+    /// The roster sequence the joining device anchored on, for the account's own
+    /// devices only. It lets an approver whose roster has moved on since the
+    /// pairing started say so, rather than reporting a bare code mismatch.
+    pub roster_seq: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
