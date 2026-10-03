@@ -12,9 +12,47 @@ const MAX_KEYS: usize = 10_000;
 /// a flood cannot outrun the sweep.
 const SWEEP_INTERVAL: Duration = Duration::from_secs(30);
 
+/// One key's recent calls, and the window they are counted over.
+///
+/// The window belongs to the bucket rather than to the call doing the pruning,
+/// because the table holds windows of different lengths at once: 60s for object
+/// writes and the login endpoints, 300s for rotations and account operations.
+/// The sweeps below run on whichever call happens to trigger them, and pruning
+/// every bucket with that call's window threw away timestamps the longer buckets
+/// still needed. Object writes are allowed 1,200 per 60s, so in practice a 60s
+/// caller triggered nearly every sweep and the 300s limits counted only the last
+/// 60 seconds.
+struct Bucket {
+    window: Duration,
+    stamps: Vec<Instant>,
+}
+
+impl Bucket {
+    /// Drops the calls that have aged out of *this* bucket's window.
+    fn prune(&mut self, now: Instant) {
+        self.stamps
+            .retain(|stamp| now.duration_since(*stamp) < self.window);
+    }
+
+    /// The most recent call, for picking the least recently used bucket.
+    fn newest(&self) -> Option<Instant> {
+        self.stamps.iter().max().copied()
+    }
+}
+
 struct Buckets {
-    by_key: HashMap<String, Vec<Instant>>,
+    by_key: HashMap<String, Bucket>,
     last_sweep: Instant,
+}
+
+impl Buckets {
+    /// Prunes every bucket against its own window and drops the empty ones.
+    fn prune_all(&mut self, now: Instant) {
+        self.by_key.retain(|_, bucket| {
+            bucket.prune(now);
+            !bucket.stamps.is_empty()
+        });
+    }
 }
 
 pub struct RateLimiter {
@@ -36,10 +74,7 @@ impl RateLimiter {
         let now = Instant::now();
 
         if now.duration_since(buckets.last_sweep) >= SWEEP_INTERVAL {
-            buckets.by_key.retain(|_, stamps| {
-                stamps.retain(|t| now.duration_since(*t) < window);
-                !stamps.is_empty()
-            });
+            buckets.prune_all(now);
             buckets.last_sweep = now;
         }
 
@@ -48,16 +83,13 @@ impl RateLimiter {
         // server has not seen before. Drop expired buckets, then the least
         // recently used one, rather than refusing the newcomer.
         if buckets.by_key.len() >= MAX_KEYS && !buckets.by_key.contains_key(key) {
-            buckets.by_key.retain(|_, stamps| {
-                stamps.retain(|t| now.duration_since(*t) < window);
-                !stamps.is_empty()
-            });
+            buckets.prune_all(now);
             while buckets.by_key.len() >= MAX_KEYS {
                 let Some(stalest) = buckets
                     .by_key
                     .iter()
-                    .min_by_key(|(_, stamps)| stamps.iter().max().copied())
-                    .map(|(k, _)| k.clone())
+                    .min_by_key(|(_, bucket)| bucket.newest())
+                    .map(|(key, _)| key.clone())
                 else {
                     break;
                 };
@@ -65,12 +97,22 @@ impl RateLimiter {
             }
         }
 
-        let stamps = buckets.by_key.entry(key.to_string()).or_default();
-        stamps.retain(|t| now.duration_since(*t) < window);
-        if stamps.len() >= limit {
+        let bucket = buckets
+            .by_key
+            .entry(key.to_string())
+            .or_insert_with(|| Bucket {
+                window,
+                stamps: Vec::new(),
+            });
+        // The caller's window is this key's current one, so a limit changed in
+        // configuration takes effect instead of staying pinned to whatever the
+        // first call after startup asked for.
+        bucket.window = window;
+        bucket.prune(now);
+        if bucket.stamps.len() >= limit {
             return false;
         }
-        stamps.push(now);
+        bucket.stamps.push(now);
         true
     }
 
@@ -163,6 +205,92 @@ mod tests {
             assert!(limiter.allow("alice", 5, Duration::from_nanos(1)).await);
         }
         assert!(limiter.allow("alice", 5, Duration::from_nanos(1)).await);
+    }
+
+    #[tokio::test]
+    async fn the_sweep_prunes_each_bucket_by_its_own_window() {
+        let limiter = RateLimiter::new();
+        let long = Duration::from_secs(300);
+        for _ in 0..5 {
+            assert!(limiter.allow("rotate:alice", 5, long).await);
+        }
+        assert!(
+            !limiter.allow("rotate:alice", 5, long).await,
+            "five calls must exhaust a limit of five"
+        );
+
+        {
+            let mut buckets = limiter.inner.lock().await;
+            // Age every call in the long bucket past a 60s window, while leaving
+            // it well inside its own 300s one. This is the state the bug needed:
+            // with fresh stamps, pruning by the wrong window drops nothing.
+            let aged = Instant::now()
+                .checked_sub(Duration::from_secs(120))
+                .expect("the monotonic clock must be at least two minutes old");
+            buckets
+                .by_key
+                .get_mut("rotate:alice")
+                .expect("the bucket must exist")
+                .stamps
+                .fill(aged);
+            // And make the next call due a sweep.
+            buckets.last_sweep = Instant::now()
+                .checked_sub(SWEEP_INTERVAL)
+                .expect("the monotonic clock must be older than one sweep interval");
+        }
+
+        assert!(
+            limiter
+                .allow("put-object:alice", 1_200, Duration::from_secs(60))
+                .await
+        );
+        assert!(
+            !limiter.allow("rotate:alice", 5, long).await,
+            "a sweep run by a 60s caller shortened the 300s window"
+        );
+    }
+
+    /// The same for the eviction path, which prunes the whole table when it is
+    /// full rather than on a timer.
+    #[tokio::test]
+    async fn evicting_a_full_table_prunes_each_bucket_by_its_own_window() {
+        let limiter = RateLimiter::new();
+        let long = Duration::from_secs(300);
+
+        for index in 0..(MAX_KEYS - 1) {
+            limiter
+                .allow(&format!("flood:{index}"), 5, Duration::from_secs(60))
+                .await;
+        }
+        for _ in 0..5 {
+            assert!(limiter.allow("rotate:alice", 5, long).await);
+        }
+
+        // Age every call in the table past 60s while leaving it inside 300s, so
+        // the two windows disagree about what has expired.
+        {
+            let mut buckets = limiter.inner.lock().await;
+            let aged = Instant::now()
+                .checked_sub(Duration::from_secs(120))
+                .expect("the monotonic clock must be at least two minutes old");
+            for bucket in buckets.by_key.values_mut() {
+                bucket.stamps.fill(aged);
+            }
+        }
+
+        // The table is full, so a key it has not seen takes the eviction path.
+        assert!(limiter.allow("newcomer", 5, Duration::from_secs(60)).await);
+
+        let buckets = limiter.inner.lock().await;
+        assert_eq!(
+            buckets.by_key.get("rotate:alice").map(|b| b.stamps.len()),
+            Some(5),
+            "the eviction prune shortened or dropped the 300s bucket"
+        );
+        assert!(
+            !buckets.by_key.contains_key("flood:0"),
+            "the 60s buckets have aged out and should have been dropped"
+        );
     }
 
     #[tokio::test]
