@@ -265,17 +265,72 @@ struct AppState {
     pending_account_ops: Mutex<HashMap<Uuid, PendingAccountOp>>,
     limiter: RateLimiter,
     trusted_proxies: TrustedProxies,
+    registration: Registration,
 }
 
 type Shared = Arc<AppState>;
 
+/// Whether this server will create new accounts.
+///
+/// Open was the only behaviour, and for a server that is usually one household
+/// it is the most surprising default on offer: anyone who can reach the port
+/// could create an account. The README warned about it, which is not the same as
+/// being able to do something about it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Registration {
+    Open,
+    Closed,
+}
+
+impl Registration {
+    /// Reads `SEALBOOK_DISABLE_REGISTRATION`.
+    ///
+    /// Refuses a value it does not recognise rather than falling back, because
+    /// the fallback is the permissive one: an operator who misspells this would
+    /// otherwise be told nothing and left serving an open server.
+    pub fn from_env() -> anyhow::Result<Self> {
+        match std::env::var("SEALBOOK_DISABLE_REGISTRATION") {
+            Ok(value) if !value.trim().is_empty() => Self::parse(value.trim()),
+            _ => Ok(Self::Open),
+        }
+    }
+
+    fn parse(value: &str) -> anyhow::Result<Self> {
+        match value.to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Ok(Self::Closed),
+            "0" | "false" | "no" | "off" => Ok(Self::Open),
+            other => anyhow::bail!(
+                "unknown SEALBOOK_DISABLE_REGISTRATION={other}; expected 1, true, yes or on \
+                 to close registration, or 0, false, no or off to leave it open"
+            ),
+        }
+    }
+
+    pub fn is_open(&self) -> bool {
+        matches!(self, Self::Open)
+    }
+}
+
 pub async fn app(db_path: &str) -> anyhow::Result<Router> {
-    app_with_limits(db_path, Limits::from_env()).await
+    app_with(db_path, Limits::from_env(), Registration::from_env()?).await
 }
 
 /// Builds the app with explicit storage limits, rather than reading the
 /// environment. Tests use this so that one test's quota cannot affect another's.
 pub async fn app_with_limits(db_path: &str, limits: Limits) -> anyhow::Result<Router> {
+    app_with(db_path, limits, Registration::Open).await
+}
+
+/// Builds the app with every policy given explicitly.
+///
+/// Tests take this rather than setting `SEALBOOK_DISABLE_REGISTRATION`, which
+/// the whole process shares and so every other test running beside them would
+/// see.
+pub async fn app_with(
+    db_path: &str,
+    limits: Limits,
+    registration: Registration,
+) -> anyhow::Result<Router> {
     let db = open_migrated(db_path).await?;
     verify_db_integrity(&db).await?;
     let opaque = load_or_create_setup(&db).await?;
@@ -306,6 +361,7 @@ pub async fn app_with_limits(db_path: &str, limits: Limits) -> anyhow::Result<Ro
         pending_account_ops: Mutex::new(HashMap::new()),
         limiter: RateLimiter::new(),
         trusted_proxies: TrustedProxies::from_env(),
+        registration,
     });
     spawn_session_sweeper(state.clone());
     Ok(router(state.clone()).with_state(state))
@@ -556,6 +612,15 @@ pub async fn serve(db_path: &str, bind: &str) -> anyhow::Result<()> {
              remembering that it is buffered in memory"
         );
     }
+
+    // Read here as well as in `app`, like the storage limits above, so that a
+    // misspelled value fails before the listener is bound and so an operator can
+    // see from the log which way it was read.
+    let registration = Registration::from_env()?;
+    info!(
+        open = registration.is_open(),
+        "account registration; close it with SEALBOOK_DISABLE_REGISTRATION=1"
+    );
 
     let trusted_proxy_count = TrustedProxies::from_env().len();
     // Rate limits are keyed on the peer address, which behind a proxy is the
@@ -920,6 +985,34 @@ mod tests {
             small.rotation_peak_bytes() * 2
         );
         assert!(concurrent.rotation_peak_bytes() > small.rotation_peak_bytes());
+    }
+
+    #[test]
+    fn registration_reads_the_spellings_an_operator_would_write() {
+        for value in ["1", "true", "TRUE", "yes", "on"] {
+            assert_eq!(
+                Registration::parse(value).unwrap(),
+                Registration::Closed,
+                "parsing {value}"
+            );
+        }
+        for value in ["0", "false", "no", "off"] {
+            assert_eq!(
+                Registration::parse(value).unwrap(),
+                Registration::Open,
+                "parsing {value}"
+            );
+        }
+    }
+
+    /// The fallback is the permissive one, so a typo must not reach it: an
+    /// operator who misspells this would otherwise be left serving an open
+    /// server having been told nothing.
+    #[test]
+    fn a_misspelled_registration_setting_is_refused() {
+        let error = Registration::parse("disabled").unwrap_err().to_string();
+        assert!(error.contains("SEALBOOK_DISABLE_REGISTRATION"), "{error}");
+        assert!(error.contains("true"), "{error}");
     }
 
     #[test]

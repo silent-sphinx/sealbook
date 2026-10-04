@@ -6,6 +6,8 @@ Sealbook is a fully end-to-end encrypted vault for your contacts, calendars and 
 
 This project exists because the usual options don't offer this. CalDAV and CardDAV servers store your address book in the clear, and hand your provider everyone you know. Sealbook uses its own protocol instead, designed security-first and *resistant* to future quantum attack.
 
+The [**threat model**](https://github.com/silent-sphinx/sealbook/wiki/Threat-Model) is the thing to read before you trust this with anything: what the server can and cannot do, what it learns anyway, and what your password and recovery phrase are each worth.
+
 > [!IMPORTANT]
 > This repository is the **server** and the **CLI**. To use Sealbook from a phone
 > or browser you also need a client: [sealbook-web](https://github.com/silent-sphinx/sealbook-web)
@@ -88,7 +90,7 @@ against the certificate even when they pin the certificate, so anything else
 fails the handshake with a name mismatch.
 
 > [!IMPORTANT]
-> Registration is open. There is no invite system and no way to close signups, so anyone who can reach the port can create an account. If you're exposing Sealbook to the internet for yourself, put it behind a VPN, or firewall the port to the addresses you use.
+> Registration is open until you close it. There is no invite system, so anyone who can reach the port can create an account. Once you and the people you're hosting for have signed up, set `SEALBOOK_DISABLE_REGISTRATION: 1` and restart; existing accounts carry on as normal, and pairing a new device still works. Until then, keep the port behind a VPN or firewalled to the addresses you use.
 
 Your data lives in the `sealbook-data` Docker volume. See [Backups](#backups) before you rely on it.
 
@@ -194,6 +196,7 @@ Everything is set through environment variables in `docker-compose.yml`.
 | `SEALBOOK_TLS_MODE` | `provided` in production, else `self-signed` | Where the certificate comes from: `self-signed`, `provided` or `proxy`. See [Certificates](#certificates). |
 | `SEALBOOK_TLS_SANS` | `localhost`, `127.0.0.1`, `0.0.0.0`, `10.0.2.2` | Hostnames and IP addresses a generated certificate is valid for, comma-separated. Set this in `self-signed` mode to whatever your clients put in their URL. |
 | `SEALBOOK_CORS_ORIGINS` | localhost dev ports | Comma-separated addresses your web client is served from. Browsers block anything not listed. |
+| `SEALBOOK_DISABLE_REGISTRATION` | unset | Set to `1` once your accounts exist. New signups are refused; existing accounts, logins and device pairing are unaffected. |
 | `SEALBOOK_DATA_DIR` | `/data` | Where the database and certificates live. This is the directory to back up. |
 | `SEALBOOK_BIND` | `0.0.0.0:8443` | Address and port to listen on inside the container. |
 

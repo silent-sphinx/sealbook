@@ -37,6 +37,15 @@ pub(crate) async fn register_start(
     headers: HeaderMap,
     Json(body): Json<RegisterStartRequest>,
 ) -> Result<Json<RegisterStartResponse>, (StatusCode, Json<ErrorBody>)> {
+    // Checked before anything else, since the answer does not depend on the
+    // request: a closed server should not spend a rate-limit budget or an OPRF
+    // evaluation on telling a caller no.
+    if !state.registration.is_open() {
+        return Err(err(
+            StatusCode::FORBIDDEN,
+            "registration is closed on this server",
+        ));
+    }
     if !valid_username(&body.username) {
         return Err(err(StatusCode::BAD_REQUEST, "invalid username"));
     }
@@ -70,6 +79,15 @@ pub(crate) async fn register_finish(
     headers: HeaderMap,
     Json(body): Json<RegisterFinishRequest>,
 ) -> Result<Json<RegisterFinishResponse>, (StatusCode, Json<ErrorBody>)> {
+    // Checked before anything else, since the answer does not depend on the
+    // request: a closed server should not spend a rate-limit budget or an OPRF
+    // evaluation on telling a caller no.
+    if !state.registration.is_open() {
+        return Err(err(
+            StatusCode::FORBIDDEN,
+            "registration is closed on this server",
+        ));
+    }
     if !valid_username(&body.username) {
         return Err(err(StatusCode::BAD_REQUEST, "invalid username"));
     }

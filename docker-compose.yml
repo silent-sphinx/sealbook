@@ -13,6 +13,9 @@ services:
       SEALBOOK_ENV: production
       RUST_LOG: sealbook_server=info
       SEALBOOK_CORS_ORIGINS: https://your-frontend-domain.example
+      # Uncomment once your accounts exist. Signups are refused; existing
+      # accounts, logins and device pairing carry on as normal.
+      # SEALBOOK_DISABLE_REGISTRATION: 1
       # Where the certificate clients check comes from:
       #   self-signed  generated here and pinned by clients (home network, VPN, bare IP)
       #   provided     you supply /data/tls/cert.pem and key.pem (public domain name)

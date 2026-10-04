@@ -3618,6 +3618,89 @@ async fn a_write_landing_mid_walk_restarts_the_sync_rather_than_crying_tamper() 
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #12: registration was open with no way to close it, which for a server that
+/// is usually one household is the most surprising default on offer.
+#[tokio::test]
+async fn a_closed_server_creates_no_accounts_but_still_serves_the_ones_it_has() {
+    let dir = std::env::temp_dir().join(format!("sealbook-closed-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let db_path = db.to_str().unwrap().to_string();
+
+    // An account made while it was open, so the test can tell "closed" from
+    // "broken".
+    let open = spawn_http(&db_path).await;
+    let mut owner = SealbookClient::plaintext_http();
+    owner
+        .register(&open, "closedalice", "correct horse battery")
+        .await
+        .expect("register while open");
+    owner
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"Ada Lovelace"}}"#,
+        )
+        .await
+        .expect("write while open");
+
+    // The same database, served with registration closed.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let app = sealbook_server::app_with(
+        &db_path,
+        sealbook_server::Limits::default(),
+        sealbook_server::Registration::Closed,
+    )
+    .await
+    .unwrap();
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        .unwrap();
+    });
+    let closed = format!("http://{addr}");
+
+    let mut newcomer = SealbookClient::plaintext_http();
+    let refused = newcomer
+        .register(&closed, "closedbob", "correct horse battery")
+        .await
+        .expect_err("a closed server must not create an account")
+        .to_string();
+    assert!(
+        refused.contains("registration is closed"),
+        "the refusal should say why, got: {refused}"
+    );
+
+    // Nothing was half-created either: the refusal is before any row is written.
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    let accounts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    assert_eq!(accounts, 1, "a closed server created an account anyway");
+
+    // And the account that already exists is untouched: closing registration is
+    // not closing the server.
+    let mut state = owner.state.clone().unwrap();
+    state.server = closed.clone();
+    let mut returning = SealbookClient::with_state(state);
+    returning
+        .login("correct horse battery")
+        .await
+        .expect("an existing account must still sign in");
+    let contacts = returning.list_contacts().await.expect("read the vault");
+    assert_eq!(contacts.len(), 1);
+    assert!(contacts[0].1.contains("Ada Lovelace"));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[tokio::test]
 async fn the_quota_counters_never_drift_from_the_objects() {
     let dir = std::env::temp_dir().join(format!("sealbook-usage-{}", Uuid::new_v4()));
