@@ -20,7 +20,7 @@ use sealbook_protocol::{
     RecoverStartRequest, RecoverStartResponse,
 };
 
-use crate::pairing::{insert_device, verify_enroll};
+use crate::pairing::{insert_device, verify_enroll, DeviceCap};
 use crate::roster;
 use crate::*;
 
@@ -224,6 +224,7 @@ pub(crate) async fn recover_finish(
         &collection_id,
         &body.device,
         &body.wrap,
+        DeviceCap::PhraseExempt,
     )
     .await?;
     roster::verify_and_store(

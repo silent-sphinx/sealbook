@@ -3104,6 +3104,148 @@ async fn an_account_cannot_enrol_devices_without_limit() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #4: `recover_finish` enrolled its device as the first statement of its
+/// transaction, so an account at the cap could not recover at all. Freeing a
+/// slot needs a revocation, a revocation needs a session, and a session needs
+/// the password the phrase exists to replace.
+#[tokio::test]
+async fn an_account_at_the_device_cap_can_still_recover() {
+    let dir = std::env::temp_dir().join(format!("sealbook-caprecover-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let forgotten = "correct horse battery";
+    let mut owner = SealbookClient::plaintext_http();
+    let phrase = owner.register(&base, "capcarol", forgotten).await.unwrap();
+    let owner_device = owner.state.as_ref().unwrap().device_id;
+    owner
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"Ada Lovelace"}}"#,
+        )
+        .await
+        .unwrap();
+
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    let account_id: String = sqlx::query_scalar("SELECT id FROM accounts WHERE username = ?")
+        .bind("capcarol")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let template = sqlx::query("SELECT mldsa_pk, ed25519_pk, xwing_hpke_pk FROM devices LIMIT 1")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    // Registration enrolled one, so fill the remaining fifteen slots.
+    for _ in 0..15 {
+        sqlx::query(
+            "INSERT INTO devices (id, account_id, mldsa_pk, ed25519_pk, xwing_hpke_pk, created_at)
+             VALUES (?, ?, ?, ?, ?, 0)",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(&account_id)
+        .bind(template.get::<Vec<u8>, _>("mldsa_pk"))
+        .bind(template.get::<Vec<u8>, _>("ed25519_pk"))
+        .bind(template.get::<Vec<u8>, _>("xwing_hpke_pk"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let enrolled: Vec<sealbook_protocol::DevicePublicKeys> = sqlx::query(
+        "SELECT id, mldsa_pk, ed25519_pk, xwing_hpke_pk FROM devices WHERE account_id = ?",
+    )
+    .bind(&account_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|row| sealbook_protocol::DevicePublicKeys {
+        device_id: Uuid::parse_str(&row.get::<String, _>("id")).unwrap(),
+        mldsa_pk: row.get("mldsa_pk"),
+        ed25519_pk: row.get("ed25519_pk"),
+        xwing_hpke_pk: row.get("xwing_hpke_pk"),
+    })
+    .collect();
+    assert_eq!(enrolled.len(), 16, "the account must start at the cap");
+    let (collection_id, phrase_mldsa_pk, phrase_ed25519_pk): (String, Vec<u8>, Vec<u8>) =
+        sqlx::query_as(
+            "SELECT c.id, a.phrase_mldsa_pk, a.phrase_ed25519_pk
+             FROM accounts a JOIN collections c ON c.account_id = a.id WHERE a.id = ?",
+        )
+        .bind(&account_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let owner_state = owner.state.as_ref().unwrap();
+    let filled = hand_roster(
+        Uuid::parse_str(&collection_id).unwrap(),
+        2,
+        1,
+        enrolled,
+        phrase_mldsa_pk,
+        phrase_ed25519_pk,
+        sealbook_crypto::RosterSigner::Device(owner_device),
+        &DeviceSigningSecrets {
+            mldsa_seed: owner_state.mldsa_seed.clone(),
+            ed25519_sk: owner_state.ed25519_sk.clone(),
+        },
+        owner.collection_key().unwrap(),
+    );
+    sqlx::query("INSERT INTO device_rosters (collection_id, roster_seq, body) VALUES (?, 2, ?)")
+        .bind(&collection_id)
+        .bind(serde_json::to_string(&filled).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    // The cap really is reached: a pairing from the live session is refused.
+    let mut extra = SealbookClient::plaintext_http();
+    let (pair_code, confirm) = extra.pair_join(&base, "capcarol").await.unwrap();
+    assert!(
+        owner.pair_approve(&pair_code, &confirm).await.is_err(),
+        "a pairing past the cap must still be refused"
+    );
+
+    // The phrase gets in anyway, and the vault comes back decrypted.
+    let chosen = "a different password entirely";
+    let mut recovered = SealbookClient::plaintext_http();
+    let next_phrase = recovered
+        .recover(&base, "capcarol", &phrase, chosen)
+        .await
+        .expect("a full device list must not make an account unrecoverable");
+    assert_eq!(next_phrase.split_whitespace().count(), 24);
+    let contacts = recovered.list_contacts().await.expect("read the vault");
+    assert_eq!(contacts.len(), 1);
+    assert!(contacts[0].1.contains("Ada Lovelace"));
+    assert_eq!(
+        recovered.list_devices().await.expect("list").len(),
+        17,
+        "recovery takes a slot past the cap rather than being refused one"
+    );
+
+    // And the slot it took is reclaimable, from the session it just obtained.
+    let victim = recovered
+        .list_devices()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|device| device.device_id)
+        .find(|id| *id != recovered.state.as_ref().unwrap().device_id)
+        .unwrap();
+    recovered
+        .revoke_device(victim, chosen)
+        .await
+        .expect("revoke");
+    assert_eq!(recovered.list_devices().await.expect("list").len(), 16);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[tokio::test]
 async fn the_quota_counters_never_drift_from_the_objects() {
     let dir = std::env::temp_dir().join(format!("sealbook-usage-{}", Uuid::new_v4()));

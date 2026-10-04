@@ -78,12 +78,25 @@ pub(crate) fn verify_enroll(
 /// foothold. Revoking a device frees its slot.
 const MAX_DEVICES_PER_ACCOUNT: i64 = 16;
 
+/// Whether this enrolment is refused at `MAX_DEVICES_PER_ACCOUNT`.
+pub(crate) enum DeviceCap {
+    /// A pairing. The session approving it can free a slot by revoking.
+    Enforced,
+    /// A phrase recovery, which cannot be refused: the only way to free a slot
+    /// is a revocation, which needs a session, which needs the password this
+    /// request exists to replace. Enforcing the cap here loses the account for
+    /// good, while exempting it costs one device on an account that already
+    /// owes a rotation before it can be used again.
+    PhraseExempt,
+}
+
 pub(crate) async fn insert_device(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     account_id: &str,
     collection_id: &str,
     device: &DevicePublicKeys,
     wrap: &KeyWrapBody,
+    cap: DeviceCap,
 ) -> Result<(), (StatusCode, Json<ErrorBody>)> {
     // Counted inside the caller's transaction, so two simultaneous enrolments
     // cannot both see room for the last slot.
@@ -95,10 +108,19 @@ pub(crate) async fn insert_device(
     .await
     .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
     if enrolled >= MAX_DEVICES_PER_ACCOUNT {
-        return Err(err(
-            StatusCode::CONFLICT,
-            "this account already has the maximum number of devices; revoke one first",
-        ));
+        match cap {
+            DeviceCap::Enforced => {
+                return Err(err(
+                    StatusCode::CONFLICT,
+                    "this account already has the maximum number of devices; revoke one first",
+                ))
+            }
+            DeviceCap::PhraseExempt => tracing::warn!(
+                enrolled,
+                "a recovery enrolled a device past the device cap; revoke the devices no \
+                 longer in use, since every one of them is wrapped in each rotation"
+            ),
+        }
     }
     if wrap.recipient_kind != "device"
         || wrap.recipient_id != device.device_id.to_string()
@@ -441,6 +463,7 @@ pub(crate) async fn pair_approve(
         &collection_id,
         pair.device,
         &body.wrap,
+        DeviceCap::Enforced,
     )
     .await?;
     roster::verify_and_store(
