@@ -29,6 +29,13 @@ pub enum ClientError {
     BatchTooLarge(usize),
     #[error("a batch write may name each object once")]
     DuplicateInBatch,
+    /// Sealing under a retired key would store a row no device can decrypt and
+    /// no rotation can re-encrypt, so the write is refused instead.
+    #[error(
+        "the collection key has moved to epoch {expected} and this device holds epoch {held}; \
+         nothing was written"
+    )]
+    StaleCollectionKey { expected: u64, held: u64 },
     /// Read through a helper that returns `String`, of an object whose plaintext
     /// is not text. Rotation carries bytes through untouched, so the object is
     /// intact; only this accessor cannot represent it.

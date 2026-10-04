@@ -5444,3 +5444,79 @@ async fn a_batch_naming_one_object_twice_is_refused() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A device that has not noticed another device's rotation must not seal a write
+/// under the key it still holds.
+///
+/// The epoch a write signs comes from the server's manifest while the ciphertext
+/// is sealed with the cached key, so without a check between them the write
+/// stored a row under the retired key: unreadable to every device, and
+/// unrotatable, because a rotation has to re-encrypt that row and only a rotation
+/// could remove it. The client refreshes its wrap inside the write instead.
+#[tokio::test]
+async fn a_write_after_someone_else_rotated_is_not_sealed_under_the_old_key() {
+    let dir = std::env::temp_dir().join(format!("sealbook-epoch-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let password = "correct horse battery";
+    let mut owner = SealbookClient::plaintext_http();
+    owner.register(&base, "epochalice", password).await.unwrap();
+    owner
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"Before"}}"#,
+        )
+        .await
+        .expect("first write");
+
+    // A second device, which will do the rotating. The first one is left holding
+    // the key of the epoch before it.
+    let mut joiner = SealbookClient::plaintext_http();
+    let (pair_code, confirm) = joiner.pair_join(&base, "epochalice").await.expect("join");
+    owner
+        .pair_approve(&pair_code, &confirm)
+        .await
+        .expect("approve");
+    joiner.login(password).await.expect("joiner login");
+    let stale_epoch = owner.cached_key_epoch();
+    joiner.change_phrase(password).await.expect("rotate");
+    assert_eq!(
+        owner.cached_key_epoch(),
+        stale_epoch,
+        "the owner must still be holding the pre-rotation key for this to test anything"
+    );
+
+    // The write that used to go out under the stale key.
+    owner
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"After the rotation"}}"#,
+        )
+        .await
+        .expect("a write across a rotation must still land");
+    assert_eq!(
+        owner.cached_key_epoch(),
+        stale_epoch + 1,
+        "the write should have refreshed this device's key"
+    );
+
+    // Both objects open, from both devices, which is what a row sealed under the
+    // retired key would have broken.
+    for client in [&mut owner, &mut joiner] {
+        let listed = client.list_contacts().await.expect("list");
+        assert_eq!(listed.len(), 2, "both contacts must still be readable");
+    }
+
+    // And the vault is still rotatable, which is the failure that cannot be
+    // recovered from: a rotation re-encrypts every live object under the current
+    // key, so one row sealed under an older one wedges it for good.
+    owner
+        .change_phrase(password)
+        .await
+        .expect("the vault must still be rotatable");
+    assert_eq!(owner.list_contacts().await.expect("list").len(), 2);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

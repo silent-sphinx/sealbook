@@ -17,6 +17,7 @@ use sealbook_protocol::{
     JSCONTACT_CONTENT_TYPE, NOTEBOOK_CONTENT_TYPE, NOTE_CONTENT_TYPE, SEALED_CONTENT_TYPE,
 };
 
+use crate::manifest::BucketedManifest;
 use crate::{ClientError, ManifestError, SealbookClient};
 
 /// An object as stored, still wrapped in its envelope.
@@ -56,6 +57,22 @@ struct PlainObject {
     id: Uuid,
     content_type: String,
     plaintext: Vec<u8>,
+}
+
+/// The distinct, sorted ids of a batch, refusing one the manifest could not
+/// describe: it holds one entry per id, and it is signed once for the whole
+/// batch.
+fn batch_ids(mut ids: Vec<Uuid>) -> Result<Vec<Uuid>, ClientError> {
+    if ids.len() > MAX_BATCH_OBJECTS {
+        return Err(ClientError::BatchTooLarge(ids.len()));
+    }
+    let distinct = ids.len();
+    ids.sort_unstable();
+    ids.dedup();
+    if ids.len() != distinct {
+        return Err(ClientError::DuplicateInBatch);
+    }
+    Ok(ids)
 }
 
 impl PlainObject {
@@ -288,15 +305,41 @@ impl SealbookClient {
         plaintext: &[u8],
         content_type: &str,
     ) -> Result<u64, ClientError> {
+        // Read before sealing: `prepare_write` fixes the epoch to seal under.
+        let state = self.prepare_write(&[object_id]).await?;
         let write = self.seal_write(object_id, plaintext, content_type)?;
-        self.write_object(
-            write.id,
-            write.nonce,
-            write.ciphertext,
-            write.padded_size,
-            write.tombstone,
-        )
-        .await
+        self.write_prepared(state, write).await
+    }
+
+    /// The bucket state a write folds into, with the cached collection key
+    /// aligned to that state's epoch.
+    ///
+    /// Callers must seal after this, not before: the epoch a write signs comes
+    /// from the manifest read here, and sealing under an older key stores a row
+    /// nothing can decrypt or rotate.
+    async fn prepare_write(&mut self, ids: &[Uuid]) -> Result<BucketedManifest, ClientError> {
+        let state = self.manifest_bucket_state(ids).await?;
+        self.align_key_epoch(state.key_epoch).await?;
+        Ok(state)
+    }
+
+    /// Brings the cached collection key up to `key_epoch`, or refuses the write.
+    ///
+    /// Refreshing needs only this device's X-Wing secret, so it happens here
+    /// rather than sending the caller back for the password. A device that still
+    /// cannot reach the epoch has been revoked or raced a second rotation.
+    async fn align_key_epoch(&mut self, key_epoch: u64) -> Result<(), ClientError> {
+        if self.key_epoch == key_epoch {
+            return Ok(());
+        }
+        let refreshed = self.refresh_collection_key().await?;
+        if refreshed != key_epoch {
+            return Err(ClientError::StaleCollectionKey {
+                expected: key_epoch,
+                held: refreshed,
+            });
+        }
+        Ok(())
     }
 
     /// Seals one object for a write, without sending it.
@@ -332,11 +375,16 @@ impl SealbookClient {
         objects: &[(Uuid, &str)],
         content_type: &str,
     ) -> Result<u64, ClientError> {
+        if objects.is_empty() {
+            return Ok(0);
+        }
+        let ids = batch_ids(objects.iter().map(|(id, _)| *id).collect())?;
+        let state = self.prepare_write(&ids).await?;
         let mut writes = Vec::with_capacity(objects.len());
         for (object_id, plaintext) in objects {
             writes.push(self.seal_write(*object_id, plaintext.as_bytes(), content_type)?);
         }
-        self.write_objects(writes).await
+        self.write_batch_prepared(state, writes).await
     }
 
     /// Objects as stored, without opening the envelope, so they can be
@@ -462,6 +510,10 @@ impl SealbookClient {
     }
 
     /// Writes one object, signing a manifest for the state the write produces.
+    ///
+    /// Only the bucket the object falls in is read, not the whole collection.
+    /// Reading every entry per write is what made importing n objects cost O(n^2)
+    /// bytes.
     async fn write_object(
         &mut self,
         object_id: Uuid,
@@ -470,18 +522,42 @@ impl SealbookClient {
         padded_size: usize,
         tombstone: bool,
     ) -> Result<u64, ClientError> {
+        let state = self.prepare_write(&[object_id]).await?;
+        self.write_prepared(
+            state,
+            PendingWrite {
+                id: object_id,
+                nonce,
+                ciphertext,
+                padded_size,
+                tombstone,
+            },
+        )
+        .await
+    }
+
+    /// Sends one write against a bucket state already read and a key already
+    /// aligned to its epoch.
+    async fn write_prepared(
+        &mut self,
+        state: BucketedManifest,
+        write: PendingWrite,
+    ) -> Result<u64, ClientError> {
         let (server, collection_id, token) = {
-            let state = self.state.as_ref().ok_or(ClientError::NoState)?;
+            let local = self.state.as_ref().ok_or(ClientError::NoState)?;
             (
-                state.server.clone(),
-                state.collection_id,
-                state.session_token.clone().ok_or(ClientError::NoState)?,
+                local.server.clone(),
+                local.collection_id,
+                local.session_token.clone().ok_or(ClientError::NoState)?,
             )
         };
-        // Only the bucket this object falls in, not the whole collection. Reading
-        // every entry per write is what made importing n objects cost O(n^2)
-        // bytes.
-        let state = self.manifest_bucket_state(&[object_id]).await?;
+        let PendingWrite {
+            id: object_id,
+            nonce,
+            ciphertext,
+            padded_size,
+            tombstone,
+        } = write;
         let (seq, key_epoch, revision) = (state.seq, state.key_epoch, state.latest_revision + 1);
         let (object_count, root) = state.apply(&[ManifestEntry {
             id: object_id,
@@ -524,37 +600,21 @@ impl SealbookClient {
     ///
     /// Revisions run consecutively from the collection's next one, in the order
     /// given, because that is what the server assigns and the manifest commits to
-    /// each of them. Returns the revision the last object took, or 0 for an empty
-    /// batch, which writes nothing: revisions start at 1, so that is not one.
-    async fn write_objects(&mut self, writes: Vec<PendingWrite>) -> Result<u64, ClientError> {
-        if writes.is_empty() {
-            return Ok(0);
-        }
-        if writes.len() > MAX_BATCH_OBJECTS {
-            return Err(ClientError::BatchTooLarge(writes.len()));
-        }
-        let mut ids: Vec<Uuid> = writes.iter().map(|write| write.id).collect();
-        ids.sort_unstable();
-        let distinct = ids.len();
-        ids.dedup();
-        if ids.len() != distinct {
-            // The manifest would commit to one entry per id while the batch
-            // carried two writes for it, so the server's recomputed digest could
-            // not match whichever of them landed last.
-            return Err(ClientError::DuplicateInBatch);
-        }
-
+    /// each of them. Sent against a bucket state already read and a key already
+    /// aligned to that state's epoch.
+    async fn write_batch_prepared(
+        &mut self,
+        state: BucketedManifest,
+        writes: Vec<PendingWrite>,
+    ) -> Result<u64, ClientError> {
         let (server, collection_id, token) = {
-            let state = self.state.as_ref().ok_or(ClientError::NoState)?;
+            let local = self.state.as_ref().ok_or(ClientError::NoState)?;
             (
-                state.server.clone(),
-                state.collection_id,
-                state.session_token.clone().ok_or(ClientError::NoState)?,
+                local.server.clone(),
+                local.collection_id,
+                local.session_token.clone().ok_or(ClientError::NoState)?,
             )
         };
-        // One fetch covering every bucket the batch touches, rather than one per
-        // object.
-        let state = self.manifest_bucket_state(&ids).await?;
         let (seq, key_epoch) = (state.seq, state.key_epoch);
         let first_revision = state.latest_revision + 1;
 
