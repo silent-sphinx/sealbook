@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Sealbook server</title>
+    <meta name="description" content="This Sealbook server is running. Its data is encrypted and needs a Sealbook client to read." />
+    <meta name="theme-color" content="#161616" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="robots" content="noindex" />
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <style>
+      :root {
+        --bg: #161616;
+        --panel: #1e1e1e;
+        --surface: #242424;
+        --line: #2c2c2c;
+        --line-light: #363636;
+        --text: #ececec;
+        --mute: #8f8f8f;
+        --accent: #7aa2f7;
+        --accent-glow: rgba(122, 162, 247, 0.08);
+        --accent-ring: rgba(122, 162, 247, 0.25);
+        --ok: #34d399;
+        --ok-text: #6ee7b7;
+        color-scheme: dark;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 40px 16px;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background:
+          radial-gradient(56rem 34rem at 50% -14%, var(--accent-glow), transparent 70%),
+          radial-gradient(38rem 26rem at 50% 118%, rgba(122, 162, 247, 0.05), transparent 70%);
+      }
+
+      main {
+        position: relative;
+        width: 100%;
+        max-width: 520px;
+        animation: rise 0.45s ease-out both;
+      }
+
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: rgba(30, 30, 30, 0.75);
+        backdrop-filter: blur(12px);
+        box-shadow: 0 24px 48px -16px rgba(0, 0, 0, 0.6);
+        padding: 28px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+
+      .brand img {
+        width: 52px;
+        height: 52px;
+        flex: none;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 1.5rem;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+      }
+
+      .sub {
+        margin: 2px 0 0;
+        font-size: 0.875rem;
+        color: var(--mute);
+      }
+
+      .status {
+        margin-top: 22px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        border: 1px solid rgba(52, 211, 153, 0.25);
+        background: rgba(52, 211, 153, 0.08);
+        border-radius: 12px;
+        padding: 11px 14px;
+        font-size: 0.8125rem;
+        font-weight: 500;
+        color: var(--ok-text);
+      }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        flex: none;
+        border-radius: 50%;
+        background: var(--ok);
+        box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.15);
+        animation: pulse 2.4s ease-in-out infinite;
+      }
+
+      .status .version {
+        margin-left: auto;
+        color: var(--mute);
+        font-size: 0.75rem;
+        font-weight: 400;
+        font-variant-numeric: tabular-nums;
+      }
+
+      p {
+        margin: 18px 0 0;
+        font-size: 0.9375rem;
+        line-height: 1.65;
+        color: var(--mute);
+      }
+
+      p strong {
+        color: var(--text);
+        font-weight: 500;
+      }
+
+      .addr {
+        margin-top: 18px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        border: 1px solid var(--line);
+        background: rgba(36, 36, 36, 0.5);
+        border-radius: 12px;
+        padding: 12px 14px;
+      }
+
+      .addr .label {
+        font-size: 0.6875rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--mute);
+      }
+
+      .addr code {
+        margin-left: auto;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.8125rem;
+        color: var(--accent);
+        user-select: all;
+        word-break: break-all;
+      }
+
+      .links {
+        margin-top: 22px;
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .btn {
+        flex: 1 1 0;
+        min-width: 150px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 11px 16px;
+        background: var(--surface);
+        color: var(--text);
+        font-size: 0.875rem;
+        font-weight: 600;
+        white-space: nowrap;
+        text-decoration: none;
+        transition:
+          border-color 0.15s ease,
+          color 0.15s ease,
+          filter 0.15s ease;
+      }
+
+      .btn:hover {
+        border-color: var(--line-light);
+        color: var(--accent);
+      }
+
+      .btn.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: var(--bg);
+      }
+
+      .btn.primary:hover {
+        color: var(--bg);
+        filter: brightness(1.1);
+      }
+
+      .btn:focus-visible,
+      .foot a:focus-visible {
+        outline: 2px solid var(--accent-ring);
+        outline-offset: 2px;
+      }
+
+      .icon {
+        width: 15px;
+        height: 15px;
+        flex: none;
+      }
+
+      .foot {
+        margin-top: 24px;
+        border-top: 1px solid var(--line);
+        padding-top: 16px;
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        font-size: 0.75rem;
+        color: var(--mute);
+      }
+
+      .foot a {
+        color: var(--mute);
+        text-decoration: none;
+        transition: color 0.15s ease;
+      }
+
+      .foot a:hover {
+        color: var(--accent);
+      }
+
+      .sep {
+        opacity: 0.5;
+      }
+
+      @keyframes rise {
+        from {
+          opacity: 0;
+          transform: translateY(12px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.45;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+
+      @media (max-width: 420px) {
+        .card {
+          padding: 22px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="card">
+        <header class="brand">
+          <img src="/logo.png" alt="" width="52" height="52" />
+          <div>
+            <h1>Sealbook</h1>
+            <p class="sub">Encrypted vault server</p>
+          </div>
+        </header>
+
+        <div class="status" role="status">
+          <span class="dot" aria-hidden="true"></span>
+          <span>Server running</span>
+          <span class="version">v__VERSION__</span>
+        </div>
+
+        <p>
+          This address is a <strong>Sealbook server</strong>, not an app. Your contacts, calendar and
+          notes are stored here as ciphertext, and this server holds no key that opens them.
+        </p>
+
+        <p>
+          There is nothing to sign in to on this page. To reach your data you need a Sealbook client,
+          pointed at this server.
+        </p>
+
+        <!--address-->
+        <div class="addr">
+          <span class="label">Server address</span>
+          <code>__SERVER__</code>
+        </div>
+        <!--/address-->
+
+        <div class="links">
+          <a class="btn primary" href="https://github.com/silent-sphinx/sealbook-web">
+            <svg
+              class="icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="9" />
+              <path d="M3 12h18" />
+              <path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18" />
+            </svg>
+            Web client
+          </a>
+          <a class="btn" href="https://github.com/silent-sphinx/sealbook-android">
+            <svg
+              class="icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <rect x="6.5" y="2.5" width="11" height="19" rx="2.5" />
+              <path d="M10.5 18.5h3" />
+            </svg>
+            Android client
+          </a>
+        </div>
+
+        <footer class="foot">
+          <span>Protocol __PROTOCOL__</span>
+          <span class="sep" aria-hidden="true">&middot;</span>
+          <a href="https://github.com/silent-sphinx/sealbook">Source and docs</a>
+        </footer>
+      </div>
+    </main>
+  </body>
+</html>

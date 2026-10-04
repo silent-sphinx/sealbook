@@ -6174,3 +6174,64 @@ async fn a_write_after_someone_else_rotated_is_not_sealed_under_the_old_key() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn the_root_serves_a_status_page_and_its_logo() {
+    let dir = std::env::temp_dir().join(format!("sealbook-landing-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+    let host = base.trim_start_matches("http://").to_string();
+
+    let resp = reqwest::Client::new().get(&base).send().await.unwrap();
+
+    assert_eq!(resp.status(), 200);
+    assert!(resp
+        .headers()
+        .get("content-type")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .starts_with("text/html"));
+
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("Server running"));
+    assert!(body.contains(&format!("<code>{host}</code>")));
+    assert!(body.contains("sealbook-web"));
+    // A client is the only way in, and the page has to say so.
+    assert!(body.contains("you need a Sealbook client"));
+
+    let logo = reqwest::Client::new()
+        .get(format!("{base}/logo.png"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(logo.status(), 200);
+    assert_eq!(logo.headers().get("content-type").unwrap(), "image/png");
+    assert_eq!(logo.bytes().await.unwrap()[..4], [0x89, b'P', b'N', b'G']);
+}
+
+/// A `Host` the server would have to escape is dropped instead, taking the
+/// block that would have shown it.
+#[tokio::test]
+async fn the_root_refuses_a_host_that_is_not_a_host() {
+    let dir = std::env::temp_dir().join(format!("sealbook-landing-host-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let body = reqwest::Client::new()
+        .get(&base)
+        .header("host", "a\"><script>alert(1)</script>b")
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    assert!(!body.contains("<script"));
+    assert!(!body.contains("Server address"));
+    assert!(body.contains("Server running"));
+}

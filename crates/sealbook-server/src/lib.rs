@@ -32,6 +32,7 @@ mod client_ip;
 mod db;
 mod devices;
 mod http;
+mod landing;
 mod objects;
 mod pairing;
 mod recovery;
@@ -754,6 +755,8 @@ fn router(state: Shared) -> Router<Shared> {
     // may take, so each gets its own budget rather than one number that has to be
     // generous enough for a rotation and therefore useless for everything else.
     let small = Router::new()
+        .route("/", get(landing::landing))
+        .route("/logo.png", get(landing::logo))
         .route("/health", get(|| async { "ok" }))
         .route("/health/crypto", get(crypto_profile))
         .route("/v1/opaque/register/start", post(register_start))
