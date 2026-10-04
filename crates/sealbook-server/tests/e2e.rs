@@ -3533,6 +3533,91 @@ async fn roster_history_is_pruned_to_a_floor_a_stale_device_cannot_walk_back_pas
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The pages are served by hand so the race is deterministic: the first says the
+/// collection is at manifest sequence 1 and the second says 2, which is exactly
+/// what a write committing in between looks like. A walk that disagrees with
+/// itself must restart before verification is attempted at all, since whatever
+/// verification then said about an inconsistent set would be meaningless.
+#[tokio::test]
+async fn a_write_landing_mid_walk_restarts_the_sync_rather_than_crying_tamper() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    let (dir, base, mut client) = account_with_contacts("midwalk", 1).await;
+    let real_server = base.clone();
+
+    let requests = Arc::new(AtomicUsize::new(0));
+    let counter = requests.clone();
+    let manifest = |seq: u64| sealbook_protocol::ManifestBody {
+        manifest_seq: seq,
+        key_epoch: 1,
+        latest_revision: 1,
+        object_count: 1,
+        digest: Vec::new(),
+        device_id: Uuid::new_v4(),
+        signature: DualSignatureBody {
+            mldsa: Vec::new(),
+            ed25519: Vec::new(),
+        },
+    };
+    let changes = move || {
+        let counter = counter.clone();
+        async move {
+            // Two pages per walk: the first has more to come, the second ends it.
+            let index = counter.fetch_add(1, Ordering::SeqCst);
+            let first_page = index.is_multiple_of(2);
+            axum::Json(sealbook_protocol::ChangesResponse {
+                latest_revision: 1,
+                key_epoch: 1,
+                objects: if first_page {
+                    vec![sealbook_protocol::ObjectChange {
+                        id: Uuid::new_v4(),
+                        revision: 1,
+                        tombstone: false,
+                        nonce: vec![0u8; 24],
+                        ciphertext: Vec::new(),
+                        padded_size: 256,
+                        content_type: SEALED_CONTENT_TYPE.to_string(),
+                    }]
+                } else {
+                    Vec::new()
+                },
+                has_more: first_page,
+                manifest: Some(manifest(if first_page { 1 } else { 2 })),
+                resync: false,
+                tombstone_floor: 0,
+            })
+        }
+    };
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let fake = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        let app =
+            axum::Router::new().route("/v1/collections/{id}/changes", axum::routing::get(changes));
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    client.state.as_mut().unwrap().server = fake;
+    let error = client
+        .list_contacts()
+        .await
+        .expect_err("a collection that moves under the walk cannot be verified");
+    assert!(
+        matches!(error, sealbook_client::ClientError::CollectionBusy),
+        "a benign race must be reported as transient, not sent down the manifest \
+         verification path, got: {error}"
+    );
+    // Four walks of two pages: it restarted rather than failing on the first
+    // disagreement, and stopped rather than restarting for ever.
+    assert_eq!(requests.load(Ordering::SeqCst), 8);
+
+    // And the real server, where the pages do agree, still syncs.
+    client.state.as_mut().unwrap().server = real_server;
+    assert_eq!(client.list_contacts().await.expect("real sync").len(), 1);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[tokio::test]
 async fn the_quota_counters_never_drift_from_the_objects() {
     let dir = std::env::temp_dir().join(format!("sealbook-usage-{}", Uuid::new_v4()));

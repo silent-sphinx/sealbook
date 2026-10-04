@@ -45,6 +45,13 @@ pub enum ClientError {
     Envelope(uuid::Uuid),
     #[error("pairing is still waiting")]
     PairPending,
+    /// Pages of a sync come from separate transactions, so a write landing
+    /// between two of them leaves the accumulated set and the final manifest
+    /// describing different states. That is a race, not a withheld object, and
+    /// it has to be told apart from `Manifest`: retrying is the right answer to
+    /// this one and the wrong answer to that one.
+    #[error("the collection changed while it was being read; nothing is wrong, try again")]
+    CollectionBusy,
     /// A recovery enrolled this device but never rotated the collection key, so
     /// the phrase used to recover still opens the vault. Call
     /// `complete_recovery_rotation` to finish it; the server refuses writes until

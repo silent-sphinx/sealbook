@@ -3,6 +3,8 @@
 
 use uuid::Uuid;
 
+use std::collections::HashMap;
+
 use sealbook_crypto::{
     content_digest, decrypt_object, encrypt_object, object_aad, EncryptedObject,
 };
@@ -662,8 +664,25 @@ impl SealbookClient {
     ///
     /// Walks the paginated change feed to the end, then verifies the whole set at
     /// once — a page on its own cannot be checked, since the manifest commits to
-    /// the collection rather than to any page of it.
+    /// the collection rather than to any page of it. Restarts the walk if a write
+    /// lands during it, because the accumulated set and the final manifest would
+    /// then describe different states.
     async fn fetch_verified_objects(&mut self) -> Result<VerifiedObjects, ClientError> {
+        for _ in 0..SYNC_ATTEMPTS {
+            let Some(walk) = self.walk_collection().await? else {
+                continue;
+            };
+            return self.verify_walk(walk).await;
+        }
+        Err(ClientError::CollectionBusy)
+    }
+
+    /// One pass over the change feed, or `None` if the collection moved during it.
+    ///
+    /// Every page carries the current manifest, so a page whose manifest sequence
+    /// differs from the first page's is proof that a write committed between the
+    /// two and that this pass cannot be verified as a whole.
+    async fn walk_collection(&self) -> Result<Option<Walk>, ClientError> {
         let (server, collection_id, token) = {
             let state = self.state.as_ref().ok_or(ClientError::NoState)?;
             (
@@ -676,6 +695,8 @@ impl SealbookClient {
         let mut after = 0u64;
         let mut manifest;
         let mut tombstone_floor;
+        let mut expected_seq = None;
+        let mut first_page = true;
         loop {
             let page: ChangesResponse = self
                 .get_json(
@@ -691,6 +712,15 @@ impl SealbookClient {
                     Some(&token),
                 )
                 .await?;
+            // Compared as `Option`, so a collection that gains its first manifest
+            // part way through a walk restarts as well.
+            let page_seq = page.manifest.as_ref().map(|current| current.manifest_seq);
+            if first_page {
+                expected_seq = page_seq;
+                first_page = false;
+            } else if page_seq != expected_seq {
+                return Ok(None);
+            }
             manifest = page.manifest.clone();
             tombstone_floor = page.tombstone_floor;
             let page_high = page.objects.iter().map(|object| object.revision).max();
@@ -700,15 +730,21 @@ impl SealbookClient {
                 _ => break,
             }
         }
-        // A later revision of the same object supersedes an earlier one.
-        objects.sort_by_key(|object| object.revision);
-        let mut latest: Vec<sealbook_protocol::ObjectChange> = Vec::new();
-        for object in objects {
-            match latest.iter_mut().find(|existing| existing.id == object.id) {
-                Some(existing) => *existing = object,
-                None => latest.push(object),
-            }
-        }
+        Ok(Some(Walk {
+            objects,
+            manifest,
+            tombstone_floor,
+        }))
+    }
+
+    /// Checks a completed walk against the manifest it was served with.
+    async fn verify_walk(&mut self, walk: Walk) -> Result<VerifiedObjects, ClientError> {
+        let Walk {
+            objects,
+            manifest,
+            tombstone_floor,
+        } = walk;
+        let latest = latest_revisions(objects);
 
         match manifest {
             Some(manifest) => {
@@ -742,6 +778,47 @@ impl SealbookClient {
     }
 }
 
+/// How many times a full sync restarts when the collection moves during it.
+///
+/// A write between two pages used to produce the tamper error, which is the
+/// loudest thing this client says and the one failure that must never be
+/// retried away. Telling the two apart is the point: a bounded restart answers
+/// the race, and `ClientError::CollectionBusy` answers a collection that is
+/// being written to continuously.
+const SYNC_ATTEMPTS: usize = 4;
+
+/// One pass over the change feed, before it has been verified.
+struct Walk {
+    objects: Vec<sealbook_protocol::ObjectChange>,
+    manifest: Option<sealbook_protocol::ManifestBody>,
+    tombstone_floor: u64,
+}
+
+/// The newest revision of each object, in the order they were first walked.
+///
+/// Indexed by id rather than scanned for: a linear search per object made a full
+/// sync quadratic, which at the object quota is over a billion comparisons. The
+/// manifest digest sorts within its buckets, so only the returned order matters
+/// here, and first-walked order keeps it stable for callers.
+fn latest_revisions(
+    mut objects: Vec<sealbook_protocol::ObjectChange>,
+) -> Vec<sealbook_protocol::ObjectChange> {
+    // A later revision of the same object supersedes an earlier one.
+    objects.sort_by_key(|object| object.revision);
+    let mut position: HashMap<Uuid, usize> = HashMap::with_capacity(objects.len());
+    let mut latest: Vec<sealbook_protocol::ObjectChange> = Vec::with_capacity(objects.len());
+    for object in objects {
+        match position.get(&object.id) {
+            Some(&index) => latest[index] = object,
+            None => {
+                position.insert(object.id, latest.len());
+                latest.push(object);
+            }
+        }
+    }
+    latest
+}
+
 /// One verified walk of the collection: the latest revision of every row, and
 /// the floor that says which of its tombstones a rotation may retire.
 struct VerifiedObjects {
@@ -766,8 +843,57 @@ pub(crate) fn container_name(plaintext: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::PlainObject;
+    use super::{latest_revisions, PlainObject};
     use uuid::Uuid;
+
+    fn change(id: Uuid, revision: u64) -> sealbook_protocol::ObjectChange {
+        sealbook_protocol::ObjectChange {
+            id,
+            revision,
+            tombstone: false,
+            nonce: vec![0u8; 24],
+            ciphertext: Vec::new(),
+            padded_size: 256,
+            content_type: "application/sealbook.sealed".to_string(),
+        }
+    }
+
+    /// The dedupe used to be a linear scan per object, so a full sync at the
+    /// object quota was over a billion comparisons. It has to keep both of the
+    /// properties the scan had: the newest revision wins, and the order is the
+    /// one the objects were first walked in, so a listing does not reshuffle
+    /// between syncs.
+    #[test]
+    fn latest_revisions_keeps_the_newest_of_each_object_in_walk_order() {
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        let third = Uuid::new_v4();
+        // Deliberately out of revision order, as two pages of a walk arrive.
+        let walked = vec![
+            change(first, 1),
+            change(second, 2),
+            change(first, 7),
+            change(third, 3),
+            change(second, 5),
+        ];
+
+        let latest = latest_revisions(walked);
+        assert_eq!(
+            latest
+                .iter()
+                .map(|object| (object.id, object.revision))
+                .collect::<Vec<_>>(),
+            // First appearance in revision order decides the position, which is
+            // what the scan it replaced did too.
+            vec![(first, 7), (second, 5), (third, 3)],
+            "each id appears once, at its newest revision, in walk order"
+        );
+    }
+
+    #[test]
+    fn latest_revisions_handles_an_empty_walk() {
+        assert!(latest_revisions(Vec::new()).is_empty());
+    }
 
     // The envelope format itself is covered in `sealbook_protocol::envelope`,
     // which is where all three clients read it from.
