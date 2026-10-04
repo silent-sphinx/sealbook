@@ -54,6 +54,15 @@ impl SealbookClient {
             None => format!("{server}/v1/collections/{collection_id}/roster"),
         };
         let response: RosterResponse = self.get_json(&url, Some(&token)).await?;
+        if let Some(pin) = pin {
+            if response.floor > pin.roster_seq {
+                return Err(roster_error(
+                    "this device is further behind than the server's roster history reaches, \
+                     so the chain from its pinned roster cannot be checked; pair this device \
+                     again to anchor it on the current roster",
+                ));
+            }
+        }
         let key = self
             .collection_key
             .as_ref()

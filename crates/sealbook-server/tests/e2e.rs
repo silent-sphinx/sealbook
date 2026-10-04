@@ -3368,6 +3368,172 @@ async fn an_account_at_the_device_cap_can_still_recover() {
 }
 
 #[tokio::test]
+async fn roster_history_is_pruned_to_a_floor_a_stale_device_cannot_walk_back_past() {
+    let dir = std::env::temp_dir().join(format!("sealbook-rosterfloor-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let password = "correct horse battery";
+    let mut owner = SealbookClient::plaintext_http();
+    owner
+        .register(&base, "flooralice", password)
+        .await
+        .expect("register");
+    let owner_device = owner.state.as_ref().unwrap().device_id;
+    assert_eq!(
+        owner.state.as_ref().unwrap().roster_seq,
+        1,
+        "registration should pin the genesis roster"
+    );
+
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    let (account_id, collection_id, phrase_mldsa_pk, phrase_ed25519_pk): (
+        String,
+        String,
+        Vec<u8>,
+        Vec<u8>,
+    ) = sqlx::query_as(
+        "SELECT a.id, c.id, a.phrase_mldsa_pk, a.phrase_ed25519_pk
+         FROM accounts a JOIN collections c ON c.account_id = a.id WHERE a.username = ?",
+    )
+    .bind("flooralice")
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let enrolled: Vec<sealbook_protocol::DevicePublicKeys> = sqlx::query(
+        "SELECT id, mldsa_pk, ed25519_pk, xwing_hpke_pk FROM devices WHERE account_id = ?",
+    )
+    .bind(&account_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|row| sealbook_protocol::DevicePublicKeys {
+        device_id: Uuid::parse_str(&row.get::<String, _>("id")).unwrap(),
+        mldsa_pk: row.get("mldsa_pk"),
+        ed25519_pk: row.get("ed25519_pk"),
+        xwing_hpke_pk: row.get("xwing_hpke_pk"),
+    })
+    .collect();
+    let owner_state = owner.state.as_ref().unwrap();
+    let secrets = DeviceSigningSecrets {
+        mldsa_seed: owner_state.mldsa_seed.clone(),
+        ed25519_sk: owner_state.ed25519_sk.clone(),
+    };
+
+    // Seventy more rosters, each signed by the device the one before it lists,
+    // so the chain is the one a long-lived account would really have.
+    for roster_seq in 2..=71u64 {
+        let body = hand_roster(
+            Uuid::parse_str(&collection_id).unwrap(),
+            roster_seq,
+            1,
+            enrolled.clone(),
+            phrase_mldsa_pk.clone(),
+            phrase_ed25519_pk.clone(),
+            sealbook_crypto::RosterSigner::Device(owner_device),
+            &secrets,
+            owner.collection_key().unwrap(),
+        );
+        sqlx::query(
+            "INSERT INTO device_rosters (collection_id, roster_seq, body) VALUES (?, ?, ?)",
+        )
+        .bind(&collection_id)
+        .bind(roster_seq as i64)
+        .bind(serde_json::to_string(&body).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    pool.close().await;
+
+    // A pairing is the next real roster write, and writing one is what prunes.
+    let mut joiner = SealbookClient::plaintext_http();
+    let (pair_code, confirm) = joiner.pair_join(&base, "flooralice").await.expect("join");
+    owner
+        .pair_approve(&pair_code, &confirm)
+        .await
+        .expect("approve");
+
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    let (kept, oldest, newest): (i64, i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*), MIN(roster_seq), MAX(roster_seq) FROM device_rosters
+         WHERE collection_id = ?",
+    )
+    .bind(&collection_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+    assert_eq!(
+        newest, 72,
+        "the pairing should have written the next roster"
+    );
+    assert_eq!(
+        kept, 64,
+        "the table should hold exactly the retention floor"
+    );
+    assert_eq!(oldest, 9, "and start at the newest 64");
+
+    // The route says where the floor is, rather than quietly serving a chain
+    // that starts above what was asked for.
+    let token = owner.state.as_ref().unwrap().session_token.clone().unwrap();
+    let served: serde_json::Value = reqwest::Client::new()
+        .get(format!(
+            "{base}/v1/collections/{collection_id}/roster?from=1"
+        ))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(served["floor"], serde_json::json!(9));
+    assert_eq!(served["rosters"].as_array().unwrap().len(), 64);
+
+    // `pair_approve` verifies the chain without moving the pin, so the owner is
+    // still anchored on the genesis roster, which is now below the floor.
+    assert_eq!(owner.state.as_ref().unwrap().roster_seq, 1);
+    let error = owner
+        .sync_roster()
+        .await
+        .expect_err("a pin below the floor cannot be verified")
+        .to_string();
+    assert!(
+        error.contains("pair this device again"),
+        "the refusal should say how to recover, got: {error}"
+    );
+
+    // Pairing again is that remedy, approved here by the device that is still
+    // current, and it leaves the stale device's replacement working.
+    joiner.login(password).await.expect("joiner login");
+    let mut repaired = SealbookClient::plaintext_http();
+    let (pair_code, confirm) = repaired
+        .pair_join(&base, "flooralice")
+        .await
+        .expect("re-join");
+    joiner
+        .pair_approve(&pair_code, &confirm)
+        .await
+        .expect("a current device must still be able to approve");
+    assert!(repaired.pair_ready(&pair_code).await.expect("ready"));
+    repaired.login(password).await.expect("re-paired login");
+    assert!(repaired
+        .list_contacts()
+        .await
+        .expect("a re-paired device syncs")
+        .is_empty());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
 async fn the_quota_counters_never_drift_from_the_objects() {
     let dir = std::env::temp_dir().join(format!("sealbook-usage-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();

@@ -20,6 +20,7 @@ use crate::*;
 
 /// A device's id and its three public keys, compared as one value.
 type DeviceKeys = (String, Vec<u8>, Vec<u8>, Vec<u8>);
+const MAX_ROSTER_HISTORY: i64 = 64;
 
 /// Who must have signed the roster an operation submits.
 pub(crate) enum Signer<'a> {
@@ -39,6 +40,23 @@ pub(crate) struct Expected<'a> {
 
 fn decode(body: &str) -> Result<RosterBody, (StatusCode, Json<ErrorBody>)> {
     serde_json::from_str(body).map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))
+}
+
+pub(crate) async fn retention_floor<'e, E>(
+    db: E,
+    collection_id: &str,
+) -> Result<u64, (StatusCode, Json<ErrorBody>)>
+where
+    E: sqlx::Executor<'e, Database = Sqlite>,
+{
+    let floor: Option<i64> =
+        sqlx::query_scalar("SELECT MIN(roster_seq) FROM device_rosters WHERE collection_id = ?")
+            .bind(collection_id)
+            .fetch_optional(db)
+            .await
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
+            .flatten();
+    Ok(floor.unwrap_or(0) as u64)
 }
 
 /// The collection's newest roster.
@@ -183,6 +201,12 @@ pub(crate) async fn verify_and_store(
         .execute(&mut **tx)
         .await
         .map_err(|_| err(StatusCode::CONFLICT, "stale roster sequence"))?;
+    sqlx::query("DELETE FROM device_rosters WHERE collection_id = ? AND roster_seq <= ?")
+        .bind(expected.collection_id)
+        .bind(body.roster_seq as i64 - MAX_ROSTER_HISTORY)
+        .execute(&mut **tx)
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
     Ok(())
 }
 
@@ -204,8 +228,14 @@ pub(crate) async fn collection_roster(
     if owned.is_none() {
         return Err(err(StatusCode::NOT_FOUND, "collection"));
     }
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let floor = retention_floor(&mut *tx, &collection_id.to_string()).await?;
     let rosters = match query.from {
-        None => latest(&state.db, &collection_id.to_string())
+        None => latest(&mut *tx, &collection_id.to_string())
             .await?
             .into_iter()
             .collect(),
@@ -217,7 +247,7 @@ pub(crate) async fn collection_roster(
             )
             .bind(collection_id.to_string())
             .bind(from as i64)
-            .fetch_all(&state.db)
+            .fetch_all(&mut *tx)
             .await
             .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
             bodies
@@ -226,5 +256,8 @@ pub(crate) async fn collection_roster(
                 .collect::<Result<Vec<_>, _>>()?
         }
     };
-    Ok(Json(RosterResponse { rosters }))
+    tx.commit()
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    Ok(Json(RosterResponse { rosters, floor }))
 }

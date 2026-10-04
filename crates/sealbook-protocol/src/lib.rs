@@ -263,6 +263,8 @@ pub struct RosterQuery {
 pub struct RosterResponse {
     /// Oldest first.
     pub rosters: Vec<RosterBody>,
+    #[serde(default)]
+    pub floor: u64,
 }
 
 /// Hybrid recovery-phrase material.
