@@ -28,6 +28,7 @@ This project exists because the usual options don't offer this. CalDAV and CardD
     - [The ones you'll actually touch](#the-ones-youll-actually-touch)
     - [The rest](#the-rest)
   - [Storage limits](#storage-limits)
+    - [Sizing it for your machine](#sizing-it-for-your-machine)
   - [Behind a reverse proxy](#behind-a-reverse-proxy)
   - [Backups](#backups)
   - [Running from source](#running-from-source)
@@ -205,15 +206,17 @@ Everything is set through environment variables in `docker-compose.yml`.
 | `SEALBOOK_CERT_EXPORT` | unset | Write a copy of the certificate here on start, for clients that need to pin it. |
 | `SEALBOOK_TRUSTED_PROXIES` | unset | Proxies whose `X-Forwarded-For` you believe, see [below](#behind-a-reverse-proxy). |
 | `SEALBOOK_MAX_OBJECTS` | `50000` | Most objects one account may store: contacts, events, notes, and the address books, calendars and notebooks holding them. |
-| `SEALBOOK_MAX_BYTES` | `134217728` | Most stored bytes one account may use (128 MiB of padded ciphertext). |
-| `SEALBOOK_MAX_ROTATION_BODY` | `268435456` | Largest key-rotation request (256 MiB). See [Storage limits](#storage-limits) before changing it. |
+| `SEALBOOK_MAX_BYTES` | `67108864` | Most stored bytes one account may use (64 MiB of padded ciphertext). |
+| `SEALBOOK_MAX_ROTATION_BODY` | `134217728` | Largest key-rotation request (128 MiB). See [Storage limits](#storage-limits) before changing it. |
+| `SEALBOOK_MAX_CONCURRENT_ROTATIONS` | `1` | Rotations allowed in flight at once. Multiplies the setting above, so it is part of the memory budget. |
 | `SEALBOOK_REVISION_RETENTION_DAYS` | `30` | How long a deleted object's tombstone has to be kept: a key rotation retires the ones older than this, so a longer window means deletions take longer to reclaim their quota. |
 | `SEALBOOK_FULL_INTEGRITY_CHECK` | unset | Set to `1` for an exhaustive SQLite check at startup instead of the quick one. Worth it after a crash or a restore. |
 | `RUST_LOG` | unset | Log level. `sealbook_server=info` is a good default; `=debug` when something is wrong. |
 
 ## Storage limits
 
-Three settings interact, and one of them is the real ceiling.
+Four settings interact: one of them is the real ceiling, and two of them decide
+how much memory the server needs.
 
 Revoking a device has to make the old collection key useless, so it re-encrypts
 the whole vault under a new one. Only a client can do that, since only a client
@@ -225,22 +228,37 @@ that still opens everything it ever synced.
 So the server refuses a write that would push a vault past what one rotation can
 carry, rather than letting it grow and discovering the problem at revocation
 time. In practice that, not `SEALBOOK_MAX_BYTES`, is what you hit first. The
-effective ceiling is logged at startup:
+effective ceiling is logged at startup, with the memory the route may use:
 
 ```
-INFO storage limits max_objects=50000 max_bytes=134217728
-     max_rotation_body=268435456 rotatable_bytes=201228272
+INFO storage limits max_objects=50000 max_bytes=67108864
+     max_rotation_body=134217728 rotatable_bytes=98764976
+INFO peak memory the rotation route may use
+     max_concurrent_rotations=1 rotation_peak_bytes=234881024
 ```
 
-If you raise `SEALBOOK_MAX_BYTES`, raise `SEALBOOK_MAX_ROTATION_BODY` with it —
-roughly four thirds of the byte quota, plus about 320 bytes per object, since the
-body is base64 JSON. Two rotations may be in flight at once and each is buffered
-and parsed whole, so that setting is the server's peak memory, not a free number.
+### Sizing it for your machine
+
+The defaults suit a single-board computer or a small VPS: a 64 MiB vault needs
+about 224 MiB of memory to rotate, so a 1 GB machine has room for the rest of
+itself.
+
+Want bigger vaults? Double both, and keep doubling:
+
+```yaml
+environment:
+  SEALBOOK_MAX_BYTES: 134217728          # 128 MiB vault
+  SEALBOOK_MAX_ROTATION_BODY: 268435456  # 256 MiB, needs ~450 MiB of RAM
+```
+
+Then check the startup log: `rotatable_bytes` must be at or above `max_bytes`,
+and `rotation_peak_bytes` must be memory you can spare. Sealbook warns if the
+first is wrong.
 
 A single object is capped at 8 MiB of padded plaintext, which is the ceiling a
 long note runs into first. Padding rounds up to a power of two, so the usable
-ceiling for one object's contents is just under 8 MiB, and 16 objects at that
-size would fill a default account.
+ceiling for one object's contents is just under 8 MiB, and 8 objects at that size
+would fill a default account.
 
 An account may have 16 devices enrolled at once. Every device gets a wrap of the
 collection key in every rotation, so the list is bounded; revoking a device frees

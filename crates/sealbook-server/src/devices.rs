@@ -94,7 +94,7 @@ pub(crate) async fn rotate(
     // Everything that depends only on the request body is done before the
     // transaction opens, because all of it hashes the whole body: the object
     // digest the transcript covers, and the per-object content digests the rows
-    // store. At the 128 MiB ceiling that is several hundred milliseconds of
+    // store. At the byte quota that is hundreds of milliseconds of
     // SHA-256, and under the write lock it would stall every other writer for
     // that long.
     let mut supplied: Vec<String> = Vec::with_capacity(body.objects.len());

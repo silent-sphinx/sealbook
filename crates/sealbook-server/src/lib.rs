@@ -118,28 +118,38 @@ pub struct Limits {
     /// Largest rotation request body this server will accept, and therefore the
     /// real ceiling on a vault's size — see `rotation_body_estimate`.
     pub max_rotation_body: usize,
+    /// How many rotations may be in flight at once. Multiplies
+    /// `rotation_peak_bytes`, so it is part of the memory budget rather than a
+    /// throughput setting.
+    pub max_concurrent_rotations: usize,
 }
 
 impl Default for Limits {
     fn default() -> Self {
+        // The three settings below are one budget, not three choices. A rotation
+        // carries the whole vault in one body, buffered and parsed whole, so the
+        // vault quota sets the body size and the body size times the concurrency
+        // sets the server's peak memory. They are sized for the smallest machine
+        // someone would self-host on — a single-board computer or a small VPS —
+        // and `the_default_limits_fit_a_small_machine` holds them to it. The
+        // README says how to raise them together for a larger one.
         Self {
             max_objects: 50_000,
-            // Sized so that a vault at *both* ceilings at once, 50,000 objects
-            // totalling this many padded bytes, still fits in one rotation body,
-            // which `the_default_quota_can_be_rotated` checks.
-            //
-            // Raised from 32 MiB for notes, which are the first content type that
-            // is routinely large: at the 4 MiB per-object ceiling the old quota
-            // was 8 objects deep, and hitting it blocks *every* write, contacts
-            // included, not just the oversized one.
-            max_bytes: 128 * 1024 * 1024,
-            // Two of these may be buffered and JSON-parsed whole at once
-            // (`MAX_CONCURRENT_ROTATIONS`), so this is the server's peak memory
-            // and not a free number to raise. It tracks `max_bytes`: the estimate
-            // for a vault at both ceilings is roughly 187 MiB, and
-            // `rotatable_bytes_ceiling` must stay above `max_bytes` or writes are
-            // refused before the quota is reached.
-            max_rotation_body: 256 * 1024 * 1024,
+            // Enough for notes, which are the first content type that is
+            // routinely large: at the 8 MiB per-object ceiling this is 8 objects
+            // deep, and hitting the quota blocks *every* write, contacts
+            // included, not just the oversized one. A vault at both ceilings at
+            // once still fits one rotation body, which
+            // `the_default_quota_can_be_rotated` checks.
+            max_bytes: 64 * 1024 * 1024,
+            // Tracks `max_bytes`: the estimate for a vault at both ceilings is
+            // roughly 104 MiB, and `rotatable_bytes_ceiling` must stay above
+            // `max_bytes` or writes are refused before the quota is reached.
+            max_rotation_body: 128 * 1024 * 1024,
+            // One, because this multiplies the figure above. A second concurrent
+            // rotation doubles the server's peak memory to buy throughput on the
+            // rarest request it serves.
+            max_concurrent_rotations: 1,
         }
     }
 }
@@ -161,6 +171,10 @@ impl Limits {
                 "SEALBOOK_MAX_ROTATION_BODY",
                 defaults.max_rotation_body as i64,
             ) as usize,
+            max_concurrent_rotations: read(
+                "SEALBOOK_MAX_CONCURRENT_ROTATIONS",
+                defaults.max_concurrent_rotations as i64,
+            ) as usize,
         }
     }
 
@@ -170,6 +184,20 @@ impl Limits {
     /// revoking a device is impossible.
     fn rotation_fits(&self, objects: i64, padded_bytes: i64, tombstones: i64) -> bool {
         rotation_body_estimate(objects, padded_bytes, tombstones) <= self.max_rotation_body as i64
+    }
+
+    /// Rough peak resident memory the rotation route costs.
+    ///
+    /// A body is buffered whole and then parsed whole, and the parsed ciphertexts
+    /// are base64-decoded, so three quarters of the body exists a second time
+    /// while the request is in flight. Logged at startup, because this is the
+    /// number that decides whether the machine survives a revocation and it was
+    /// previously only derivable from three separate settings.
+    pub(crate) fn rotation_peak_bytes(&self) -> usize {
+        self.max_concurrent_rotations.saturating_mul(
+            self.max_rotation_body
+                .saturating_add(self.max_rotation_body / 4 * 3),
+        )
     }
 
     /// The largest vault, in padded bytes, that can still be rotated. Logged at
@@ -372,8 +400,8 @@ pub async fn prune_old_revisions(
 ///
 /// The storage quota counts only the live `objects` table, so before this the
 /// revision log was bounded by the retention window and the write rate and by
-/// nothing else: at the rates the limiter permits, one account on a 128 MiB quota
-/// could append terabytes a day and every byte stayed for thirty days. Age was
+/// nothing else: at the rates the limiter permits, one account within its byte
+/// quota could append terabytes a day and every byte stayed for thirty days. Age was
 /// capping how long a revision lived, not how many there were.
 ///
 /// Dropping the oldest first raises an away client's chance of being told to
@@ -512,6 +540,13 @@ pub async fn serve(db_path: &str, bind: &str) -> anyhow::Result<()> {
         rotatable_bytes = limits.rotatable_bytes_ceiling(),
         "storage limits"
     );
+    // The one figure that decides whether a revocation kills the machine, rather
+    // than leaving it to be derived from the three settings above.
+    info!(
+        max_concurrent_rotations = limits.max_concurrent_rotations,
+        rotation_peak_bytes = limits.rotation_peak_bytes(),
+        "peak memory the rotation route may use"
+    );
     if limits.max_bytes > limits.rotatable_bytes_ceiling() {
         tracing::warn!(
             max_bytes = limits.max_bytes,
@@ -632,15 +667,6 @@ const MAX_BODY: usize = 256 * 1024;
 /// is also the server's memory cost per write in flight.
 const MAX_OBJECT_BODY: usize = 12 * 1024 * 1024;
 
-/// How many rotations may be in flight at once.
-///
-/// A rotation body is buffered and JSON-parsed whole, so peak memory is a few
-/// multiples of `Limits::max_rotation_body` per concurrent request. Without a
-/// bound, a handful of concurrent rotations is an out-of-memory kill; with one,
-/// the cost of the largest route on the server is a number an operator can
-/// reason about.
-const MAX_CONCURRENT_ROTATIONS: usize = 2;
-
 /// How long a small, fixed-shape request gets before it is abandoned.
 ///
 /// Everything but an object write and a rotation is a handful of kilobytes and a
@@ -716,12 +742,14 @@ fn router(state: Shared) -> Router<Shared> {
     //
     // The concurrency limit sits outside the body limit, so requests over the
     // limit wait before their bodies are buffered rather than after. That is what
-    // bounds peak memory: at most `MAX_CONCURRENT_ROTATIONS` bodies exist at once,
-    // however many clients ask at the same time.
+    // bounds peak memory: at most `max_concurrent_rotations` bodies exist at
+    // once, however many clients ask at the same time.
     let rotation = Router::new()
         .route("/v1/collections/{id}/rotate", post(rotate))
         .layer(DefaultBodyLimit::max(state.limits.max_rotation_body))
-        .layer(ConcurrencyLimitLayer::new(MAX_CONCURRENT_ROTATIONS))
+        .layer(ConcurrencyLimitLayer::new(
+            state.limits.max_concurrent_rotations.max(1),
+        ))
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
             ROTATION_TIMEOUT,
@@ -845,6 +873,53 @@ mod tests {
             limits.max_bytes,
             limits.rotatable_bytes_ceiling()
         );
+    }
+
+    /// Peak memory the default limits are sized to fit.
+    ///
+    /// The smallest machine someone self-hosts on is a single-board computer or
+    /// a small VPS, so the rotation route has to leave room for the rest of the
+    /// system on a 1 GiB machine. The defaults did not: a 256 MiB body limit
+    /// times two concurrent rotations, each parsed beside its buffer, projected
+    /// to about 896 MiB.
+    const SMALL_MACHINE_BUDGET: usize = 256 * 1024 * 1024;
+
+    #[test]
+    fn the_default_limits_fit_a_small_machine() {
+        let limits = Limits::default();
+        assert!(
+            limits.rotation_peak_bytes() <= SMALL_MACHINE_BUDGET,
+            "the rotation route projects {} bytes of peak memory, over the {} \
+             the defaults are meant to fit",
+            limits.rotation_peak_bytes(),
+            SMALL_MACHINE_BUDGET
+        );
+        // The projection has to be the one an operator is told at startup, so
+        // the buffered body and the parse beside it are both in it.
+        assert!(
+            limits.rotation_peak_bytes() > limits.max_rotation_body,
+            "the projection must count the parsed body as well as the buffer"
+        );
+    }
+
+    /// Raising the body limit for a larger machine must move the projection with
+    /// it, since that is the whole reason the figure is logged.
+    #[test]
+    fn the_peak_projection_follows_both_settings() {
+        let small = Limits::default();
+        let bigger = Limits {
+            max_rotation_body: small.max_rotation_body * 2,
+            ..small
+        };
+        let concurrent = Limits {
+            max_concurrent_rotations: small.max_concurrent_rotations + 1,
+            ..small
+        };
+        assert_eq!(
+            bigger.rotation_peak_bytes(),
+            small.rotation_peak_bytes() * 2
+        );
+        assert!(concurrent.rotation_peak_bytes() > small.rotation_peak_bytes());
     }
 
     #[test]
