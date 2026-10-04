@@ -1,13 +1,11 @@
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::IpAddr;
 use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Context;
-use rcgen::{
-    CertificateParams, DistinguishedName, DnType, KeyPair, SanType, PKCS_ECDSA_P256_SHA256,
-};
+use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair, PKCS_ECDSA_P256_SHA256};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use rustls::version::TLS13;
 use rustls::ServerConfig;
@@ -95,6 +93,116 @@ impl TlsMode {
     }
 }
 
+/// The names and addresses a generated certificate is valid for.
+///
+/// A client that pins this certificate still runs full name verification
+/// against the URL it connects to, so an address missing from this set fails
+/// the handshake rather than falling back to the pin.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TlsSans {
+    entries: Vec<String>,
+}
+
+/// Covered whatever the operator configures: loopback by name and by address,
+/// the Android emulator's alias for its host, and the wildcard bind address.
+const BUILTIN_SANS: [&str; 4] = ["localhost", "127.0.0.1", "10.0.2.2", "0.0.0.0"];
+
+/// Records which set the stored certificate was generated for, so that a change
+/// to the configured set can be noticed on the next start.
+const SANS_FILE: &str = "cert-sans";
+
+impl Default for TlsSans {
+    fn default() -> Self {
+        let mut sans = Self {
+            entries: Vec::new(),
+        };
+        for name in BUILTIN_SANS {
+            sans.add(name).expect("builtin sans are valid");
+        }
+        sans
+    }
+}
+
+impl TlsSans {
+    /// Reads `SEALBOOK_TLS_SANS`, a comma-separated list of DNS names and IP
+    /// addresses to add to the builtin set.
+    pub fn from_env() -> anyhow::Result<Self> {
+        match std::env::var("SEALBOOK_TLS_SANS") {
+            Ok(raw) => Self::parse(&raw),
+            Err(_) => Ok(Self::default()),
+        }
+    }
+
+    pub fn parse(raw: &str) -> anyhow::Result<Self> {
+        let mut sans = Self::default();
+        for entry in raw.split(',').map(str::trim).filter(|e| !e.is_empty()) {
+            sans.add(entry)?;
+        }
+        Ok(sans)
+    }
+
+    pub fn names(&self) -> &[String] {
+        &self.entries
+    }
+
+    fn add(&mut self, entry: &str) -> anyhow::Result<()> {
+        let normalized = normalize_san(entry)?;
+        if !self.entries.contains(&normalized) {
+            self.entries.push(normalized);
+            self.entries.sort();
+        }
+        Ok(())
+    }
+
+    fn stored_form(&self) -> String {
+        let mut form = self.entries.join("\n");
+        form.push('\n');
+        form
+    }
+
+    /// An entry this build can no longer parse is dropped, which makes the set
+    /// differ and so forces a regeneration.
+    fn from_stored(contents: &str) -> Self {
+        let mut sans = Self::default();
+        for line in contents.lines().map(str::trim).filter(|l| !l.is_empty()) {
+            let _ = sans.add(line);
+        }
+        sans
+    }
+}
+
+/// Rejects a typo rather than generating a certificate that silently omits it.
+fn normalize_san(entry: &str) -> anyhow::Result<String> {
+    // The bracketed form is what an operator copying an IPv6 host out of a URL
+    // would paste.
+    let entry = entry
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+        .unwrap_or(entry);
+    if let Ok(ip) = entry.parse::<IpAddr>() {
+        return Ok(ip.to_string());
+    }
+    if entry.contains('/') || entry.contains(':') {
+        anyhow::bail!(
+            "SEALBOOK_TLS_SANS entry {entry:?} is neither a DNS name nor an IP address; \
+             list bare names and addresses, with no scheme, port or prefix length"
+        );
+    }
+    let name = entry.to_ascii_lowercase();
+    let usable = name.len() <= 253
+        && name.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        });
+    if !usable {
+        anyhow::bail!("SEALBOOK_TLS_SANS entry {entry:?} is not a usable DNS name");
+    }
+    Ok(name)
+}
+
 /// The certificate's SHA-256 fingerprint, formatted as other TLS tools print it
 /// so it can be compared against what a client reports.
 pub fn fingerprint(cert: &CertificateDer<'_>) -> String {
@@ -117,8 +225,14 @@ pub fn fingerprint(cert: &CertificateDer<'_>) -> String {
 pub const CERT_VALIDITY_DAYS: i64 = 365;
 
 pub fn generate_self_signed() -> anyhow::Result<TlsMaterial> {
+    generate_self_signed_for(&TlsSans::default())
+}
+
+pub fn generate_self_signed_for(sans: &TlsSans) -> anyhow::Result<TlsMaterial> {
     install_crypto_provider();
-    let mut params = CertificateParams::new(vec!["localhost".to_string()])?;
+    // `CertificateParams::new` classifies each entry as an IP address or a DNS
+    // name, which is the same split `normalize_san` validated.
+    let mut params = CertificateParams::new(sans.entries.clone())?;
     params.distinguished_name = DistinguishedName::new();
     params
         .distinguished_name
@@ -126,15 +240,6 @@ pub fn generate_self_signed() -> anyhow::Result<TlsMaterial> {
     let now = OffsetDateTime::now_utc();
     params.not_before = now - Duration::hours(1);
     params.not_after = now + Duration::days(CERT_VALIDITY_DAYS);
-    params
-        .subject_alt_names
-        .push(SanType::IpAddress(IpAddr::V4(Ipv4Addr::LOCALHOST)));
-    params
-        .subject_alt_names
-        .push(SanType::IpAddress(IpAddr::V4(Ipv4Addr::new(10, 0, 2, 2))));
-    params
-        .subject_alt_names
-        .push(SanType::IpAddress(IpAddr::V4(Ipv4Addr::UNSPECIFIED)));
     // Pin the key algorithm explicitly so that changing it is a deliberate act
     // rather than a side effect of an rcgen default changing.
     let key_pair = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256)?;
@@ -156,7 +261,7 @@ pub fn generate_self_signed() -> anyhow::Result<TlsMaterial> {
 /// `Provided` fails rather than generating, because a deployment that meant to
 /// serve a CA-issued certificate is better off not starting than starting with
 /// one no client will accept.
-pub fn load_for_mode(dir: &Path, mode: TlsMode) -> anyhow::Result<TlsMaterial> {
+pub fn load_for_mode(dir: &Path, mode: TlsMode, sans: &TlsSans) -> anyhow::Result<TlsMaterial> {
     if !mode.generates_certificate() {
         let cert_path = dir.join("cert.pem");
         let key_path = dir.join("key.pem");
@@ -173,24 +278,49 @@ pub fn load_for_mode(dir: &Path, mode: TlsMode) -> anyhow::Result<TlsMaterial> {
                 key_path.display()
             );
         }
+        return load_existing(dir);
     }
-    load_or_create(dir)
+    load_or_create(dir, sans)
 }
 
-pub fn load_or_create(dir: &Path) -> anyhow::Result<TlsMaterial> {
+/// Loads the stored certificate, replacing it when it does not cover the
+/// configured names.
+///
+/// Regenerating changes the fingerprint clients pin, so it happens only on a
+/// configuration change and says so.
+pub fn load_or_create(dir: &Path, sans: &TlsSans) -> anyhow::Result<TlsMaterial> {
     std::fs::create_dir_all(dir)?;
     let cert_path = dir.join("cert.pem");
     let key_path = dir.join("key.pem");
+    let sans_path = dir.join(SANS_FILE);
+    let stored = match std::fs::read_to_string(&sans_path) {
+        Ok(contents) => TlsSans::from_stored(&contents),
+        // No record means a certificate from before this setting existed, which
+        // was generated for the builtin set.
+        Err(_) => TlsSans::default(),
+    };
     if cert_path.exists() && key_path.exists() {
-        install_crypto_provider();
-        let cert_pem = std::fs::read_to_string(&cert_path)?;
-        let key_pem = std::fs::read_to_string(&key_path)?;
-        return from_pem(&cert_pem, &key_pem);
+        if stored == *sans {
+            return load_existing(dir);
+        }
+        tracing::warn!(
+            names = %sans.names().join(", "),
+            "SEALBOOK_TLS_SANS changed; regenerating the certificate, so pinning clients \
+             need the new one"
+        );
     }
-    let material = generate_self_signed()?;
+    let material = generate_self_signed_for(sans)?;
     write_private_file(&cert_path, material.cert_pem.as_bytes(), 0o644)?;
     write_private_file(&key_path, material.key_pem.as_bytes(), 0o600)?;
+    write_private_file(&sans_path, sans.stored_form().as_bytes(), 0o644)?;
     Ok(material)
+}
+
+fn load_existing(dir: &Path) -> anyhow::Result<TlsMaterial> {
+    install_crypto_provider();
+    let cert_pem = std::fs::read_to_string(dir.join("cert.pem"))?;
+    let key_pem = std::fs::read_to_string(dir.join("key.pem"))?;
+    from_pem(&cert_pem, &key_pem)
 }
 
 fn write_private_file(path: &Path, contents: &[u8], mode: u32) -> anyhow::Result<()> {
@@ -331,7 +461,8 @@ mod tests {
 
         // `.err()` rather than `unwrap_err()`: TlsMaterial deliberately has no
         // Debug, so the private key cannot be printed by accident.
-        let error = load_for_mode(&dir, TlsMode::Provided)
+        let sans = TlsSans::default();
+        let error = load_for_mode(&dir, TlsMode::Provided, &sans)
             .err()
             .expect("provided mode must fail with no certificate")
             .to_string();
@@ -344,11 +475,96 @@ mod tests {
         );
 
         // The same directory works for a mode whose job is to generate.
-        load_for_mode(&dir, TlsMode::SelfSigned).unwrap();
+        load_for_mode(&dir, TlsMode::SelfSigned, &sans).unwrap();
         assert!(dir.join("cert.pem").exists());
         assert!(dir.join("key.pem").exists());
         // And now that material exists, provided mode is satisfied by it.
-        load_for_mode(&dir, TlsMode::Provided).unwrap();
+        load_for_mode(&dir, TlsMode::Provided, &sans).unwrap();
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn configured_sans_are_added_to_the_builtin_set() {
+        let sans = TlsSans::parse("Sealbook.Lan, 10.88.42.134, [::1]").unwrap();
+        for expected in ["localhost", "127.0.0.1", "10.0.2.2", "0.0.0.0"] {
+            assert!(sans.names().contains(&expected.to_string()), "{expected}");
+        }
+        assert!(sans.names().contains(&"sealbook.lan".to_string()));
+        assert!(sans.names().contains(&"10.88.42.134".to_string()));
+        assert!(sans.names().contains(&"::1".to_string()));
+    }
+
+    #[test]
+    fn repeating_an_entry_does_not_repeat_the_san() {
+        let sans = TlsSans::parse("localhost, LOCALHOST, 127.0.0.1").unwrap();
+        assert_eq!(sans, TlsSans::default());
+    }
+
+    /// An entry that cannot become a SAN must not be dropped silently: the
+    /// certificate would then omit the one address it was set for.
+    #[test]
+    fn sans_reject_what_cannot_be_certified() {
+        for bad in [
+            "https://sealbook.lan",
+            "sealbook.lan:8443",
+            "10.88.42.0/24",
+            "sealbook..lan",
+            "-sealbook.lan",
+            "seal_book.lan",
+        ] {
+            let error = TlsSans::parse(bad)
+                .err()
+                .unwrap_or_else(|| panic!("{bad} must be refused"))
+                .to_string();
+            assert!(error.contains("SEALBOOK_TLS_SANS"), "{error}");
+        }
+    }
+
+    #[test]
+    fn a_stored_certificate_survives_a_restart_but_not_a_san_change() {
+        let dir = std::env::temp_dir().join(format!("sealbook-sans-{}", uuid::Uuid::new_v4()));
+        let default = TlsSans::default();
+
+        let first = load_or_create(&dir, &default).unwrap();
+        let restarted = load_or_create(&dir, &default).unwrap();
+        assert_eq!(
+            fingerprint(&first.cert_der),
+            fingerprint(&restarted.cert_der),
+            "an unchanged set must reuse the stored certificate"
+        );
+
+        let widened = TlsSans::parse("sealbook.lan").unwrap();
+        let regenerated = load_or_create(&dir, &widened).unwrap();
+        assert_ne!(
+            fingerprint(&first.cert_der),
+            fingerprint(&regenerated.cert_der),
+            "a widened set must produce a certificate that covers it"
+        );
+        // And the new set is what is now stored, so the next start is a reuse.
+        let after = load_or_create(&dir, &widened).unwrap();
+        assert_eq!(
+            fingerprint(&regenerated.cert_der),
+            fingerprint(&after.cert_der)
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A certificate predating `SEALBOOK_TLS_SANS` has no record beside it, and
+    /// upgrading must not invalidate what clients have already pinned.
+    #[test]
+    fn an_unrecorded_certificate_is_kept_on_the_default_set() {
+        let dir = std::env::temp_dir().join(format!("sealbook-sans-old-{}", uuid::Uuid::new_v4()));
+        let default = TlsSans::default();
+        let original = load_or_create(&dir, &default).unwrap();
+        std::fs::remove_file(dir.join(SANS_FILE)).unwrap();
+
+        let loaded = load_or_create(&dir, &default).unwrap();
+        assert_eq!(
+            fingerprint(&original.cert_der),
+            fingerprint(&loaded.cert_der)
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }

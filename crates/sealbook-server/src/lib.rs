@@ -476,7 +476,8 @@ pub async fn serve(db_path: &str, bind: &str) -> anyhow::Result<()> {
     let tls_dir = std::env::var("SEALBOOK_TLS_DIR").unwrap_or_else(|_| "tls".into());
     let production = is_production();
     let tls_mode = tls::TlsMode::from_env(production)?;
-    let material = tls::load_for_mode(Path::new(&tls_dir), tls_mode)?;
+    let tls_sans = tls::TlsSans::from_env()?;
+    let material = tls::load_for_mode(Path::new(&tls_dir), tls_mode, &tls_sans)?;
     let pq_supported = tls::preferred_kx_is_pq();
     info!(
         pq_required = true,
@@ -490,6 +491,15 @@ pub async fn serve(db_path: &str, bind: &str) -> anyhow::Result<()> {
         info!(
             fingerprint = %tls::fingerprint(&material.cert_der),
             "clients must pin this certificate (sha256)"
+        );
+    }
+    // A client verifies the name in its URL against the certificate even when it
+    // has pinned it, so the covered set has to be visible rather than inferred
+    // from a failed handshake.
+    if tls_mode.generates_certificate() {
+        info!(
+            names = %tls_sans.names().join(", "),
+            "certificate covers these names; add yours with SEALBOOK_TLS_SANS"
         );
     }
     // The rotation budget is the real ceiling on a vault, so say what it works out

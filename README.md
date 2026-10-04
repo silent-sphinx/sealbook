@@ -56,8 +56,10 @@ There are 3 TLS configuration methods available:
 - `reverse-proxy` - Cloudflare Tunnel, Tailscale, Nginx, Apache2 Proxy
 
 The shipped `SEALBOOK_TLS_MODE: self-signed`
-works out of the box and is right for a home network, a VPN, or access by bare
-IP. If you have a public domain name or a reverse proxy, change it. See
+is right for a home network, a VPN, or access by bare IP. Set
+`SEALBOOK_TLS_SANS` to the hostname or IP address your clients will use, or the
+certificate will only be valid for `localhost`. If you have a public domain name
+or a reverse proxy, change the mode instead. See
 [Certificates](#certificates).
 
 **3. Review the Docker Compose file** 
@@ -79,7 +81,10 @@ You're looking for:
 sealbook listening on https://0.0.0.0:8443 (TLS 1.3, X25519MLKEM768 preferred)
 ```
 
-Now point a client at `https://your-host:8443` and register an account.
+Now point a client at `https://your-host:8443` and register an account. The
+host in that URL has to be one `SEALBOOK_TLS_SANS` covers: clients verify it
+against the certificate even when they pin the certificate, so anything else
+fails the handshake with a name mismatch.
 
 > [!IMPORTANT]
 > Registration is open. There is no invite system and no way to close signups, so anyone who can reach the port can create an account. If you're exposing Sealbook to the internet for yourself, put it behind a VPN, or firewall the port to the addresses you use.
@@ -101,16 +106,34 @@ subdirectory of its data directory (so `/data/tls/` by default).
 
 ### `self-signed` - home network, VPN, or bare IP
 
-This is the shipped default, and it needs nothing from you. There's no public
-name to certify, so Sealbook generates its own certificate on first start and
-keeps it. Clients pin it, which is what makes this safe rather than a downgrade.
+This is the shipped default. There's no public name to certify, so Sealbook
+generates its own certificate on first start and keeps it. Clients pin it, which
+is what makes this safe rather than a downgrade.
 
-On startup it prints the fingerprint so you can check what your client is
-seeing:
+Tell it which addresses you'll reach it on. Pinning a certificate does not skip
+the name check, so a certificate that doesn't name the host in the client's URL
+is refused:
+
+```yaml
+environment:
+  SEALBOOK_TLS_MODE: self-signed
+  SEALBOOK_TLS_SANS: sealbook.lan,10.88.42.134
+```
+
+A comma-separated list of hostnames and IP addresses, with no scheme, port or
+prefix length. `localhost`, `127.0.0.1`, `0.0.0.0` and `10.0.2.2` (the Android
+emulator's alias for its host) are always included. Change the list and the
+certificate is regenerated on the next start, so clients have to pin the new
+one; the log says when that has happened.
+
+On startup it prints the names it covers and the fingerprint, so you can check
+what your client is seeing:
 
 ```text
 INFO sealbook_server: clients must pin this certificate (sha256)
   fingerprint=86:FF:BF:04:9F:4D:8E:D6:2A:CE:63:37:85:CA:3E:55:88:F0:EC:1B:...
+INFO sealbook_server: certificate covers these names; add yours with SEALBOOK_TLS_SANS
+  names=0.0.0.0, 10.0.2.2, 10.88.42.134, 127.0.0.1, localhost, sealbook.lan
 ```
 
 That is the same value `openssl x509 -fingerprint -sha256` prints. Copy the
@@ -168,6 +191,7 @@ Everything is set through environment variables in `docker-compose.yml`.
 | --- | --- | --- |
 | `SEALBOOK_ENV` | unset | Set to `production` for any real deployment. Stops trusting localhost dev origins, and stops writing `cert.pem` into the working directory. |
 | `SEALBOOK_TLS_MODE` | `provided` in production, else `self-signed` | Where the certificate comes from: `self-signed`, `provided` or `proxy`. See [Certificates](#certificates). |
+| `SEALBOOK_TLS_SANS` | `localhost`, `127.0.0.1`, `0.0.0.0`, `10.0.2.2` | Hostnames and IP addresses a generated certificate is valid for, comma-separated. Set this in `self-signed` mode to whatever your clients put in their URL. |
 | `SEALBOOK_CORS_ORIGINS` | localhost dev ports | Comma-separated addresses your web client is served from. Browsers block anything not listed. |
 | `SEALBOOK_DATA_DIR` | `/data` | Where the database and certificates live. This is the directory to back up. |
 | `SEALBOOK_BIND` | `0.0.0.0:8443` | Address and port to listen on inside the container. |

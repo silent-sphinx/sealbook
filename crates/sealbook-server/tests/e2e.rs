@@ -730,6 +730,63 @@ async fn https_tls13_round_trip() {
         .expect("https register");
 }
 
+/// Pinning does not skip name verification, so the handshake is the only thing
+/// that proves a configured SAN is served. The negative half keeps this from
+/// passing on a certificate that happens to match any name.
+#[tokio::test]
+async fn a_configured_san_completes_a_handshake_and_an_unconfigured_one_does_not() {
+    let dir = std::env::temp_dir().join(format!("sealbook-san-tls-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+
+    let sans = sealbook_server::tls::TlsSans::parse("sealbook.lan").unwrap();
+    let material = sealbook_server::tls::generate_self_signed_for(&sans).unwrap();
+    let cert = material.cert_der.clone();
+    let app = sealbook_server::app(db.to_str().unwrap()).await.unwrap();
+    let addr = SocketAddr::from(([127, 0, 0, 1], 0));
+    let handle = axum_server::Handle::new();
+    let handle2 = handle.clone();
+    let config = axum_server::tls_rustls::RustlsConfig::from_config(material.server_config);
+    tokio::spawn(async move {
+        axum_server::bind_rustls(addr, config)
+            .handle(handle)
+            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+            .await
+            .unwrap();
+    });
+    let bound = loop {
+        if let Some(address) = handle2.listening().await {
+            break address;
+        }
+    };
+
+    // Each client reaches the loopback listener under the name being verified,
+    // which is what serving on an address other than loopback looks like to
+    // rustls without needing one in the test environment.
+    let probe = |name: &str| {
+        let tls =
+            sealbook_client::pq_tls_config(sealbook_client::TrustAnchors::Pinned(cert.clone()))
+                .unwrap();
+        reqwest::Client::builder()
+            .use_preconfigured_tls(tls)
+            .resolve(name, SocketAddr::from(([127, 0, 0, 1], bound.port())))
+            .build()
+            .unwrap()
+            .get(format!("https://{name}:{}/health", bound.port()))
+            .send()
+    };
+
+    let configured = probe("sealbook.lan").await;
+    assert!(
+        configured.is_ok(),
+        "a configured SAN must verify: {:?}",
+        configured.err()
+    );
+    assert!(probe("sealbook.other").await.is_err());
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 #[tokio::test]
 async fn classical_tls_client_is_rejected() {
     let dir = std::env::temp_dir().join(format!("sealbook-pq-only-{}", Uuid::new_v4()));

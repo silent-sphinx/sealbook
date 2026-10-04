@@ -18,6 +18,11 @@ services:
       #   provided     you supply /data/tls/cert.pem and key.pem (public domain name)
       #   proxy        a reverse proxy holds it; set SEALBOOK_TRUSTED_PROXIES too
       SEALBOOK_TLS_MODE: self-signed
+      # In self-signed mode, the hostnames and IP addresses clients will use.
+      # Clients check the name in their URL against the certificate even though
+      # they pin it, so an address missing here fails the handshake. localhost,
+      # 127.0.0.1, 0.0.0.0 and 10.0.2.2 are always covered.
+      # SEALBOOK_TLS_SANS: sealbook.lan,10.88.42.134
     volumes:
       - sealbook-data:/data
     logging:
