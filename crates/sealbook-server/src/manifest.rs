@@ -96,37 +96,38 @@ pub(crate) async fn bucket_state(
     Ok((buckets_to_blob(&buckets), count))
 }
 
-/// Every entry whose id falls in one bucket.
+/// Every entry whose id falls in one of these buckets.
 ///
-/// The same range scan `bucket_digest` does, returning the rows rather than their
-/// digest, so a client can check them against it.
-pub(crate) async fn entries_in_bucket(
+pub(crate) async fn entries_in_buckets(
     tx: &mut Transaction<'_, Sqlite>,
     account_id: &str,
     collection_id: &str,
-    bucket: u8,
+    buckets: &[u8],
 ) -> Result<Vec<ManifestEntry>, (StatusCode, Json<ErrorBody>)> {
-    let (low, high) = bucket_range(bucket);
-    let rows = sqlx::query(
-        "SELECT id, revision, tombstone, content_digest FROM objects
-         WHERE account_id = ? AND collection_id = ? AND id >= ? AND id < ?",
-    )
-    .bind(account_id)
-    .bind(collection_id)
-    .bind(&low)
-    .bind(&high)
-    .fetch_all(&mut **tx)
-    .await
-    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-    let mut out = Vec::with_capacity(rows.len());
-    for row in rows {
-        let id: String = row.get("id");
-        out.push(ManifestEntry {
-            id: Uuid::parse_str(&id).map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?,
-            revision: row.get::<i64, _>("revision") as u64,
-            tombstone: row.get::<i64, _>("tombstone") != 0,
-            content_digest: row.get("content_digest"),
-        });
+    let mut out = Vec::new();
+    for bucket in buckets {
+        let (low, high) = bucket_range(*bucket);
+        let rows = sqlx::query(
+            "SELECT id, revision, tombstone, content_digest FROM objects
+             WHERE account_id = ? AND collection_id = ? AND id >= ? AND id < ?",
+        )
+        .bind(account_id)
+        .bind(collection_id)
+        .bind(&low)
+        .bind(&high)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+        for row in rows {
+            let id: String = row.get("id");
+            out.push(ManifestEntry {
+                id: Uuid::parse_str(&id)
+                    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?,
+                revision: row.get::<i64, _>("revision") as u64,
+                tombstone: row.get::<i64, _>("tombstone") != 0,
+                content_digest: row.get("content_digest"),
+            });
+        }
     }
     Ok(out)
 }
@@ -303,27 +304,36 @@ async fn digest_state(
     }
 }
 
-/// Folds one object write into the stored state.
+/// Folds a write of one or more objects into the stored state.
 ///
-/// Only the bucket the object's id falls in can have changed, so only that one is
-/// rebuilt. `is_new` says whether the write added a row, which is the only way the
-/// count moves — a replacement, including tombstoning, leaves it alone.
-pub(crate) async fn record_object_write(
+/// Only the buckets the ids fall in can have changed, so only those are rebuilt,
+/// and each is rebuilt once however many of the written objects share it. The
+/// `is_new` flag beside each id says whether that object added a row, which is the
+/// only way the count moves, since a replacement, including tombstoning, leaves
+/// it alone.
+pub(crate) async fn record_object_writes(
     tx: &mut Transaction<'_, Sqlite>,
     account_id: &str,
     collection_id: &str,
-    object_id: Uuid,
-    is_new: bool,
+    written: &[(Uuid, bool)],
 ) -> Result<(), (StatusCode, Json<ErrorBody>)> {
-    // Called after the object row is written, so a rebuild from the rows already
-    // accounts for this write and must not then be incremented again.
+    // Called after the object rows are written, so a rebuild from the rows already
+    // accounts for them and must not then be incremented again.
     let Some((mut buckets, count)) = stored_digest_state(tx, collection_id).await? else {
         rebuild_digest_state(tx, account_id, collection_id).await?;
         return Ok(());
     };
-    let bucket = manifest_bucket_of(object_id);
-    buckets[bucket as usize] = bucket_digest(tx, account_id, collection_id, bucket).await?;
-    store_digest_state(tx, collection_id, &buckets, count + i64::from(is_new)).await
+    let mut touched: Vec<u8> = written
+        .iter()
+        .map(|(id, _)| manifest_bucket_of(*id))
+        .collect();
+    touched.sort_unstable();
+    touched.dedup();
+    for bucket in touched {
+        buckets[bucket as usize] = bucket_digest(tx, account_id, collection_id, bucket).await?;
+    }
+    let fresh: i64 = written.iter().map(|(_, is_new)| i64::from(*is_new)).sum();
+    store_digest_state(tx, collection_id, &buckets, count + fresh).await
 }
 
 /// Checks a submitted manifest against the server's own view and stores it.

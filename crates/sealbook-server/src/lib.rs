@@ -691,6 +691,7 @@ fn router(state: Shared) -> Router<Shared> {
 
     let objects = Router::new()
         .route("/v1/collections/{id}/objects", put(put_object))
+        .route("/v1/collections/{id}/objects/batch", put(put_objects))
         .layer(DefaultBodyLimit::max(MAX_OBJECT_BODY))
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,

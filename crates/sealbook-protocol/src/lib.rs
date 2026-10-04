@@ -431,26 +431,57 @@ pub struct ManifestResponse {
     pub entries: Vec<ManifestEntry>,
 }
 
-/// Which bucket of the manifest a caller wants the entries of.
+/// Which buckets of the manifest a caller wants the entries of.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ManifestBucketQuery {
-    /// `manifest_bucket_of(object_id)`. Omitted asks for the digests alone.
-    pub bucket: Option<u8>,
+    /// The buckets to serve, as concatenated two-digit hex: `manifest_bucket_of`
+    /// of each object the caller is about to write, so `03` for one and `031f`
+    /// for two. Omitted asks for the digests alone.
+    ///
+    /// A list rather than a single bucket because a batch write touches one
+    /// bucket per object, and asking for them one request at a time would undo
+    /// what batching is for.
+    pub buckets: Option<String>,
 }
 
-/// The manifest as a single write needs to see it.
+/// Renders a bucket list for `ManifestBucketQuery::buckets`.
+pub fn bucket_query(buckets: &[u8]) -> String {
+    buckets
+        .iter()
+        .map(|bucket| format!("{bucket:02x}"))
+        .collect()
+}
+
+/// Parses a `ManifestBucketQuery::buckets` list, rejecting anything malformed.
+pub fn parse_bucket_query(buckets: &str) -> Option<Vec<u8>> {
+    if !buckets.len().is_multiple_of(2) {
+        return None;
+    }
+    let bytes = buckets.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len() / 2);
+    for pair in bytes.chunks(2) {
+        let text = std::str::from_utf8(pair).ok()?;
+        out.push(u8::from_str_radix(text, 16).ok()?);
+    }
+    out.sort_unstable();
+    out.dedup();
+    Some(out)
+}
+
+/// The manifest as a write needs to see it.
 ///
 /// `ManifestResponse` carries every entry in the collection, so a write that
 /// fetched it moved bytes proportional to the whole vault and importing *n*
 /// objects cost O(n squared). The root is a hash of 256 bucket digests, and a
-/// write changes exactly one bucket, so this serves the digests plus the entries
-/// of that one bucket: enough to check the manifest and to compute the next one.
+/// write changes one bucket per object, so this serves the digests plus the
+/// entries of the buckets asked for: enough to check the manifest and to compute
+/// the next one.
 ///
 /// Verifying it is the same work as before, in two steps rather than one. The
-/// served entries must hash to `buckets[bucket]`, and `buckets` with
-/// `object_count` must produce the root the manifest signature covers. A server
-/// withholding an object from the bucket fails the first check, and one editing a
-/// bucket digest fails the second.
+/// served entries of each bucket must hash to that bucket's digest, and `buckets`
+/// with `object_count` must produce the root the manifest signature covers. A
+/// server withholding an object from a served bucket fails the first check, and
+/// one editing a bucket digest fails the second.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManifestBucketsResponse {
     pub manifest: Option<ManifestBody>,
@@ -458,9 +489,11 @@ pub struct ManifestBucketsResponse {
     #[serde(with = "b64")]
     pub buckets: Vec<u8>,
     pub object_count: u64,
-    /// The bucket whose entries follow, echoed from the request.
-    pub bucket: Option<u8>,
-    /// Every entry in `bucket`, or empty if none was asked for.
+    /// The buckets whose entries follow, parsed back from the request and in
+    /// ascending order. A caller checks its own list against this rather than
+    /// trusting that every bucket it asked for was served.
+    pub served: Vec<u8>,
+    /// Every entry in every bucket of `served`, or empty if none was asked for.
     pub entries: Vec<ManifestEntry>,
 }
 
@@ -485,6 +518,61 @@ pub struct PutObjectRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PutObjectResponse {
     pub revision: u64,
+}
+
+/// Most objects one batch write may carry.
+///
+/// The body limit is the other bound and the tighter one for large objects: a
+/// batch of notes at the per-object ceiling is refused long before it reaches
+/// this many. It is small objects that this caps, which is what an import of
+/// contacts is.
+pub const MAX_BATCH_OBJECTS: usize = 256;
+
+/// One object inside a batch write.
+///
+/// The same fields `PutObjectRequest` carries per object, without the manifest:
+/// a batch signs one manifest for the state all of them together produce.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchObject {
+    pub id: Uuid,
+    /// Revisions a batch assigns, which must run consecutively from the
+    /// collection's next revision in the order the objects are sent.
+    pub revision: u64,
+    #[serde(with = "b64")]
+    pub nonce: Vec<u8>,
+    #[serde(with = "b64")]
+    pub ciphertext: Vec<u8>,
+    pub padded_size: usize,
+    pub content_type: String,
+    pub tombstone: bool,
+}
+
+/// Several objects written under one manifest.
+///
+/// A single `PutObjectRequest` costs a round trip and a manifest signature each,
+/// so importing *n* objects meant *n* requests against the per-minute write cap
+/// with nothing else able to write in between. This applies them in one
+/// transaction under one signature instead.
+///
+/// It does not relax the sequence rule: the manifest still has to be the
+/// collection's next one, so two devices writing at the same time still collide.
+/// What it changes is how much one request can carry, which is what an import
+/// needs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PutObjectsRequest {
+    /// At least one and at most `MAX_BATCH_OBJECTS`, each id appearing once.
+    pub objects: Vec<BatchObject>,
+    /// The collection as it will stand once every object in `objects` is
+    /// applied.
+    pub manifest: ManifestBody,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PutObjectsResponse {
+    /// The revision the first object in the batch took.
+    pub first_revision: u64,
+    /// The revision the last one took, which is the collection's latest.
+    pub latest_revision: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -812,6 +900,31 @@ pub struct SimpleStatusResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bucket_list_round_trips() {
+        let buckets = [0u8, 3, 0x1f, 0xff];
+        assert_eq!(bucket_query(&buckets), "00031fff");
+        assert_eq!(parse_bucket_query("00031fff"), Some(buckets.to_vec()));
+        // Sorted and deduplicated, so a caller's own sorted list can be compared
+        // against the echo without reordering either.
+        assert_eq!(
+            parse_bucket_query("ff03ff00"),
+            Some(vec![0u8, 3, 0xff]),
+            "a bucket list must come back sorted and deduplicated"
+        );
+        assert_eq!(parse_bucket_query(""), Some(Vec::new()));
+    }
+
+    #[test]
+    fn a_malformed_bucket_list_is_rejected() {
+        // An odd number of digits would silently drop or shift a bucket.
+        assert_eq!(parse_bucket_query("0"), None);
+        assert_eq!(parse_bucket_query("031"), None);
+        assert_eq!(parse_bucket_query("zz"), None);
+        // Multi-byte characters, which are not two hex digits however they chunk.
+        assert_eq!(parse_bucket_query("é"), None);
+    }
 
     #[test]
     fn default_address_book_id_is_stable() {

@@ -7,7 +7,10 @@ use sealbook_crypto::{
     content_digest, decrypt_object, encrypt_object, object_aad, EncryptedObject,
 };
 use sealbook_protocol::envelope::{open_envelope, seal_envelope, Unsealed};
-use sealbook_protocol::{ChangesResponse, ManifestEntry, PutObjectRequest};
+use sealbook_protocol::{
+    BatchObject, ChangesResponse, ManifestEntry, PutObjectRequest, PutObjectsRequest,
+    PutObjectsResponse, MAX_BATCH_OBJECTS,
+};
 use sealbook_protocol::{
     ADDRESS_BOOK_CONTENT_TYPE, CALENDAR_CONTENT_TYPE, CALENDAR_EVENT_CONTENT_TYPE,
     DEFAULT_ADDRESS_BOOK_ID, DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_NOTEBOOK_ID, DEFAULT_NOTEBOOK_NAME,
@@ -36,6 +39,19 @@ pub(crate) struct VaultContents {
     pub(crate) retired: Vec<Uuid>,
 }
 
+/// One object's encrypted bytes, waiting to be written.
+///
+/// What a batch is made of: the sealing is done per object, but the revision each
+/// one takes and the manifest they are all written under are decided once, for
+/// the batch.
+pub(crate) struct PendingWrite {
+    id: Uuid,
+    nonce: Vec<u8>,
+    ciphertext: Vec<u8>,
+    padded_size: usize,
+    tombstone: bool,
+}
+
 struct PlainObject {
     id: Uuid,
     content_type: String,
@@ -56,6 +72,19 @@ impl SealbookClient {
         jscontact: &str,
     ) -> Result<u64, ClientError> {
         self.put_sealed(object_id, jscontact.as_bytes(), JSCONTACT_CONTENT_TYPE)
+            .await
+    }
+
+    /// Writes up to `MAX_BATCH_OBJECTS` contacts in one request.
+    ///
+    /// What an import should use: one round trip and one manifest signature for
+    /// the whole batch instead of one of each per contact, and the per-minute
+    /// write cap then bounds objects rather than requests. Larger imports are
+    /// sent in several calls.
+    ///
+    /// Returns the revision the last contact took, or 0 if the batch was empty.
+    pub async fn put_contacts(&mut self, contacts: &[(Uuid, &str)]) -> Result<u64, ClientError> {
+        self.put_sealed_batch(contacts, JSCONTACT_CONTENT_TYPE)
             .await
     }
 
@@ -184,6 +213,14 @@ impl SealbookClient {
             .await
     }
 
+    /// Writes up to `MAX_BATCH_OBJECTS` notes in one request, as `put_contacts`
+    /// does for contacts. Notes are the largest objects a vault holds, so a batch
+    /// of them is bounded by the server's body limit well before the object
+    /// count.
+    pub async fn put_notes(&mut self, notes: &[(Uuid, &str)]) -> Result<u64, ClientError> {
+        self.put_sealed_batch(notes, NOTE_CONTENT_TYPE).await
+    }
+
     pub async fn delete_note(&mut self, object_id: Uuid) -> Result<u64, ClientError> {
         self.write_object(object_id, Vec::new(), Vec::new(), 0, true)
             .await
@@ -251,6 +288,24 @@ impl SealbookClient {
         plaintext: &[u8],
         content_type: &str,
     ) -> Result<u64, ClientError> {
+        let write = self.seal_write(object_id, plaintext, content_type)?;
+        self.write_object(
+            write.id,
+            write.nonce,
+            write.ciphertext,
+            write.padded_size,
+            write.tombstone,
+        )
+        .await
+    }
+
+    /// Seals one object for a write, without sending it.
+    fn seal_write(
+        &self,
+        object_id: Uuid,
+        plaintext: &[u8],
+        content_type: &str,
+    ) -> Result<PendingWrite, ClientError> {
         let collection_id = self
             .state
             .as_ref()
@@ -262,14 +317,26 @@ impl SealbookClient {
             .ok_or(ClientError::NoCollectionKey)?;
         let aad = object_aad(object_id.as_bytes(), collection_id.as_bytes());
         let enc = encrypt_object(key, &seal_envelope(content_type, plaintext), &aad)?;
-        self.write_object(
-            object_id,
-            enc.nonce.to_vec(),
-            enc.ciphertext,
-            enc.padded_size,
-            false,
-        )
-        .await
+        Ok(PendingWrite {
+            id: object_id,
+            nonce: enc.nonce.to_vec(),
+            ciphertext: enc.ciphertext,
+            padded_size: enc.padded_size,
+            tombstone: false,
+        })
+    }
+
+    /// Seals and writes several objects of one kind in a single request.
+    async fn put_sealed_batch(
+        &mut self,
+        objects: &[(Uuid, &str)],
+        content_type: &str,
+    ) -> Result<u64, ClientError> {
+        let mut writes = Vec::with_capacity(objects.len());
+        for (object_id, plaintext) in objects {
+            writes.push(self.seal_write(*object_id, plaintext.as_bytes(), content_type)?);
+        }
+        self.write_objects(writes).await
     }
 
     /// Objects as stored, without opening the envelope, so they can be
@@ -414,14 +481,14 @@ impl SealbookClient {
         // Only the bucket this object falls in, not the whole collection. Reading
         // every entry per write is what made importing n objects cost O(n^2)
         // bytes.
-        let state = self.manifest_bucket_state(object_id).await?;
+        let state = self.manifest_bucket_state(&[object_id]).await?;
         let (seq, key_epoch, revision) = (state.seq, state.key_epoch, state.latest_revision + 1);
-        let (object_count, root) = state.apply(ManifestEntry {
+        let (object_count, root) = state.apply(&[ManifestEntry {
             id: object_id,
             revision,
             tombstone,
             content_digest: content_digest(&nonce, &ciphertext).to_vec(),
-        })?;
+        }])?;
         let manifest =
             self.sign_manifest_root(seq + 1, key_epoch, revision, object_count, &root)?;
         let written_seq = seq + 1;
@@ -446,6 +513,89 @@ impl SealbookClient {
         // now the floor: anything older served back is a rollback.
         self.accept_manifest_seq(written_seq)?;
         Ok(resp.revision)
+    }
+
+    /// Writes several objects under one manifest and one request.
+    ///
+    /// One `write_object` per object costs a round trip and a manifest signature
+    /// each, and the per-minute write cap is reached at one object per request, so
+    /// an import of any size was slow for reasons that had nothing to do with its
+    /// bytes. This signs one manifest for the state the whole batch produces.
+    ///
+    /// Revisions run consecutively from the collection's next one, in the order
+    /// given, because that is what the server assigns and the manifest commits to
+    /// each of them. Returns the revision the last object took, or 0 for an empty
+    /// batch, which writes nothing: revisions start at 1, so that is not one.
+    async fn write_objects(&mut self, writes: Vec<PendingWrite>) -> Result<u64, ClientError> {
+        if writes.is_empty() {
+            return Ok(0);
+        }
+        if writes.len() > MAX_BATCH_OBJECTS {
+            return Err(ClientError::BatchTooLarge(writes.len()));
+        }
+        let mut ids: Vec<Uuid> = writes.iter().map(|write| write.id).collect();
+        ids.sort_unstable();
+        let distinct = ids.len();
+        ids.dedup();
+        if ids.len() != distinct {
+            // The manifest would commit to one entry per id while the batch
+            // carried two writes for it, so the server's recomputed digest could
+            // not match whichever of them landed last.
+            return Err(ClientError::DuplicateInBatch);
+        }
+
+        let (server, collection_id, token) = {
+            let state = self.state.as_ref().ok_or(ClientError::NoState)?;
+            (
+                state.server.clone(),
+                state.collection_id,
+                state.session_token.clone().ok_or(ClientError::NoState)?,
+            )
+        };
+        // One fetch covering every bucket the batch touches, rather than one per
+        // object.
+        let state = self.manifest_bucket_state(&ids).await?;
+        let (seq, key_epoch) = (state.seq, state.key_epoch);
+        let first_revision = state.latest_revision + 1;
+
+        let entries: Vec<ManifestEntry> = writes
+            .iter()
+            .enumerate()
+            .map(|(index, write)| ManifestEntry {
+                id: write.id,
+                revision: first_revision + index as u64,
+                tombstone: write.tombstone,
+                content_digest: content_digest(&write.nonce, &write.ciphertext).to_vec(),
+            })
+            .collect();
+        let latest_revision = first_revision + writes.len() as u64 - 1;
+        let (object_count, root) = state.apply(&entries)?;
+        let manifest =
+            self.sign_manifest_root(seq + 1, key_epoch, latest_revision, object_count, &root)?;
+        let written_seq = seq + 1;
+
+        let objects: Vec<BatchObject> = writes
+            .into_iter()
+            .zip(&entries)
+            .map(|(write, entry)| BatchObject {
+                id: write.id,
+                revision: entry.revision,
+                nonce: write.nonce,
+                ciphertext: write.ciphertext,
+                padded_size: write.padded_size,
+                content_type: SEALED_CONTENT_TYPE.into(),
+                tombstone: write.tombstone,
+            })
+            .collect();
+        let resp: PutObjectsResponse = self
+            .put_json(
+                &format!("{server}/v1/collections/{collection_id}/objects/batch"),
+                &PutObjectsRequest { objects, manifest },
+                Some(&token),
+            )
+            .await?;
+        self.accept_manifest_seq(written_seq)?;
+        Ok(resp.latest_revision)
     }
 
     /// Every object in the collection, checked against the signed manifest.

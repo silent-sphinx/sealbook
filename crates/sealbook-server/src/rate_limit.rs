@@ -70,6 +70,17 @@ impl RateLimiter {
     }
 
     pub async fn allow(&self, key: &str, limit: usize, window: Duration) -> bool {
+        self.allow_cost(key, 1, limit, window).await
+    }
+
+    /// `allow`, for a call that does the work of `cost` of them.
+    ///
+    /// A batch write carries up to `MAX_BATCH_OBJECTS` objects in one request, so
+    /// counting it as a single call would turn the per-minute object limit into a
+    /// per-minute *request* limit and let one token write 256 times as much. The
+    /// cost is the object count, which keeps the ceiling on objects written per
+    /// window the same however they are packed into requests.
+    pub async fn allow_cost(&self, key: &str, cost: usize, limit: usize, window: Duration) -> bool {
         let mut buckets = self.inner.lock().await;
         let now = Instant::now();
 
@@ -109,10 +120,12 @@ impl RateLimiter {
         // first call after startup asked for.
         bucket.window = window;
         bucket.prune(now);
-        if bucket.stamps.len() >= limit {
+        if bucket.stamps.len() + cost > limit {
             return false;
         }
-        bucket.stamps.push(now);
+        // One stamp per unit of cost, so the calls a batch stands for age out of
+        // the window together with it rather than all at once at some later time.
+        bucket.stamps.extend(std::iter::repeat_n(now, cost));
         true
     }
 
@@ -130,8 +143,26 @@ impl RateLimiter {
         limit: usize,
         window: Duration,
     ) -> bool {
-        self.allow(&format!("account:{endpoint}:{account_id}"), limit, window)
+        self.allow_account_cost(endpoint, account_id, 1, limit, window)
             .await
+    }
+
+    /// `allow_account`, for a call worth `cost` of them. See `allow_cost`.
+    pub async fn allow_account_cost(
+        &self,
+        endpoint: &str,
+        account_id: &str,
+        cost: usize,
+        limit: usize,
+        window: Duration,
+    ) -> bool {
+        self.allow_cost(
+            &format!("account:{endpoint}:{account_id}"),
+            cost,
+            limit,
+            window,
+        )
+        .await
     }
 
     pub async fn allow_endpoint(&self, endpoint: &str, username: &str, ip: Option<IpAddr>) -> bool {
@@ -290,6 +321,35 @@ mod tests {
         assert!(
             !buckets.by_key.contains_key("flood:0"),
             "the 60s buckets have aged out and should have been dropped"
+        );
+    }
+
+    /// A batch write is charged for every object it carries, so packing writes
+    /// into fewer requests does not buy a larger quota.
+    #[tokio::test]
+    async fn a_costly_call_is_charged_for_every_unit_of_work() {
+        let limiter = RateLimiter::new();
+        let window = Duration::from_secs(60);
+        assert!(limiter.allow_cost("batch:alice", 4, 10, window).await);
+        assert!(limiter.allow_cost("batch:alice", 4, 10, window).await);
+        assert!(
+            !limiter.allow_cost("batch:alice", 4, 10, window).await,
+            "twelve objects must not fit under a limit of ten"
+        );
+        // And the two it has left are still there for smaller calls.
+        assert!(limiter.allow_cost("batch:alice", 2, 10, window).await);
+        assert!(!limiter.allow("batch:alice", 10, window).await);
+    }
+
+    /// A single call worth more than the whole limit can never be let through,
+    /// rather than being admitted because the bucket happens to be empty.
+    #[tokio::test]
+    async fn a_call_costing_more_than_the_limit_is_refused() {
+        let limiter = RateLimiter::new();
+        assert!(
+            !limiter
+                .allow_cost("batch:bob", 11, 10, Duration::from_secs(60))
+                .await
         );
     }
 

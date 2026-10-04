@@ -25,6 +25,10 @@ pub enum ClientError {
     NoCollectionKey,
     #[error("invalid nonce")]
     Nonce,
+    #[error("a batch write may carry at most {max} objects, got {0}", max = sealbook_protocol::MAX_BATCH_OBJECTS)]
+    BatchTooLarge(usize),
+    #[error("a batch write may name each object once")]
+    DuplicateInBatch,
     /// Read through a helper that returns `String`, of an object whose plaintext
     /// is not text. Rotation carries bytes through untouched, so the object is
     /// intact; only this accessor cannot represent it.

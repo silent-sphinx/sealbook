@@ -4916,7 +4916,7 @@ async fn a_write_reads_one_bucket_not_the_whole_collection() {
     let http = reqwest::Client::new();
     let response: ManifestBucketsResponse = http
         .get(format!(
-            "{base}/v1/collections/{collection}/manifest/buckets?bucket={bucket}"
+            "{base}/v1/collections/{collection}/manifest/buckets?buckets={bucket:02x}"
         ))
         .bearer_auth(&token)
         .send()
@@ -4926,7 +4926,7 @@ async fn a_write_reads_one_bucket_not_the_whole_collection() {
         .await
         .unwrap();
 
-    assert_eq!(response.bucket, Some(bucket));
+    assert_eq!(response.served, vec![bucket]);
     assert_eq!(response.buckets.len(), MANIFEST_BUCKETS * 32);
     assert_eq!(response.object_count, count as u64);
     // One bucket of a 400-object collection, not all 400. Ids spread over 256
@@ -5104,6 +5104,343 @@ async fn a_cached_roster_still_accepts_a_manifest_from_a_newly_paired_device() {
         .await
         .expect("writes must work after the epoch moves");
     assert_eq!(owner.list_contacts().await.expect("list").len(), 5);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A batch is one request, one manifest signature and one sequence number for
+/// however many objects it carries. Writing them one at a time is what made an
+/// import cost a round trip and a signature each, and left nothing else able to
+/// write in between.
+#[tokio::test]
+async fn a_batch_write_lands_every_object_under_one_manifest() {
+    let dir = std::env::temp_dir().join(format!("sealbook-batch-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "batchalice", "correct horse battery")
+        .await
+        .expect("register");
+
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    let manifest_seq_before: i64 = sqlx::query_scalar("SELECT manifest_seq FROM manifests")
+        .fetch_optional(&pool)
+        .await
+        .expect("manifest")
+        .unwrap_or(0);
+    let next_revision_before: i64 = sqlx::query_scalar("SELECT next_revision FROM revision_seq")
+        .fetch_one(&pool)
+        .await
+        .expect("revision_seq");
+
+    let count = 40;
+    let bodies: Vec<(Uuid, String)> = (0..count)
+        .map(|index| {
+            (
+                Uuid::new_v4(),
+                format!(r#"{{"@type":"Card","name":{{"full":"Imported {index}"}}}}"#),
+            )
+        })
+        .collect();
+    let batch: Vec<(Uuid, &str)> = bodies
+        .iter()
+        .map(|(id, body)| (*id, body.as_str()))
+        .collect();
+    let latest = client.put_contacts(&batch).await.expect("batch write");
+
+    // Every object landed, and the whole-collection manifest check `list_contacts`
+    // does still passes over the result.
+    let listed = client.list_contacts().await.expect("list");
+    assert_eq!(listed.len(), count);
+    for (id, body) in &bodies {
+        let found = listed
+            .iter()
+            .find(|(listed_id, _)| listed_id == id)
+            .expect("every batched contact must be listed");
+        assert_eq!(&found.1, body);
+    }
+
+    // One sequence number for the batch, and one revision per object in it.
+    let manifest_seq_after: i64 = sqlx::query_scalar("SELECT manifest_seq FROM manifests")
+        .fetch_one(&pool)
+        .await
+        .expect("manifest");
+    let next_revision_after: i64 = sqlx::query_scalar("SELECT next_revision FROM revision_seq")
+        .fetch_one(&pool)
+        .await
+        .expect("revision_seq");
+    assert_eq!(
+        manifest_seq_after,
+        manifest_seq_before + 1,
+        "a batch must advance the manifest sequence once, not once per object"
+    );
+    assert_eq!(
+        next_revision_after,
+        next_revision_before + count as i64,
+        "every object in a batch takes its own revision"
+    );
+    assert_eq!(latest, (next_revision_after - 1) as u64);
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM object_revisions")
+        .fetch_one(&pool)
+        .await
+        .expect("log");
+    assert_eq!(
+        rows, count as i64,
+        "the change feed must carry one log row per batched object"
+    );
+    pool.close().await;
+
+    // And the collection is still writable both ways afterwards: a single write
+    // has to verify the manifest the batch signed, and a second batch has to
+    // verify the one the single write signed.
+    client
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"After the batch"}}"#,
+        )
+        .await
+        .expect("a single write after a batch");
+    let more = [(
+        Uuid::new_v4(),
+        r#"{"@type":"Card","name":{"full":"Second batch"}}"#,
+    )];
+    client.put_contacts(&more).await.expect("second batch");
+    assert_eq!(client.list_contacts().await.expect("list").len(), count + 2);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Two objects of a batch in one bucket, and one of them replacing a row that is
+/// already there.
+///
+/// The digests are per bucket, so a batch has to rehash each touched bucket once
+/// over every entry that ends up in it. Rehashing per object, or counting a
+/// replacement as a new object, leaves the client's root disagreeing with what the
+/// server recomputes and the write is refused.
+#[tokio::test]
+async fn a_batch_rehashes_a_shared_bucket_once() {
+    use sealbook_crypto::manifest_bucket_of;
+
+    let dir = std::env::temp_dir().join(format!("sealbook-batchbucket-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "batchbob", "correct horse battery")
+        .await
+        .expect("register");
+
+    // Three ids in one bucket, which random uuids reach in a few hundred draws.
+    let mut by_bucket: std::collections::HashMap<u8, Vec<Uuid>> = std::collections::HashMap::new();
+    let shared = loop {
+        let id = Uuid::new_v4();
+        let slot = by_bucket.entry(manifest_bucket_of(id)).or_default();
+        slot.push(id);
+        if slot.len() == 3 {
+            break slot.clone();
+        }
+    };
+    let elsewhere = {
+        let bucket = manifest_bucket_of(shared[0]);
+        loop {
+            let id = Uuid::new_v4();
+            if manifest_bucket_of(id) != bucket {
+                break id;
+            }
+        }
+    };
+
+    // One of the three is written first, so the batch below replaces a row rather
+    // than adding one and the object count must not move for it.
+    client
+        .put_contact(shared[0], r#"{"@type":"Card","name":{"full":"First"}}"#)
+        .await
+        .expect("seed the bucket");
+
+    let batch = [
+        (shared[0], r#"{"@type":"Card","name":{"full":"Replaced"}}"#),
+        (
+            shared[1],
+            r#"{"@type":"Card","name":{"full":"Same bucket"}}"#,
+        ),
+        (
+            shared[2],
+            r#"{"@type":"Card","name":{"full":"Same again"}}"#,
+        ),
+        (
+            elsewhere,
+            r#"{"@type":"Card","name":{"full":"Another bucket"}}"#,
+        ),
+    ];
+    client
+        .put_contacts(&batch)
+        .await
+        .expect("a batch sharing a bucket must be accepted");
+
+    let listed = client.list_contacts().await.expect("list");
+    assert_eq!(listed.len(), 4, "the replacement must not have added a row");
+    let replaced = listed
+        .iter()
+        .find(|(id, _)| *id == shared[0])
+        .expect("the replaced contact");
+    assert!(replaced.1.contains("Replaced"));
+
+    // The next write reads one of those buckets back and checks it against the
+    // digest the batch left behind.
+    client
+        .put_contact(shared[1], r#"{"@type":"Card","name":{"full":"Edited"}}"#)
+        .await
+        .expect("a write into a bucket a batch rehashed");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A batch is one transaction, so one that would end over the quota is refused
+/// entire rather than filling the vault to the ceiling and failing partway.
+#[tokio::test]
+async fn a_batch_past_the_object_quota_is_refused_entire() {
+    let dir = std::env::temp_dir().join(format!("sealbook-batchquota-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let app = sealbook_server::app_with_limits(
+        db.to_str().unwrap(),
+        sealbook_server::Limits {
+            max_objects: 2,
+            max_bytes: 1024 * 1024,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        .unwrap();
+    });
+    let base = format!("http://{addr}");
+
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "batchquota", "correct horse battery")
+        .await
+        .expect("register");
+
+    let batch = [
+        (Uuid::new_v4(), r#"{"@type":"Card","name":{"full":"One"}}"#),
+        (Uuid::new_v4(), r#"{"@type":"Card","name":{"full":"Two"}}"#),
+        (
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"Three"}}"#,
+        ),
+    ];
+    let error = client
+        .put_contacts(&batch)
+        .await
+        .expect_err("a batch past the quota must be refused");
+    assert!(error.to_string().contains("quota"), "wrong error: {error}");
+    assert!(
+        client.list_contacts().await.expect("list").is_empty(),
+        "a refused batch must leave nothing behind"
+    );
+
+    // And the same objects fit once the batch is inside the quota.
+    client
+        .put_contacts(&batch[..2])
+        .await
+        .expect("a batch within the quota");
+    assert_eq!(client.list_contacts().await.expect("list").len(), 2);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Two writes for one object in a batch would leave the collection holding one
+/// row while the signed manifest committed to whichever was folded in last, so
+/// both sides refuse it.
+#[tokio::test]
+async fn a_batch_naming_one_object_twice_is_refused() {
+    use sealbook_protocol::{BatchObject, ManifestBody, PutObjectsRequest};
+
+    let dir = std::env::temp_dir().join(format!("sealbook-batchdupe-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "batchdupe", "correct horse battery")
+        .await
+        .expect("register");
+
+    let id = Uuid::new_v4();
+    let error = client
+        .put_contacts(&[
+            (id, r#"{"@type":"Card","name":{"full":"First"}}"#),
+            (id, r#"{"@type":"Card","name":{"full":"Second"}}"#),
+        ])
+        .await
+        .expect_err("the client must refuse a duplicate id");
+    assert!(
+        error.to_string().contains("each object once"),
+        "wrong error: {error}"
+    );
+
+    // And the server refuses it too, for a client that does not check. The batch
+    // is shape-checked before anything is read, so a manifest that would never
+    // verify is enough to show which check fires.
+    let state = client.state.as_ref().unwrap();
+    let token = state.session_token.clone().unwrap();
+    let collection = state.collection_id;
+    let device_id = state.device_id;
+    let object = BatchObject {
+        id,
+        revision: 1,
+        nonce: vec![0u8; 24],
+        ciphertext: vec![0u8; 256 + 16],
+        padded_size: 256,
+        content_type: SEALED_CONTENT_TYPE.into(),
+        tombstone: false,
+    };
+    let response = reqwest::Client::new()
+        .put(format!("{base}/v1/collections/{collection}/objects/batch"))
+        .bearer_auth(&token)
+        .json(&PutObjectsRequest {
+            objects: vec![object.clone(), object],
+            manifest: ManifestBody {
+                manifest_seq: 1,
+                key_epoch: 1,
+                latest_revision: 2,
+                object_count: 1,
+                digest: vec![0u8; 32],
+                device_id,
+                signature: DualSignatureBody {
+                    mldsa: Vec::new(),
+                    ed25519: Vec::new(),
+                },
+            },
+        })
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let body: sealbook_protocol::ErrorBody = response.json().await.expect("error body");
+    assert!(
+        body.error.contains("each object once"),
+        "wrong error: {}",
+        body.error
+    );
+    assert!(client.list_contacts().await.expect("list").is_empty());
 
     let _ = std::fs::remove_dir_all(&dir);
 }

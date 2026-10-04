@@ -10,8 +10,8 @@ use sealbook_crypto::{
     XWING_CIPHERSUITE, XWING_ENCAPSULATED_KEY_LEN,
 };
 use sealbook_protocol::{
-    ErrorBody, KeyWrapBody, PhraseRecoveryBody, PutObjectRequest, RotatedObject,
-    MAX_PADDED_OBJECT_SIZE, MIN_PADDED_OBJECT_SIZE, SEALED_CONTENT_TYPE,
+    BatchObject, ErrorBody, KeyWrapBody, PhraseRecoveryBody, PutObjectRequest, RotatedObject,
+    MAX_BATCH_OBJECTS, MAX_PADDED_OBJECT_SIZE, MIN_PADDED_OBJECT_SIZE, SEALED_CONTENT_TYPE,
 };
 
 use crate::*;
@@ -164,6 +164,45 @@ pub(crate) fn validate_object(
         body.padded_size,
         body.tombstone,
     )
+}
+
+/// Shape checks for a batch write, before any of it is applied.
+///
+/// The id check is the one a single write does not need. Two entries for one
+/// object in the same batch would leave the collection holding one row while the
+/// manifest the client signed committed to whichever of the two it folded in
+/// last, so the entry set and the signed digest would describe different
+/// collections.
+pub(crate) fn validate_batch(objects: &[BatchObject]) -> Result<(), (StatusCode, Json<ErrorBody>)> {
+    if objects.is_empty() {
+        return Err(err(StatusCode::BAD_REQUEST, "a batch must carry an object"));
+    }
+    if objects.len() > MAX_BATCH_OBJECTS {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "a batch may carry at most 256 objects",
+        ));
+    }
+    let mut ids: Vec<_> = objects.iter().map(|object| object.id).collect();
+    ids.sort_unstable();
+    let before = ids.len();
+    ids.dedup();
+    if ids.len() != before {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "a batch may name each object once",
+        ));
+    }
+    for object in objects {
+        validate_encrypted(
+            &object.content_type,
+            &object.nonce,
+            &object.ciphertext,
+            object.padded_size,
+            object.tombstone,
+        )?;
+    }
+    Ok(())
 }
 
 /// Shape checks every encrypted object must pass, however it arrives.

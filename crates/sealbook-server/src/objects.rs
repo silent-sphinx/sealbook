@@ -9,15 +9,161 @@ use uuid::Uuid;
 
 use sealbook_crypto::content_digest;
 use sealbook_protocol::{
-    ChangesQuery, ChangesResponse, CollectionKeysResponse, ErrorBody, KeyWrapBody,
-    ManifestBucketQuery, ManifestBucketsResponse, ManifestResponse, ObjectChange, PutObjectRequest,
-    PutObjectResponse, DEFAULT_CHANGES_LIMIT, MAX_CHANGES_LIMIT,
+    parse_bucket_query, ChangesQuery, ChangesResponse, CollectionKeysResponse, ErrorBody,
+    KeyWrapBody, ManifestBucketQuery, ManifestBucketsResponse, ManifestResponse, ObjectChange,
+    PutObjectRequest, PutObjectResponse, PutObjectsRequest, PutObjectsResponse,
+    DEFAULT_CHANGES_LIMIT, MAX_CHANGES_LIMIT,
 };
 
 use crate::manifest;
 use crate::session::require_session;
-use crate::validate::validate_object;
+use crate::validate::{validate_batch, validate_object};
 use crate::*;
+
+const WRITES_PER_MINUTE: usize = 1_200;
+
+/// What a write would leave the account holding.
+struct Totals {
+    objects: i64,
+    bytes: i64,
+    tombstones: i64,
+}
+
+fn check_quota(limits: &Limits, totals: &Totals) -> Result<(), (StatusCode, Json<ErrorBody>)> {
+    let Limits {
+        max_objects,
+        max_bytes,
+        ..
+    } = *limits;
+
+    let live = totals.objects - totals.tombstones;
+    if live > max_objects || totals.bytes > max_bytes {
+        return Err(err(
+            StatusCode::INSUFFICIENT_STORAGE,
+            "account storage quota exceeded",
+        ));
+    }
+
+    if totals.tombstones > max_objects {
+        return Err(err(
+            StatusCode::INSUFFICIENT_STORAGE,
+            "account storage quota exceeded: too many deleted objects. Rotating the \
+             collection key retires the ones no device can still be told about.",
+        ));
+    }
+
+    if !limits.rotation_fits(live, totals.bytes, totals.tombstones) {
+        return Err(err(
+            StatusCode::INSUFFICIENT_STORAGE,
+            "account storage quota exceeded: the vault would grow past what one \
+             key rotation can carry, and revoking a device would stop working",
+        ));
+    }
+    Ok(())
+}
+
+/// The padded size and tombstone flag of the row this write replaces, if any.
+async fn replaced_object(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    account_id: &str,
+    collection_id: &str,
+    object_id: Uuid,
+) -> Result<Option<(i64, i64)>, (StatusCode, Json<ErrorBody>)> {
+    sqlx::query_as(
+        "SELECT padded_size, tombstone FROM objects
+         WHERE account_id = ? AND collection_id = ? AND id = ?",
+    )
+    .bind(account_id)
+    .bind(collection_id)
+    .bind(object_id.to_string())
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))
+}
+
+/// One object's live row and its entry in the revision log.
+///
+/// Both tables or neither: the live state is what a snapshot walk serves and the
+/// log is what an incremental one serves, so a write that landed in one and not
+/// the other would give two devices different collections.
+#[allow(clippy::too_many_arguments)]
+async fn store_object(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    account_id: &str,
+    collection_id: &str,
+    object_id: Uuid,
+    revision: i64,
+    tombstone: bool,
+    nonce: &[u8],
+    ciphertext: &[u8],
+    padded_size: usize,
+    content_type: &str,
+    digest: &[u8],
+) -> Result<(), (StatusCode, Json<ErrorBody>)> {
+    sqlx::query(
+        "INSERT INTO objects (id, collection_id, account_id, revision, tombstone, ciphertext, nonce, padded_size, content_type, content_digest)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(account_id, collection_id, id) DO UPDATE SET
+            revision = excluded.revision,
+            tombstone = excluded.tombstone,
+            ciphertext = excluded.ciphertext,
+            nonce = excluded.nonce,
+            padded_size = excluded.padded_size,
+            content_type = excluded.content_type,
+            content_digest = excluded.content_digest",
+    )
+    .bind(object_id.to_string())
+    .bind(collection_id)
+    .bind(account_id)
+    .bind(revision)
+    .bind(i64::from(tombstone))
+    .bind(ciphertext)
+    .bind(nonce)
+    .bind(padded_size as i64)
+    .bind(content_type)
+    .bind(digest)
+    .execute(&mut **tx)
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+
+    sqlx::query(
+        "INSERT INTO object_revisions
+         (account_id, revision, collection_id, object_id, tombstone, ciphertext, nonce, padded_size, content_type, content_digest, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(account_id)
+    .bind(revision)
+    .bind(collection_id)
+    .bind(object_id.to_string())
+    .bind(i64::from(tombstone))
+    .bind(ciphertext)
+    .bind(nonce)
+    .bind(padded_size as i64)
+    .bind(content_type)
+    .bind(digest)
+    .bind(now())
+    .execute(&mut **tx)
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    Ok(())
+}
+
+/// The collection's key epoch, or a 404 if the session does not own it.
+async fn owned_collection_epoch(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    account_id: &str,
+    collection_id: Uuid,
+) -> Result<i64, (StatusCode, Json<ErrorBody>)> {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT key_epoch FROM collections WHERE id = ? AND account_id = ?",
+    )
+    .bind(collection_id.to_string())
+    .bind(account_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
+    .ok_or_else(|| err(StatusCode::NOT_FOUND, "collection"))
+}
 
 pub(crate) async fn put_object(
     State(state): State<Shared>,
@@ -27,15 +173,12 @@ pub(crate) async fn put_object(
 ) -> Result<Json<PutObjectResponse>, (StatusCode, Json<ErrorBody>)> {
     let session = require_session(&state, &headers).await?;
     crate::recovery::require_rotation_not_owed(&state, &session.account_id).await?;
-    // Authenticated routes were unmetered, so a stolen token could write until the
-    // disk filled. High enough that a first full sync of a large vault is not
-    // throttled, low enough to bound what one token can do in a minute.
     if !state
         .limiter
         .allow_account(
             "put-object",
             &session.account_id,
-            1_200,
+            WRITES_PER_MINUTE,
             Duration::from_secs(60),
         )
         .await
@@ -50,17 +193,8 @@ pub(crate) async fn put_object(
         .await
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
 
-    let collection =
-        sqlx::query("SELECT key_epoch FROM collections WHERE id = ? AND account_id = ?")
-            .bind(collection_id.to_string())
-            .bind(&session.account_id)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-    let Some(collection) = collection else {
-        return Err(err(StatusCode::NOT_FOUND, "collection"));
-    };
-    let key_epoch: i64 = collection.get("key_epoch");
+    let collection = collection_id.to_string();
+    let key_epoch = owned_collection_epoch(&mut tx, &session.account_id, collection_id).await?;
 
     let seq = sqlx::query(
         "SELECT next_revision, object_count, byte_total, tombstone_count FROM revision_seq
@@ -78,68 +212,16 @@ pub(crate) async fn put_object(
     }
 
     // Quota is checked against the state this write would produce.
-    let Limits {
-        max_objects,
-        max_bytes,
-        ..
-    } = state.limits;
-
-    let existing_objects: i64 = seq.get("object_count");
-    let existing_bytes: i64 = seq.get("byte_total");
-    let existing_tombstones: i64 = seq.get("tombstone_count");
-    let replaced: Option<(i64, i64)> = sqlx::query_as(
-        "SELECT padded_size, tombstone FROM objects
-         WHERE account_id = ? AND collection_id = ? AND id = ?",
-    )
-    .bind(&session.account_id)
-    .bind(collection_id.to_string())
-    .bind(body.id.to_string())
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let replaced = replaced_object(&mut tx, &session.account_id, &collection, body.id).await?;
     let is_new = replaced.is_none();
-    let (replaced, replaced_tombstone) = replaced.unwrap_or((0, 0));
-    let objects_after = existing_objects + i64::from(is_new);
-    let bytes_after = existing_bytes - replaced + body.padded_size as i64;
-    let tombstones_after = existing_tombstones - replaced_tombstone + i64::from(body.tombstone);
-    // A tombstone is a row, but it is not an object the account still holds.
-    // Counting one against `max_objects` meant a vault that had been filled and
-    // emptied was permanently full: the rows could never be re-used, and nothing
-    // compacts them. The live count is also the honest input to the rotation
-    // projection below, since a rotation body carries only live objects.
-    let live_after = objects_after - tombstones_after;
-    if live_after > max_objects || bytes_after > max_bytes {
-        return Err(err(
-            StatusCode::INSUFFICIENT_STORAGE,
-            "account storage quota exceeded",
-        ));
-    }
-    // Tombstones still cost a row and a manifest entry each, so they get their
-    // own ceiling rather than no ceiling. Reaching it is no longer permanent: a
-    // rotation retires every tombstone below the collection's floor, so the
-    // message says so rather than leaving the account with no way forward.
-    if tombstones_after > max_objects {
-        return Err(err(
-            StatusCode::INSUFFICIENT_STORAGE,
-            "account storage quota exceeded: too many deleted objects. Rotating the \
-             collection key retires the ones no device can still be told about.",
-        ));
-    }
-    // The vault also has to stay small enough to rotate. A rotation re-encrypts
-    // everything in one request, so a vault that outgrows that body cannot be
-    // rotated — and every operation that has to invalidate the collection key
-    // goes through a rotation. Refusing the write is the only failure mode that
-    // does not end with a revoked device still holding a working key.
-    if !state
-        .limits
-        .rotation_fits(live_after, bytes_after, tombstones_after)
-    {
-        return Err(err(
-            StatusCode::INSUFFICIENT_STORAGE,
-            "account storage quota exceeded: the vault would grow past what one \
-             key rotation can carry, and revoking a device would stop working",
-        ));
-    }
+    let (replaced_bytes, replaced_tombstone) = replaced.unwrap_or((0, 0));
+    let totals = Totals {
+        objects: seq.get::<i64, _>("object_count") + i64::from(is_new),
+        bytes: seq.get::<i64, _>("byte_total") - replaced_bytes + body.padded_size as i64,
+        tombstones: seq.get::<i64, _>("tombstone_count") - replaced_tombstone
+            + i64::from(body.tombstone),
+    };
+    check_quota(&state.limits, &totals)?;
 
     sqlx::query(
         "UPDATE revision_seq SET next_revision = ?, object_count = ?, byte_total = ?,
@@ -147,76 +229,44 @@ pub(crate) async fn put_object(
          WHERE account_id = ?",
     )
     .bind(revision + 1)
-    .bind(objects_after)
-    .bind(bytes_after)
-    .bind(tombstones_after)
+    .bind(totals.objects)
+    .bind(totals.bytes)
+    .bind(totals.tombstones)
     .bind(&session.account_id)
     .execute(&mut *tx)
     .await
     .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
 
     let digest = content_digest(&body.nonce, &body.ciphertext).to_vec();
-    sqlx::query(
-        "INSERT INTO objects (id, collection_id, account_id, revision, tombstone, ciphertext, nonce, padded_size, content_type, content_digest)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(account_id, collection_id, id) DO UPDATE SET
-            revision = excluded.revision,
-            tombstone = excluded.tombstone,
-            ciphertext = excluded.ciphertext,
-            nonce = excluded.nonce,
-            padded_size = excluded.padded_size,
-            content_type = excluded.content_type,
-            content_digest = excluded.content_digest",
+    store_object(
+        &mut tx,
+        &session.account_id,
+        &collection,
+        body.id,
+        revision,
+        body.tombstone,
+        &body.nonce,
+        &body.ciphertext,
+        body.padded_size,
+        &body.content_type,
+        &digest,
     )
-    .bind(body.id.to_string())
-    .bind(collection_id.to_string())
-    .bind(&session.account_id)
-    .bind(revision)
-    .bind(if body.tombstone { 1 } else { 0 })
-    .bind(&body.ciphertext)
-    .bind(&body.nonce)
-    .bind(body.padded_size as i64)
-    .bind(&body.content_type)
-    .bind(&digest)
-    .execute(&mut *tx)
-    .await
-    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-
-    sqlx::query(
-        "INSERT INTO object_revisions
-         (account_id, revision, collection_id, object_id, tombstone, ciphertext, nonce, padded_size, content_type, content_digest, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind(&session.account_id)
-    .bind(revision)
-    .bind(collection_id.to_string())
-    .bind(body.id.to_string())
-    .bind(if body.tombstone { 1 } else { 0 })
-    .bind(&body.ciphertext)
-    .bind(&body.nonce)
-    .bind(body.padded_size as i64)
-    .bind(&body.content_type)
-    .bind(&digest)
-    .bind(now())
-    .execute(&mut *tx)
-    .await
-    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    .await?;
 
     // Folds the write into the bucket digests, so the manifest check below reads
     // a digest instead of recomputing one over the whole collection.
-    manifest::record_object_write(
+    manifest::record_object_writes(
         &mut tx,
         &session.account_id,
-        &collection_id.to_string(),
-        body.id,
-        is_new,
+        &collection,
+        &[(body.id, is_new)],
     )
     .await?;
 
     manifest::verify_and_store(
         &mut tx,
         manifest::Expected {
-            collection_id: &collection_id.to_string(),
+            collection_id: &collection,
             account_id: &session.account_id,
             device_id: &session.device_id,
             key_epoch,
@@ -235,11 +285,151 @@ pub(crate) async fn put_object(
     }))
 }
 
+pub(crate) async fn put_objects(
+    State(state): State<Shared>,
+    AxumPath(collection_id): AxumPath<Uuid>,
+    headers: HeaderMap,
+    Json(body): Json<PutObjectsRequest>,
+) -> Result<Json<PutObjectsResponse>, (StatusCode, Json<ErrorBody>)> {
+    let session = require_session(&state, &headers).await?;
+    crate::recovery::require_rotation_not_owed(&state, &session.account_id).await?;
+    // Shape-checked before the limiter, so a malformed batch cannot be charged
+    // for an object count it was never going to be allowed to write.
+    validate_batch(&body.objects)?;
+    // Charged per object against the same bucket a single write uses: a batch is
+    // a cheaper way to send the same number of objects, not a way to send more.
+    if !state
+        .limiter
+        .allow_account_cost(
+            "put-object",
+            &session.account_id,
+            body.objects.len(),
+            WRITES_PER_MINUTE,
+            Duration::from_secs(60),
+        )
+        .await
+    {
+        return Err(err(StatusCode::TOO_MANY_REQUESTS, "rate limited"));
+    }
+
+    // Hashed before the transaction opens, for the reason `rotate` gives: a batch
+    // is up to 256 objects of SHA-256, and under `BEGIN IMMEDIATE` that would
+    // stall every other writer for as long as it takes.
+    let digests: Vec<Vec<u8>> = body
+        .objects
+        .iter()
+        .map(|object| content_digest(&object.nonce, &object.ciphertext).to_vec())
+        .collect();
+
+    let mut tx = state
+        .db
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+
+    let collection = collection_id.to_string();
+    let key_epoch = owned_collection_epoch(&mut tx, &session.account_id, collection_id).await?;
+
+    let seq = sqlx::query(
+        "SELECT next_revision, object_count, byte_total, tombstone_count FROM revision_seq
+         WHERE account_id = ?",
+    )
+    .bind(&session.account_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let first_revision: i64 = seq.get("next_revision");
+    // Revisions are chosen by the client, because the manifest it signs commits to
+    // each one, and must run consecutively from the collection's next revision in
+    // the order sent. A mismatch means another device wrote first.
+    for (index, object) in body.objects.iter().enumerate() {
+        if object.revision != first_revision as u64 + index as u64 {
+            return Err(err(StatusCode::CONFLICT, "stale revision"));
+        }
+    }
+    let latest_revision = first_revision + body.objects.len() as i64 - 1;
+
+    // Quota is checked once against the state the whole batch would produce, so a
+    // batch that would end over the ceiling is refused entire rather than part
+    // applied. Ids are unique within a batch, so no object here replaces another
+    // of its own and each replacement is read from the pre-batch rows.
+    let mut totals = Totals {
+        objects: seq.get("object_count"),
+        bytes: seq.get("byte_total"),
+        tombstones: seq.get("tombstone_count"),
+    };
+    let mut written: Vec<(Uuid, bool)> = Vec::with_capacity(body.objects.len());
+    for object in &body.objects {
+        let replaced =
+            replaced_object(&mut tx, &session.account_id, &collection, object.id).await?;
+        let is_new = replaced.is_none();
+        let (replaced_bytes, replaced_tombstone) = replaced.unwrap_or((0, 0));
+        totals.objects += i64::from(is_new);
+        totals.bytes += object.padded_size as i64 - replaced_bytes;
+        totals.tombstones += i64::from(object.tombstone) - replaced_tombstone;
+        written.push((object.id, is_new));
+    }
+    check_quota(&state.limits, &totals)?;
+
+    sqlx::query(
+        "UPDATE revision_seq SET next_revision = ?, object_count = ?, byte_total = ?,
+             tombstone_count = ?
+         WHERE account_id = ?",
+    )
+    .bind(latest_revision + 1)
+    .bind(totals.objects)
+    .bind(totals.bytes)
+    .bind(totals.tombstones)
+    .bind(&session.account_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+
+    for ((index, object), digest) in body.objects.iter().enumerate().zip(&digests) {
+        store_object(
+            &mut tx,
+            &session.account_id,
+            &collection,
+            object.id,
+            first_revision + index as i64,
+            object.tombstone,
+            &object.nonce,
+            &object.ciphertext,
+            object.padded_size,
+            &object.content_type,
+            digest,
+        )
+        .await?;
+    }
+
+    // One pass over the buckets the batch touched, each rebuilt once however many
+    // of these objects share it.
+    manifest::record_object_writes(&mut tx, &session.account_id, &collection, &written).await?;
+
+    manifest::verify_and_store(
+        &mut tx,
+        manifest::Expected {
+            collection_id: &collection,
+            account_id: &session.account_id,
+            device_id: &session.device_id,
+            key_epoch,
+            latest_revision,
+        },
+        &body.manifest,
+    )
+    .await?;
+
+    tx.commit()
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+
+    Ok(Json(PutObjectsResponse {
+        first_revision: first_revision as u64,
+        latest_revision: latest_revision as u64,
+    }))
+}
+
 /// The collection's signed manifest and the entries it commits to.
-///
-/// A client with no local state starts here: verify the signature against an
-/// enrolled device's public key, check the digest over these entries, and the
-/// entry set can then be trusted as the collection's true shape.
 pub(crate) async fn collection_manifest(
     State(state): State<Shared>,
     AxumPath(collection_id): AxumPath<Uuid>,
@@ -274,13 +464,13 @@ pub(crate) async fn collection_manifest(
     Ok(Json(ManifestResponse { manifest, entries }))
 }
 
-/// The manifest in the shape a single write needs: the bucket digests, and the
-/// entries of the one bucket that write touches.
+/// The manifest in the shape a write needs: the bucket digests, and the entries
+/// of the buckets that write touches.
 ///
 /// `collection_manifest` serves every entry in the collection, which made a write
 /// cost bytes proportional to the whole vault. This is the same guarantee for a
 /// fraction of the traffic, because the root is a hash of the 256 bucket digests
-/// and a write changes exactly one of them.
+/// and a write changes one of them per object.
 pub(crate) async fn collection_manifest_buckets(
     State(state): State<Shared>,
     AxumPath(collection_id): AxumPath<Uuid>,
@@ -297,7 +487,14 @@ pub(crate) async fn collection_manifest_buckets(
     if owned.is_none() {
         return Err(err(StatusCode::NOT_FOUND, "collection"));
     }
-    // One snapshot for the digests, the bucket and the manifest, for the reason
+    // Deduplicated and sorted by the parser, so a caller naming one bucket many
+    // times pays for one range scan and the echo back is canonical.
+    let served = match query.buckets.as_deref() {
+        Some(buckets) => parse_bucket_query(buckets)
+            .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid bucket list"))?,
+        None => Vec::new(),
+    };
+    // One snapshot for the digests, the buckets and the manifest, for the reason
     // `collection_manifest` gives: read apart, a write landing in between serves
     // a new manifest beside an old bucket and the client's check fails exactly as
     // it would against a server withholding an object.
@@ -309,12 +506,8 @@ pub(crate) async fn collection_manifest_buckets(
     let collection = collection_id.to_string();
     let (buckets, object_count) =
         manifest::bucket_state(&mut tx, &session.account_id, &collection).await?;
-    let entries = match query.bucket {
-        Some(bucket) => {
-            manifest::entries_in_bucket(&mut tx, &session.account_id, &collection, bucket).await?
-        }
-        None => Vec::new(),
-    };
+    let entries =
+        manifest::entries_in_buckets(&mut tx, &session.account_id, &collection, &served).await?;
     let manifest = manifest::load(&mut *tx, &collection).await?;
     tx.commit()
         .await
@@ -323,7 +516,7 @@ pub(crate) async fn collection_manifest_buckets(
         manifest,
         buckets,
         object_count: object_count as u64,
-        bucket: query.bucket,
+        served,
         entries,
     }))
 }

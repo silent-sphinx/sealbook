@@ -9,16 +9,16 @@ use sealbook_crypto::{
     ManifestDigestEntry, MANIFEST_BUCKETS,
 };
 use sealbook_protocol::{
-    DevicePublicKeys, DualSignatureBody, ManifestBody, ManifestBucketsResponse, ManifestEntry,
-    ManifestResponse,
+    bucket_query, DevicePublicKeys, DualSignatureBody, ManifestBody, ManifestBucketsResponse,
+    ManifestEntry, ManifestResponse,
 };
 
 use crate::{ClientError, ManifestError, SealbookClient};
 
 /// The collection as one write needs to see it.
 ///
-/// A write changes exactly one bucket, so it needs that bucket's entries and the
-/// other 255 digests, not the whole collection. `apply` does the update and
+/// A write changes one bucket per object, so it needs those buckets' entries and
+/// the remaining digests, not the whole collection. `apply` does the update and
 /// returns what the next manifest has to commit to.
 pub(crate) struct BucketedManifest {
     pub(crate) seq: u64,
@@ -26,32 +26,58 @@ pub(crate) struct BucketedManifest {
     pub(crate) latest_revision: u64,
     buckets: [[u8; 32]; MANIFEST_BUCKETS],
     object_count: u64,
-    bucket: u8,
+    /// The buckets whose entries are held, ascending. An entry outside them
+    /// cannot be folded in, because its bucket's digest cannot be recomputed
+    /// from entries this client was not served.
+    held: Vec<u8>,
     entries: Vec<ManifestEntry>,
 }
 
 impl BucketedManifest {
-    /// Folds one written entry in, and returns the object count and root the
+    /// Folds the written entries in, and returns the object count and root the
     /// manifest for the collection after that write must carry.
     ///
     /// The server recomputes both from its own rows, so these have to be derived
-    /// the same way: replace the entry in its bucket, rehash that bucket, rehash
-    /// the root over all 256.
-    pub(crate) fn apply(mut self, entry: ManifestEntry) -> Result<(u64, [u8; 32]), ManifestError> {
-        debug_assert_eq!(manifest_bucket_of(entry.id), self.bucket);
-        let fresh = match self.entries.iter_mut().find(|held| held.id == entry.id) {
-            Some(held) => {
-                *held = entry;
-                false
+    /// the same way: replace each entry in its bucket, rehash the buckets that
+    /// changed, rehash the root over all 256.
+    pub(crate) fn apply(
+        mut self,
+        written: &[ManifestEntry],
+    ) -> Result<(u64, [u8; 32]), ManifestError> {
+        let mut fresh = 0u64;
+        let mut touched: Vec<u8> = Vec::with_capacity(written.len());
+        for entry in written {
+            let bucket = manifest_bucket_of(entry.id);
+            if !self.held.contains(&bucket) {
+                return Err(ManifestError(
+                    "a write was folded into a bucket this device did not fetch".into(),
+                ));
             }
-            None => {
-                self.entries.push(entry);
-                true
+            touched.push(bucket);
+            match self.entries.iter_mut().find(|held| held.id == entry.id) {
+                Some(held) => *held = entry.clone(),
+                None => {
+                    self.entries.push(entry.clone());
+                    fresh += 1;
+                }
             }
-        };
-        let digests = SealbookClient::digest_inputs(&self.entries)?;
-        self.buckets[self.bucket as usize] = manifest_bucket_digest(&digests);
-        let object_count = self.object_count + u64::from(fresh);
+        }
+        touched.sort_unstable();
+        touched.dedup();
+        for bucket in touched {
+            let members: Vec<ManifestEntry> = self
+                .entries
+                .iter()
+                .filter(|entry| manifest_bucket_of(entry.id) == bucket)
+                .cloned()
+                .collect();
+            self.buckets[bucket as usize] = if members.is_empty() {
+                [0u8; 32]
+            } else {
+                manifest_bucket_digest(&SealbookClient::digest_inputs(&members)?)
+            };
+        }
+        let object_count = self.object_count + fresh;
         Ok((object_count, manifest_root(&self.buckets, object_count)))
     }
 }
@@ -216,17 +242,16 @@ impl SealbookClient {
         }
     }
 
-    /// The collection's manifest and the one bucket `object_id` falls in,
-    /// verified.
+    /// The collection's manifest and the buckets these objects fall in, verified.
     ///
     /// Two checks together are what the single whole-collection digest check used
-    /// to be. The served entries must hash to their bucket's digest, which catches
-    /// an object withheld from or substituted within the bucket. The digests with
-    /// the count must produce the root the signature covers, which catches an
-    /// edited digest and pins the other 255 buckets.
+    /// to be. The served entries of each bucket must hash to that bucket's digest,
+    /// which catches an object withheld from or substituted within a bucket. The
+    /// digests with the count must produce the root the signature covers, which
+    /// catches an edited digest and pins the buckets that were not served.
     pub(crate) async fn manifest_bucket_state(
         &mut self,
-        object_id: Uuid,
+        object_ids: &[Uuid],
     ) -> Result<BucketedManifest, ClientError> {
         let (server, collection_id, token) = {
             let state = self.state.as_ref().ok_or(ClientError::NoState)?;
@@ -236,31 +261,43 @@ impl SealbookClient {
                 state.session_token.clone().ok_or(ClientError::NoState)?,
             )
         };
-        let bucket = manifest_bucket_of(object_id);
+        let mut wanted: Vec<u8> = object_ids.iter().copied().map(manifest_bucket_of).collect();
+        wanted.sort_unstable();
+        wanted.dedup();
         let response: ManifestBucketsResponse = self
             .get_json(
                 &format!(
-                    "{server}/v1/collections/{collection_id}/manifest/buckets?bucket={bucket}"
+                    "{server}/v1/collections/{collection_id}/manifest/buckets?buckets={}",
+                    bucket_query(&wanted)
                 ),
                 Some(&token),
             )
             .await?;
-        if response.bucket != Some(bucket) {
-            return Err(ManifestError("server answered for another bucket".into()).into());
+        // Both lists are sorted and deduplicated, so this is the whole check that
+        // every bucket asked for was answered for.
+        if response.served != wanted {
+            return Err(ManifestError("server answered for other buckets".into()).into());
         }
         let buckets = Self::buckets_from_blob(&response.buckets)?;
-        // The entries served for this bucket must be what its digest commits to.
-        let served = Self::digest_entries_bucket(&response.entries)?;
-        if served != buckets[bucket as usize] {
-            return Err(ManifestError(
-                "the entries served for this bucket do not match its digest; an object may \
-                 have been withheld, rolled back or substituted"
-                    .into(),
-            )
-            .into());
+        // Each served bucket's entries must be what its digest commits to.
+        for bucket in &wanted {
+            let members: Vec<ManifestEntry> = response
+                .entries
+                .iter()
+                .filter(|entry| manifest_bucket_of(entry.id) == *bucket)
+                .cloned()
+                .collect();
+            if Self::digest_entries_bucket(&members)? != buckets[*bucket as usize] {
+                return Err(ManifestError(
+                    "the entries served for this bucket do not match its digest; an object may \
+                     have been withheld, rolled back or substituted"
+                        .into(),
+                )
+                .into());
+            }
         }
         for entry in &response.entries {
-            if manifest_bucket_of(entry.id) != bucket {
+            if !wanted.contains(&manifest_bucket_of(entry.id)) {
                 return Err(ManifestError("server put an entry in the wrong bucket".into()).into());
             }
         }
@@ -308,7 +345,7 @@ impl SealbookClient {
             latest_revision,
             buckets,
             object_count: response.object_count,
-            bucket,
+            held: wanted,
             entries: response.entries,
         })
     }
