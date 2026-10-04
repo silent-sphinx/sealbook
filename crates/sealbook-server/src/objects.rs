@@ -22,6 +22,15 @@ use crate::*;
 
 const WRITES_PER_MINUTE: usize = 1_200;
 
+/// Most ciphertext bytes one `changes` page may carry.
+///
+/// `limit` was the only thing deciding how large an answer could get, and an
+/// object may be `MAX_PADDED_OBJECT_SIZE`, so a page of 2,000 could read the
+/// whole of a quota-sized vault out of the rows and base64 expand it beside
+/// itself. A page always carries at least one object, so a vault whose next
+/// object is larger than this still advances rather than stalling.
+const MAX_CHANGES_BYTES: i64 = 8 * 1024 * 1024;
+
 /// What a write would leave the account holding.
 struct Totals {
     objects: i64,
@@ -436,6 +445,7 @@ pub(crate) async fn collection_manifest(
     headers: HeaderMap,
 ) -> Result<Json<ManifestResponse>, (StatusCode, Json<ErrorBody>)> {
     let session = require_session(&state, &headers).await?;
+    require_read_budget(&state, "manifest", &session.account_id).await?;
     let owned = sqlx::query("SELECT id FROM collections WHERE id = ? AND account_id = ?")
         .bind(collection_id.to_string())
         .bind(&session.account_id)
@@ -478,6 +488,7 @@ pub(crate) async fn collection_manifest_buckets(
     headers: HeaderMap,
 ) -> Result<Json<ManifestBucketsResponse>, (StatusCode, Json<ErrorBody>)> {
     let session = require_session(&state, &headers).await?;
+    require_read_budget(&state, "manifest", &session.account_id).await?;
     let owned = sqlx::query("SELECT id FROM collections WHERE id = ? AND account_id = ?")
         .bind(collection_id.to_string())
         .bind(&session.account_id)
@@ -528,6 +539,7 @@ pub(crate) async fn changes(
     headers: HeaderMap,
 ) -> Result<Json<ChangesResponse>, (StatusCode, Json<ErrorBody>)> {
     let session = require_session(&state, &headers).await?;
+    require_read_budget(&state, "changes", &session.account_id).await?;
     let after = query.after.unwrap_or(0) as i64;
     // One row over the page, so "is there more" needs no second query.
     let limit = query
@@ -606,9 +618,49 @@ pub(crate) async fn changes(
         }));
     }
 
-    let rows = if snapshot || after == 0 {
-        // `revision > ?` so a paged walk advances. Revisions start at 1, so
-        // `after = 0` still selects everything.
+    // The sizes of the candidate rows, without their ciphertext, so the byte
+    // ceiling bounds what the page reads rather than only what it returns.
+    // `revision > ?` so a paged walk advances; revisions start at 1, so
+    // `after = 0` still selects everything.
+    let sizes: Vec<i64> = if snapshot || after == 0 {
+        sqlx::query_scalar(
+            "SELECT padded_size FROM objects
+             WHERE account_id = ? AND collection_id = ? AND revision > ?
+             ORDER BY revision ASC
+             LIMIT ?",
+        )
+    } else {
+        sqlx::query_scalar(
+            "SELECT r.padded_size FROM object_revisions r
+             WHERE r.account_id = ? AND r.collection_id = ? AND r.revision > ?
+             ORDER BY r.revision ASC
+             LIMIT ?",
+        )
+    }
+    .bind(&session.account_id)
+    .bind(collection_id.to_string())
+    .bind(after)
+    .bind(probe)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+
+    // The longest prefix that fits the ceiling, and never shorter than one
+    // object.
+    let mut page = 0usize;
+    let mut page_bytes = 0i64;
+    for padded in sizes.iter().take(limit) {
+        if page > 0 && page_bytes + padded > MAX_CHANGES_BYTES {
+            break;
+        }
+        page_bytes += padded;
+        page += 1;
+    }
+    let has_more = sizes.len() > page;
+
+    let rows = if page == 0 {
+        Vec::new()
+    } else if snapshot || after == 0 {
         sqlx::query(
             "SELECT id AS object_id, revision, tombstone, nonce, ciphertext,
                 padded_size, content_type
@@ -620,9 +672,10 @@ pub(crate) async fn changes(
         .bind(&session.account_id)
         .bind(collection_id.to_string())
         .bind(after)
-        .bind(probe)
+        .bind(page as i64)
         .fetch_all(&mut *tx)
         .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
     } else {
         sqlx::query(
             "SELECT r.object_id, r.revision, r.tombstone, r.nonce, r.ciphertext,
@@ -635,16 +688,15 @@ pub(crate) async fn changes(
         .bind(&session.account_id)
         .bind(collection_id.to_string())
         .bind(after)
-        .bind(probe)
+        .bind(page as i64)
         .fetch_all(&mut *tx)
         .await
-    }
-    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
+    };
 
-    let has_more = rows.len() > limit;
     let mut latest = after as u64;
     let mut objects = Vec::new();
-    for row in rows.into_iter().take(limit) {
+    for row in rows {
         let revision: i64 = row.get("revision");
         latest = latest.max(revision as u64);
         let tombstone: i64 = row.get("tombstone");
@@ -686,6 +738,7 @@ pub(crate) async fn collection_keys(
     headers: HeaderMap,
 ) -> Result<Json<CollectionKeysResponse>, (StatusCode, Json<ErrorBody>)> {
     let session = require_session(&state, &headers).await?;
+    require_read_budget(&state, "keys", &session.account_id).await?;
     let collection =
         sqlx::query("SELECT key_epoch FROM collections WHERE id = ? AND account_id = ?")
             .bind(collection_id.to_string())

@@ -26,6 +26,7 @@ pub(crate) async fn list_devices(
     headers: HeaderMap,
 ) -> Result<Json<Vec<DevicePublicKeys>>, (StatusCode, Json<ErrorBody>)> {
     let session = require_session(&state, &headers).await?;
+    require_read_budget(&state, "devices", &session.account_id).await?;
     let rows = sqlx::query(
         "SELECT id, mldsa_pk, ed25519_pk, xwing_hpke_pk FROM devices
          WHERE account_id = ? AND revoked_at IS NULL ORDER BY created_at ASC",

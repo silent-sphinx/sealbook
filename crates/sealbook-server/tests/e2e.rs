@@ -2292,6 +2292,127 @@ async fn the_change_feed_paginates() {
     assert_eq!(client.list_contacts().await.expect("list").len(), 5);
 }
 
+#[tokio::test]
+async fn a_changes_page_is_bounded_by_bytes_and_not_only_by_count() {
+    let dir = std::env::temp_dir().join(format!("sealbook-bytecap-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut owner = SealbookClient::plaintext_http();
+    owner
+        .register(&base, "bytecap", "correct horse battery")
+        .await
+        .expect("register");
+    let notebook = owner
+        .ensure_default_notebook()
+        .await
+        .expect("default notebook");
+
+    // Padded sizes are powers of two, so each of these pads to 4 MiB and three
+    // of them cannot share one 8 MiB page.
+    for index in 0..3 {
+        owner
+            .put_note(
+                Uuid::new_v4(),
+                &note_json(
+                    &format!("big {index}"),
+                    &"m".repeat(3 * 1024 * 1024),
+                    notebook,
+                ),
+            )
+            .await
+            .expect("put a large note");
+    }
+
+    let state = owner.state.as_ref().unwrap();
+    let token = state.session_token.clone().unwrap();
+    let collection = state.collection_id;
+    // `limit` well past the object count, so a page cut can only be the byte
+    // ceiling doing it.
+    let page: serde_json::Value = reqwest::Client::new()
+        .get(format!(
+            "{base}/v1/collections/{collection}/changes?after=0&limit=2000&snapshot=true"
+        ))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let served = page["objects"].as_array().unwrap();
+    assert_eq!(
+        page["has_more"],
+        serde_json::json!(true),
+        "a page holding the whole vault was not cut"
+    );
+    let bytes: u64 = served
+        .iter()
+        .map(|object| object["padded_size"].as_u64().unwrap())
+        .sum();
+    assert!(
+        bytes <= 8 * 1024 * 1024,
+        "a page carried {bytes} bytes of ciphertext"
+    );
+    let large = served
+        .iter()
+        .filter(|object| object["padded_size"].as_u64().unwrap() == 4 * 1024 * 1024)
+        .count();
+    assert!(
+        (1..3).contains(&large),
+        "the page served {large} of the three large notes"
+    );
+
+    assert_eq!(owner.list_notes().await.expect("notes").len(), 3);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn authenticated_reads_are_metered_per_account_and_route() {
+    let (dir, base, client) = account_with_contacts("readcap", 1).await;
+    let state = client.state.as_ref().unwrap();
+    let token = state.session_token.clone().unwrap();
+    let collection = state.collection_id;
+    let http = reqwest::Client::new();
+
+    let mut refused_after = None;
+    for attempt in 1..=700 {
+        let status = http
+            .get(format!(
+                "{base}/v1/collections/{collection}/changes?after=0&limit=1"
+            ))
+            .bearer_auth(&token)
+            .send()
+            .await
+            .unwrap()
+            .status();
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            refused_after = Some(attempt);
+            break;
+        }
+        assert!(status.is_success(), "unexpected {status} on read {attempt}");
+    }
+    let refused_after = refused_after.expect("an unmetered read route must become metered");
+    assert!(
+        refused_after > 100,
+        "the budget has to leave room for a full sync, refused after {refused_after}"
+    );
+
+    // Per route, so exhausting the change feed does not take the manifest with
+    // it: a client that has been throttled on one read can still check another.
+    let manifest = http
+        .get(format!("{base}/v1/collections/{collection}/manifest"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert!(manifest.status().is_success(), "{}", manifest.status());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A rotation installs a new password KDF salt and a new recovery-phrase record.
 #[tokio::test]
 async fn the_incremental_manifest_digest_matches_a_full_rebuild() {

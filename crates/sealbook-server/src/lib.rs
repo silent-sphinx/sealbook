@@ -776,6 +776,39 @@ fn err(status: StatusCode, msg: impl Into<String>) -> (StatusCode, Json<ErrorBod
     (status, Json(ErrorBody { error: msg.into() }))
 }
 
+/// Most read requests one account may make per minute on any one route.
+///
+/// Sized so a full sync of a vault at the object quota is a fraction of the
+/// budget: pages are `DEFAULT_CHANGES_LIMIT` objects, so 50,000 objects is 100
+/// requests, and the byte ceiling adds pages only for a vault of large objects.
+const READS_PER_MINUTE: usize = 600;
+
+/// Meters an authenticated read.
+///
+/// The write routes were metered per account and the read routes were not, which
+/// left one session token able to make the server read and serialise the whole
+/// vault as often as it liked. Keyed per route rather than shared, so polling a
+/// cheap endpoint cannot exhaust the budget a sync needs.
+pub(crate) async fn require_read_budget(
+    state: &AppState,
+    endpoint: &str,
+    account_id: &str,
+) -> Result<(), (StatusCode, Json<ErrorBody>)> {
+    if state
+        .limiter
+        .allow_account(
+            endpoint,
+            account_id,
+            READS_PER_MINUTE,
+            Duration::from_secs(60),
+        )
+        .await
+    {
+        return Ok(());
+    }
+    Err(err(StatusCode::TOO_MANY_REQUESTS, "rate limited"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

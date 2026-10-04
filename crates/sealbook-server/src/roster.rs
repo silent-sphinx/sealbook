@@ -194,6 +194,7 @@ pub(crate) async fn collection_roster(
     headers: HeaderMap,
 ) -> Result<Json<RosterResponse>, (StatusCode, Json<ErrorBody>)> {
     let session = require_session(&state, &headers).await?;
+    require_read_budget(&state, "roster", &session.account_id).await?;
     let owned = sqlx::query("SELECT id FROM collections WHERE id = ? AND account_id = ?")
         .bind(collection_id.to_string())
         .bind(&session.account_id)
