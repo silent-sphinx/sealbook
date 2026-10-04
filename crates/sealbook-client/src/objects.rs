@@ -411,19 +411,19 @@ impl SealbookClient {
                 state.session_token.clone().ok_or(ClientError::NoState)?,
             )
         };
-        let (seq, key_epoch, latest_revision, mut entries) = self.manifest_state().await?;
-        let revision = latest_revision + 1;
-        let entry = ManifestEntry {
+        // Only the bucket this object falls in, not the whole collection. Reading
+        // every entry per write is what made importing n objects cost O(n^2)
+        // bytes.
+        let state = self.manifest_bucket_state(object_id).await?;
+        let (seq, key_epoch, revision) = (state.seq, state.key_epoch, state.latest_revision + 1);
+        let (object_count, root) = state.apply(ManifestEntry {
             id: object_id,
             revision,
             tombstone,
             content_digest: content_digest(&nonce, &ciphertext).to_vec(),
-        };
-        match entries.iter_mut().find(|existing| existing.id == object_id) {
-            Some(existing) => *existing = entry,
-            None => entries.push(entry),
-        }
-        let manifest = self.sign_manifest(seq + 1, key_epoch, revision, &entries)?;
+        })?;
+        let manifest =
+            self.sign_manifest_root(seq + 1, key_epoch, revision, object_count, &root)?;
         let written_seq = seq + 1;
 
         let resp: sealbook_protocol::PutObjectResponse = self

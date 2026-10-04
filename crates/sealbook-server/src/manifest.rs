@@ -86,6 +86,51 @@ pub(crate) async fn entries(
 /// The 256 bucket digests of a collection, as stored.
 type Buckets = [[u8; 32]; MANIFEST_BUCKETS];
 
+/// The bucket digests and object count a client needs to rebuild the root.
+pub(crate) async fn bucket_state(
+    tx: &mut Transaction<'_, Sqlite>,
+    account_id: &str,
+    collection_id: &str,
+) -> Result<(Vec<u8>, i64), (StatusCode, Json<ErrorBody>)> {
+    let (buckets, count) = digest_state(tx, account_id, collection_id).await?;
+    Ok((buckets_to_blob(&buckets), count))
+}
+
+/// Every entry whose id falls in one bucket.
+///
+/// The same range scan `bucket_digest` does, returning the rows rather than their
+/// digest, so a client can check them against it.
+pub(crate) async fn entries_in_bucket(
+    tx: &mut Transaction<'_, Sqlite>,
+    account_id: &str,
+    collection_id: &str,
+    bucket: u8,
+) -> Result<Vec<ManifestEntry>, (StatusCode, Json<ErrorBody>)> {
+    let (low, high) = bucket_range(bucket);
+    let rows = sqlx::query(
+        "SELECT id, revision, tombstone, content_digest FROM objects
+         WHERE account_id = ? AND collection_id = ? AND id >= ? AND id < ?",
+    )
+    .bind(account_id)
+    .bind(collection_id)
+    .bind(&low)
+    .bind(&high)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let id: String = row.get("id");
+        out.push(ManifestEntry {
+            id: Uuid::parse_str(&id).map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?,
+            revision: row.get::<i64, _>("revision") as u64,
+            tombstone: row.get::<i64, _>("tombstone") != 0,
+            content_digest: row.get("content_digest"),
+        });
+    }
+    Ok(out)
+}
+
 const BUCKETS_BLOB_LEN: usize = MANIFEST_BUCKETS * 32;
 
 fn buckets_to_blob(buckets: &Buckets) -> Vec<u8> {

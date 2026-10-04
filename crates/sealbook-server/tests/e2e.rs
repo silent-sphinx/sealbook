@@ -4888,3 +4888,222 @@ async fn a_rotation_that_retires_a_tombstone_above_the_floor_is_refused() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Bug #12. A write used to fetch every entry in the collection, so importing
+/// *n* objects moved O(n^2) bytes. The root is a hash of 256 bucket digests and
+/// a write changes one of them, so a write now reads that bucket and the digests.
+#[tokio::test]
+async fn a_write_reads_one_bucket_not_the_whole_collection() {
+    use sealbook_crypto::{manifest_bucket_of, manifest_root, MANIFEST_BUCKETS};
+    use sealbook_protocol::ManifestBucketsResponse;
+
+    let count = 400;
+    let (db, base, mut client) = account_with_contacts("buckets", count).await;
+    let state = client.state.as_ref().unwrap();
+    let token = state.session_token.clone().unwrap();
+    let collection = state.collection_id;
+
+    let ids: Vec<Uuid> = client
+        .list_contacts()
+        .await
+        .expect("list")
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+    assert_eq!(ids.len(), count);
+    let bucket = manifest_bucket_of(ids[0]);
+
+    let http = reqwest::Client::new();
+    let response: ManifestBucketsResponse = http
+        .get(format!(
+            "{base}/v1/collections/{collection}/manifest/buckets?bucket={bucket}"
+        ))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(response.bucket, Some(bucket));
+    assert_eq!(response.buckets.len(), MANIFEST_BUCKETS * 32);
+    assert_eq!(response.object_count, count as u64);
+    // One bucket of a 400-object collection, not all 400. Ids spread over 256
+    // buckets, so the mean is under two and this bound is far above it.
+    assert!(
+        response.entries.len() * 10 < count,
+        "a single bucket of {count} objects should hold a fraction of them, got {}",
+        response.entries.len()
+    );
+    assert!(
+        !response.entries.is_empty(),
+        "the bucket of a known object must not come back empty"
+    );
+    for entry in &response.entries {
+        assert_eq!(
+            manifest_bucket_of(entry.id),
+            bucket,
+            "an entry was served in the wrong bucket"
+        );
+    }
+
+    // And the digests rebuild exactly the root the manifest is signed over, which
+    // is what lets a client check the 255 buckets it was not served.
+    let mut buckets = [[0u8; 32]; MANIFEST_BUCKETS];
+    for (slot, chunk) in buckets.iter_mut().zip(response.buckets.chunks(32)) {
+        slot.copy_from_slice(chunk);
+    }
+    let manifest = response.manifest.expect("the collection has a manifest");
+    assert_eq!(
+        manifest.digest,
+        manifest_root(&buckets, response.object_count).to_vec(),
+        "the bucket digests must rebuild the signed root"
+    );
+
+    let _ = std::fs::remove_dir_all(db.parent().unwrap());
+}
+
+/// The bucket digests are what a client checks the buckets it was *not* served
+/// against, so editing one has to be refused rather than silently accepted.
+#[tokio::test]
+async fn a_write_refuses_an_edited_bucket_digest() {
+    let (db, _base, mut client) = account_with_contacts("badbucket", 3).await;
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    // Flip a byte in the stored digests. Whichever bucket it lands in, the root
+    // the client rebuilds stops matching the manifest it is served.
+    let mut blob: Vec<u8> = sqlx::query_scalar("SELECT buckets FROM manifest_digest_state")
+        .fetch_one(&pool)
+        .await
+        .expect("bucket state");
+    blob[0] ^= 0xff;
+    sqlx::query("UPDATE manifest_digest_state SET buckets = ?")
+        .bind(&blob)
+        .execute(&pool)
+        .await
+        .expect("corrupt the bucket state");
+    pool.close().await;
+
+    let error = client
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"After"}}"#,
+        )
+        .await
+        .expect_err("a write against edited bucket digests must be refused")
+        .to_string();
+    assert!(
+        error.contains("do not match the signed manifest"),
+        "the refusal should name the mismatch, got: {error}"
+    );
+
+    let _ = std::fs::remove_dir_all(db.parent().unwrap());
+}
+
+/// And an object withheld from the bucket that *is* served fails the other half
+/// of the check: the entries must hash to their bucket's digest.
+#[tokio::test]
+async fn a_write_refuses_an_object_withheld_from_its_bucket() {
+    let (db, _base, mut client) = account_with_contacts("withheld", 6).await;
+    let target = client
+        .list_contacts()
+        .await
+        .expect("list")
+        .first()
+        .map(|(id, _)| *id)
+        .expect("a contact to withhold");
+
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    // Drop the row but leave the bucket digests alone, which is what a server
+    // withholding one object from an otherwise honest answer looks like.
+    sqlx::query("DELETE FROM objects WHERE id = ?")
+        .bind(target.to_string())
+        .execute(&pool)
+        .await
+        .expect("withhold the object");
+    pool.close().await;
+
+    // Write into the same bucket, so that bucket is the one served.
+    let error = client
+        .put_contact(target, r#"{"@type":"Card","name":{"full":"Replacement"}}"#)
+        .await
+        .expect_err("a withheld object must be refused")
+        .to_string();
+    assert!(
+        error.contains("do not match its digest") || error.contains("do not match the signed"),
+        "the refusal should name the mismatch, got: {error}"
+    );
+
+    let _ = std::fs::remove_dir_all(db.parent().unwrap());
+}
+
+/// The roster is cached per session now, because fetching it per write was the
+/// second of the two reads every write made. A manifest signed by a device the
+/// cache does not hold has to refetch rather than be refused, which is what a
+/// pairing on another device looks like from here.
+#[tokio::test]
+async fn a_cached_roster_still_accepts_a_manifest_from_a_newly_paired_device() {
+    let dir = std::env::temp_dir().join(format!("sealbook-rostercache-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let password = "correct horse battery";
+    let mut owner = SealbookClient::plaintext_http();
+    owner.register(&base, "cachealice", password).await.unwrap();
+    // Two writes, so the owner has a roster cached from before the pairing.
+    for index in 0..2 {
+        owner
+            .put_contact(
+                Uuid::new_v4(),
+                &format!(r#"{{"@type":"Card","name":{{"full":"Before {index}"}}}}"#),
+            )
+            .await
+            .expect("owner writes");
+    }
+
+    let mut joiner = SealbookClient::plaintext_http();
+    let (pair_code, confirm) = joiner.pair_join(&base, "cachealice").await.expect("join");
+    owner
+        .pair_approve(&pair_code, &confirm)
+        .await
+        .expect("approve");
+    assert!(joiner.pair_ready(&pair_code).await.expect("ready"));
+    joiner.login(password).await.expect("joiner login");
+
+    // The joiner signs the next manifest. The owner's cached roster predates it,
+    // so verifying that manifest has to go back for the roster.
+    joiner
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"From the new device"}}"#,
+        )
+        .await
+        .expect("joiner writes");
+    owner
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"After"}}"#,
+        )
+        .await
+        .expect("the owner must accept a manifest signed by the paired device");
+    assert_eq!(owner.list_contacts().await.expect("list").len(), 4);
+
+    // And a rotation moves the epoch, which is what a revocation looks like, so
+    // the cache has to be dropped for that too.
+    owner.change_phrase(password).await.expect("rotate");
+    owner
+        .put_contact(
+            Uuid::new_v4(),
+            r#"{"@type":"Card","name":{"full":"After the rotation"}}"#,
+        )
+        .await
+        .expect("writes must work after the epoch moves");
+    assert_eq!(owner.list_contacts().await.expect("list").len(), 5);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

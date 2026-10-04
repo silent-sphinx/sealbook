@@ -664,6 +664,10 @@ fn router(state: Shared) -> Router<Shared> {
         .route("/v1/collections/{id}/keys", get(collection_keys))
         .route("/v1/collections/{id}/manifest", get(collection_manifest))
         .route(
+            "/v1/collections/{id}/manifest/buckets",
+            get(collection_manifest_buckets),
+        )
+        .route(
             "/v1/collections/{id}/roster",
             get(roster::collection_roster),
         )

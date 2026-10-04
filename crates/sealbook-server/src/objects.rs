@@ -10,8 +10,8 @@ use uuid::Uuid;
 use sealbook_crypto::content_digest;
 use sealbook_protocol::{
     ChangesQuery, ChangesResponse, CollectionKeysResponse, ErrorBody, KeyWrapBody,
-    ManifestResponse, ObjectChange, PutObjectRequest, PutObjectResponse, DEFAULT_CHANGES_LIMIT,
-    MAX_CHANGES_LIMIT,
+    ManifestBucketQuery, ManifestBucketsResponse, ManifestResponse, ObjectChange, PutObjectRequest,
+    PutObjectResponse, DEFAULT_CHANGES_LIMIT, MAX_CHANGES_LIMIT,
 };
 
 use crate::manifest;
@@ -272,6 +272,60 @@ pub(crate) async fn collection_manifest(
         .await
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
     Ok(Json(ManifestResponse { manifest, entries }))
+}
+
+/// The manifest in the shape a single write needs: the bucket digests, and the
+/// entries of the one bucket that write touches.
+///
+/// `collection_manifest` serves every entry in the collection, which made a write
+/// cost bytes proportional to the whole vault. This is the same guarantee for a
+/// fraction of the traffic, because the root is a hash of the 256 bucket digests
+/// and a write changes exactly one of them.
+pub(crate) async fn collection_manifest_buckets(
+    State(state): State<Shared>,
+    AxumPath(collection_id): AxumPath<Uuid>,
+    Query(query): Query<ManifestBucketQuery>,
+    headers: HeaderMap,
+) -> Result<Json<ManifestBucketsResponse>, (StatusCode, Json<ErrorBody>)> {
+    let session = require_session(&state, &headers).await?;
+    let owned = sqlx::query("SELECT id FROM collections WHERE id = ? AND account_id = ?")
+        .bind(collection_id.to_string())
+        .bind(&session.account_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    if owned.is_none() {
+        return Err(err(StatusCode::NOT_FOUND, "collection"));
+    }
+    // One snapshot for the digests, the bucket and the manifest, for the reason
+    // `collection_manifest` gives: read apart, a write landing in between serves
+    // a new manifest beside an old bucket and the client's check fails exactly as
+    // it would against a server withholding an object.
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let collection = collection_id.to_string();
+    let (buckets, object_count) =
+        manifest::bucket_state(&mut tx, &session.account_id, &collection).await?;
+    let entries = match query.bucket {
+        Some(bucket) => {
+            manifest::entries_in_bucket(&mut tx, &session.account_id, &collection, bucket).await?
+        }
+        None => Vec::new(),
+    };
+    let manifest = manifest::load(&mut *tx, &collection).await?;
+    tx.commit()
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    Ok(Json(ManifestBucketsResponse {
+        manifest,
+        buckets,
+        object_count: object_count as u64,
+        bucket: query.bucket,
+        entries,
+    }))
 }
 
 pub(crate) async fn changes(

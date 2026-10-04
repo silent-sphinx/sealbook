@@ -4,6 +4,7 @@
 use rustls::pki_types::CertificateDer;
 
 use sealbook_crypto::CollectionKey;
+use sealbook_protocol::DevicePublicKeys;
 
 use crate::tls::https_client;
 use crate::{ClientError, LocalState};
@@ -17,6 +18,14 @@ pub struct SealbookClient {
     pub(crate) key_epoch: u64,
     /// Whether the last login found a recovery's rotation still owing.
     pub(crate) recovery_pending: bool,
+    /// The verified device roster, with the key epoch it was fetched at.
+    ///
+    /// Checking a manifest signature needs the roster, and fetching it per write
+    /// was one of the two reads every write made. It is reused while the epoch
+    /// matches: a revocation is always a rotation, so the epoch moving is what a
+    /// device having been removed looks like from here, and a signer the cache
+    /// does not hold is what a pairing elsewhere looks like. Either refetches.
+    pub(crate) roster_cache: Option<(u64, Vec<DevicePublicKeys>)>,
 }
 
 impl SealbookClient {
@@ -31,6 +40,7 @@ impl SealbookClient {
             collection_key: None,
             key_epoch: 0,
             recovery_pending: false,
+            roster_cache: None,
         })
     }
 
@@ -41,6 +51,7 @@ impl SealbookClient {
             collection_key: None,
             key_epoch: 0,
             recovery_pending: false,
+            roster_cache: None,
         }
     }
 
@@ -63,6 +74,7 @@ impl SealbookClient {
             collection_key: None,
             key_epoch: 0,
             recovery_pending: false,
+            roster_cache: None,
         })
     }
 

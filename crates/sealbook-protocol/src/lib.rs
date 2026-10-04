@@ -431,6 +431,39 @@ pub struct ManifestResponse {
     pub entries: Vec<ManifestEntry>,
 }
 
+/// Which bucket of the manifest a caller wants the entries of.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ManifestBucketQuery {
+    /// `manifest_bucket_of(object_id)`. Omitted asks for the digests alone.
+    pub bucket: Option<u8>,
+}
+
+/// The manifest as a single write needs to see it.
+///
+/// `ManifestResponse` carries every entry in the collection, so a write that
+/// fetched it moved bytes proportional to the whole vault and importing *n*
+/// objects cost O(n squared). The root is a hash of 256 bucket digests, and a
+/// write changes exactly one bucket, so this serves the digests plus the entries
+/// of that one bucket: enough to check the manifest and to compute the next one.
+///
+/// Verifying it is the same work as before, in two steps rather than one. The
+/// served entries must hash to `buckets[bucket]`, and `buckets` with
+/// `object_count` must produce the root the manifest signature covers. A server
+/// withholding an object from the bucket fails the first check, and one editing a
+/// bucket digest fails the second.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManifestBucketsResponse {
+    pub manifest: Option<ManifestBody>,
+    /// The 256 bucket digests concatenated, 32 bytes each.
+    #[serde(with = "b64")]
+    pub buckets: Vec<u8>,
+    pub object_count: u64,
+    /// The bucket whose entries follow, echoed from the request.
+    pub bucket: Option<u8>,
+    /// Every entry in `bucket`, or empty if none was asked for.
+    pub entries: Vec<ManifestEntry>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PutObjectRequest {
     pub id: Uuid,
