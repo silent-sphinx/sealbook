@@ -23,3 +23,19 @@ jobs:
         run: cargo install cargo-audit --locked
       - name: Audit dependencies
         run: cargo audit
+
+  # Holds the declared `rust-version` to something that actually compiles, so a
+  # newer API cannot raise the floor unnoticed. sealbook-android is left out: its
+  # uniffi chain declares 1.91 and the job above covers it on stable.
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: "1.88"
+      - name: Check the oldest supported toolchain
+        run: >
+          cargo check --locked --all-targets
+          -p sealbook-crypto -p sealbook-protocol -p sealbook-client
+          -p sealbook-server -p sealbook-cli

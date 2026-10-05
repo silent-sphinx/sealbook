@@ -3,6 +3,8 @@ name = "sealbook-android"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+# Above the workspace floor: uniffi's cargo_metadata chain needs 1.91.
+rust-version = "1.91"
 
 [lib]
 crate-type = ["cdylib"]
