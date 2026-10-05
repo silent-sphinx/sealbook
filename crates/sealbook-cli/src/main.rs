@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use std::{fs::OpenOptions, io::Write};
+use std::{
+    fs::{File, OpenOptions},
+    io::{Seek, SeekFrom, Write},
+};
 
 use anyhow::{Context, Result};
 use chacha20poly1305::{
@@ -913,8 +916,40 @@ fn load_state(path: &Path) -> Result<LocalState> {
 
     let legacy: LocalState =
         serde_json::from_slice(&bytes).context("invalid state file; expected encrypted state")?;
-    save_state(path, &legacy).context("migrate plaintext state file")?;
+    migrate_plaintext_state(path, bytes.len() as u64, || save_state(path, &legacy))
+        .context("migrate plaintext state file")?;
     Ok(legacy)
+}
+
+/// Replaces a legacy plaintext state file, overwriting the bytes it held.
+///
+/// `save_state` renames a new file over `path`, which unlinks the plaintext and
+/// frees blocks still holding the device signing seeds. The handle is opened
+/// before that rename and written through after it, so the bytes overwritten are
+/// the old file's own and a crash between the two leaves the encrypted state in
+/// place rather than a zeroed file.
+fn migrate_plaintext_state(
+    path: &Path,
+    len: u64,
+    replace: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    let mut plaintext = OpenOptions::new().write(true).open(path)?;
+    replace()?;
+    overwrite(&mut plaintext, len)?;
+    Ok(())
+}
+
+fn overwrite(file: &mut File, len: u64) -> std::io::Result<()> {
+    const CHUNK: usize = 8 * 1024;
+    let zeros = [0u8; CHUNK];
+    file.seek(SeekFrom::Start(0))?;
+    let mut remaining = len;
+    while remaining > 0 {
+        let take = remaining.min(CHUNK as u64) as usize;
+        file.write_all(&zeros[..take])?;
+        remaining -= take as u64;
+    }
+    file.sync_all()
 }
 
 fn state_key(path: &Path) -> Result<[u8; 32]> {
@@ -956,6 +991,37 @@ fn validate_state_permissions(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The seeds have to leave the blocks they were in, not just the name.
+    #[test]
+    fn overwriting_a_plaintext_state_file_clears_the_blocks_behind_its_name() {
+        let dir = std::env::temp_dir().join(format!("sealbook-shred-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("state.json");
+        let secret = b"{\"mldsa_seed\":\"do-not-leave-this-on-the-disk\"}";
+        std::fs::write(&path, secret).unwrap();
+        let link = dir.join("same-inode.json");
+        std::fs::hard_link(&path, &link).unwrap();
+
+        // Stands in for `save_state`, which would reach for the keyring.
+        let replacement = dir.join("replacement");
+        migrate_plaintext_state(&path, secret.len() as u64, || {
+            std::fs::write(&replacement, b"encrypted")?;
+            std::fs::rename(&replacement, &path)?;
+            Ok(())
+        })
+        .unwrap();
+
+        let through_link = std::fs::read(&link).unwrap();
+        assert_eq!(
+            through_link,
+            vec![0u8; secret.len()],
+            "the old blocks still hold the seeds"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), b"encrypted");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn a_note_payload_carries_every_field_exactly_once() {

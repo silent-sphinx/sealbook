@@ -32,8 +32,8 @@ pub const ADDRESS_BOOK_ID_PROP: &str = "sealbook:addressBookId";
 /// The maximum is deliberately consistent with the per-route request limits the
 /// server applies: `MAX_OBJECT_BODY` in `sealbook-server` has to cover this many
 /// bytes plus an AEAD tag, base64url-expanded, plus a signed manifest. The real
-/// constraint on a vault is not this number but the per-account `max_bytes`:
-/// at this ceiling, 16 objects fill a default account.
+/// constraint on a vault is not this number but the per-account `max_bytes`,
+/// which the server owns and states in terms of this ceiling.
 pub const MIN_PADDED_OBJECT_SIZE: usize = 256;
 pub const MAX_PADDED_OBJECT_SIZE: usize = 8 * 1024 * 1024;
 pub const DEFAULT_ADDRESS_BOOK_NAME: &str = "Default Address Book";
