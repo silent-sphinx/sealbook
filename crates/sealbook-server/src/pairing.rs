@@ -210,13 +210,10 @@ pub(crate) async fn pair_join(
     if !valid_username(&body.username) {
         return Err(err(StatusCode::BAD_REQUEST, "invalid username"));
     }
+    let source = state.trusted_proxies.client_ip(addr.ip(), &headers);
     if !state
         .limiter
-        .allow_endpoint(
-            "pair",
-            &body.username,
-            Some(state.trusted_proxies.client_ip(addr.ip(), &headers)),
-        )
+        .allow_endpoint("pair", &body.username, Some(source))
         .await
     {
         return Err(err(StatusCode::TOO_MANY_REQUESTS, "rate limited"));
@@ -249,14 +246,13 @@ pub(crate) async fn pair_join(
         &anchor.transcript,
     );
     let mut pending = state.pending_pairs.lock().await;
-    admit(&mut pending, Duration::from_secs(180), |entry| {
-        entry.created
-    });
+    admit_pair(&mut pending);
     pending.insert(
         pair_id,
         PendingPair {
             username: body.username,
             account_id,
+            source,
             device: body.device,
             enrollment_signature: body.enrollment_signature,
             confirm: confirm.clone(),
@@ -305,7 +301,7 @@ pub(crate) async fn pair_status(
     // lock every pairing request needs made each poller wait on every other.
     let caller = require_session(&state, &headers).await.ok();
     let mut pending = state.pending_pairs.lock().await;
-    pending.retain(|_, p| p.created.elapsed() < Duration::from_secs(180));
+    pending.retain(|_, p| p.created.elapsed() < PAIR_TTL);
     let pair_id = pair_id_for_key(&pair_key, &pending)
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "expired"))?;
     let pair = pending
@@ -357,7 +353,7 @@ pub(crate) async fn pair_approve(
         pair_anchor_seq,
     ) = {
         let mut pending = state.pending_pairs.lock().await;
-        pending.retain(|_, p| p.created.elapsed() < Duration::from_secs(180));
+        pending.retain(|_, p| p.created.elapsed() < PAIR_TTL);
         let pair_id = pair_id_for_key(&pair_key, &pending)
             .ok_or_else(|| err(StatusCode::NOT_FOUND, "expired"))?;
         let pair = pending

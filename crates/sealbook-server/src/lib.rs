@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -74,6 +74,9 @@ struct PendingLogin {
 struct PendingPair {
     username: String,
     account_id: Option<String>,
+    /// The address this handshake was started from, so that making room in a
+    /// full table can take it from whoever is using the most of it.
+    source: IpAddr,
     device: DevicePublicKeys,
     enrollment_signature: DualSignatureBody,
     confirm: String,
@@ -830,8 +833,58 @@ fn router(state: Shared) -> Router<Shared> {
         .layer(cors_layer())
 }
 
-/// Most entries any one pending-handshake table holds.
+/// Most entries a pending-handshake table holds, for the tables whose entries
+/// are a challenge and a name. `pending_pairs` has its own, much smaller cap:
+/// see `MAX_PENDING_PAIRS`.
 const MAX_PENDING: usize = 10_000;
+
+/// Most entries `pending_pairs` holds.
+///
+/// `pair_join` needs no session and its entries are large: a device's three
+/// public keys and an ML-DSA enrollment signature, about 6.5 KB each. Under the
+/// shared cap an anonymous caller could hold roughly 65 MB, which on the machine
+/// the defaults are sized for is not a rounding error. 512 bounds the table at
+/// a few megabytes and is far more pairings than a server like this has in
+/// flight at once.
+const MAX_PENDING_PAIRS: usize = 512;
+
+/// How long a pending pairing lives before it has to be started again.
+const PAIR_TTL: Duration = Duration::from_secs(180);
+
+/// `admit` for `pending_pairs`, which makes room by address rather than by age.
+///
+/// A smaller cap is reached sooner, so taking the globally oldest entry would
+/// have made displacing someone else's pairing cheaper than it was before the
+/// cap came down. Instead the entry comes from whichever address holds the most
+/// of the table, oldest of those first: a flood displaces its own handshakes,
+/// and a pairing from somewhere else survives it. When every address holds one
+/// entry there is nothing to choose between them and this is the age-ordered
+/// eviction it replaced.
+fn admit_pair(pending: &mut HashMap<Uuid, PendingPair>) {
+    pending.retain(|_, entry| entry.created.elapsed() < PAIR_TTL);
+    while pending.len() >= MAX_PENDING_PAIRS {
+        let mut held: HashMap<IpAddr, usize> = HashMap::new();
+        for entry in pending.values() {
+            *held.entry(entry.source).or_default() += 1;
+        }
+        let Some(busiest) = held
+            .into_iter()
+            .max_by_key(|(_, count)| *count)
+            .map(|(ip, _)| ip)
+        else {
+            break;
+        };
+        let Some(oldest) = pending
+            .iter()
+            .filter(|(_, entry)| entry.source == busiest)
+            .min_by_key(|(_, entry)| entry.created)
+            .map(|(key, _)| *key)
+        else {
+            break;
+        };
+        pending.remove(&oldest);
+    }
+}
 
 /// Expires stale entries and, if the table is still full, drops the oldest to
 /// make room for the newcomer.
@@ -988,6 +1041,99 @@ mod tests {
             small.rotation_peak_bytes() * 2
         );
         assert!(concurrent.rotation_peak_bytes() > small.rotation_peak_bytes());
+    }
+
+    fn pending_pair(source: IpAddr, age: Duration) -> PendingPair {
+        PendingPair {
+            username: "alice".into(),
+            account_id: None,
+            source,
+            device: DevicePublicKeys {
+                device_id: Uuid::new_v4(),
+                mldsa_pk: Vec::new(),
+                ed25519_pk: Vec::new(),
+                xwing_hpke_pk: Vec::new(),
+            },
+            enrollment_signature: DualSignatureBody {
+                mldsa: Vec::new(),
+                ed25519: Vec::new(),
+            },
+            confirm: String::new(),
+            pair_code: String::new(),
+            roster_seq: 1,
+            roster_transcript: Vec::new(),
+            created: Instant::now()
+                .checked_sub(age)
+                .expect("the monotonic clock must be older than the test's ages"),
+            approved: false,
+        }
+    }
+
+    /// The table is a hundred times heavier per entry than the others and needs
+    /// no session to fill, so it has its own cap.
+    #[test]
+    fn the_pairing_table_is_capped_well_below_the_shared_one() {
+        const { assert!(MAX_PENDING_PAIRS < MAX_PENDING / 10) };
+        let flooder: IpAddr = "203.0.113.9".parse().unwrap();
+        let mut pending: HashMap<Uuid, PendingPair> = (0..MAX_PENDING_PAIRS + 50)
+            .map(|index| {
+                (
+                    Uuid::new_v4(),
+                    pending_pair(flooder, Duration::from_secs(index as u64 % 60)),
+                )
+            })
+            .collect();
+
+        admit_pair(&mut pending);
+        assert!(
+            pending.len() < MAX_PENDING_PAIRS,
+            "the table has to leave room for the newcomer, held {}",
+            pending.len()
+        );
+    }
+
+    /// The smaller cap is reached sooner, so evicting the globally oldest entry
+    /// would have made displacing someone else's pairing cheaper than it was
+    /// before. Room comes from whoever holds the most of the table instead.
+    #[test]
+    fn a_flood_displaces_its_own_pairings_and_not_someone_else_s() {
+        let flooder: IpAddr = "203.0.113.9".parse().unwrap();
+        let household: IpAddr = "192.168.1.40".parse().unwrap();
+
+        let mut pending: HashMap<Uuid, PendingPair> = HashMap::new();
+        // The one entry that matters, and deliberately the oldest in the table:
+        // age alone would have chosen it.
+        let victim = Uuid::new_v4();
+        pending.insert(victim, pending_pair(household, Duration::from_secs(120)));
+        for index in 0..MAX_PENDING_PAIRS {
+            pending.insert(
+                Uuid::new_v4(),
+                pending_pair(flooder, Duration::from_secs(index as u64 % 60)),
+            );
+        }
+
+        admit_pair(&mut pending);
+        assert!(
+            pending.contains_key(&victim),
+            "a flood took someone else's pairing"
+        );
+        assert!(pending.len() < MAX_PENDING_PAIRS);
+    }
+
+    /// Expiry still comes first: a table of stale entries makes room without
+    /// evicting anything live.
+    #[test]
+    fn expired_pairings_are_dropped_before_anything_is_evicted() {
+        let source: IpAddr = "203.0.113.9".parse().unwrap();
+        let mut pending: HashMap<Uuid, PendingPair> = (0..MAX_PENDING_PAIRS)
+            .map(|_| (Uuid::new_v4(), pending_pair(source, PAIR_TTL * 2)))
+            .collect();
+        let fresh = Uuid::new_v4();
+        pending.insert(fresh, pending_pair(source, Duration::from_secs(1)));
+
+        admit_pair(&mut pending);
+        assert_eq!(pending.len(), 1);
+        assert!(pending.contains_key(&fresh));
     }
 
     #[test]
