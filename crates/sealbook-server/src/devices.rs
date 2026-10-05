@@ -13,41 +13,13 @@ use sealbook_crypto::{
     rotation_recovery_payload, verify, DeviceSigningPublic, DualSignature, ObjectDigestEntry,
     WrapDigestEntry,
 };
-use sealbook_protocol::{DevicePublicKeys, ErrorBody, RotateRequest, RotateResponse};
+use sealbook_protocol::{ErrorBody, RotateRequest, RotateResponse};
 
 use crate::manifest;
 use crate::roster;
-use crate::session::{require_recent_session, require_session};
+use crate::session::require_recent_session;
 use crate::validate::{validate_phrase_recovery, validate_rotated_object, validate_rotation_wraps};
 use crate::*;
-
-pub(crate) async fn list_devices(
-    State(state): State<Shared>,
-    headers: HeaderMap,
-) -> Result<Json<Vec<DevicePublicKeys>>, (StatusCode, Json<ErrorBody>)> {
-    let session = require_session(&state, &headers).await?;
-    require_read_budget(&state, "devices", &session.account_id).await?;
-    let rows = sqlx::query(
-        "SELECT id, mldsa_pk, ed25519_pk, xwing_hpke_pk FROM devices
-         WHERE account_id = ? AND revoked_at IS NULL ORDER BY created_at ASC",
-    )
-    .bind(&session.account_id)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-    let devices = rows
-        .into_iter()
-        .filter_map(|row| {
-            Some(DevicePublicKeys {
-                device_id: Uuid::parse_str(&row.get::<String, _>("id")).ok()?,
-                mldsa_pk: row.get("mldsa_pk"),
-                ed25519_pk: row.get("ed25519_pk"),
-                xwing_hpke_pk: row.get("xwing_hpke_pk"),
-            })
-        })
-        .collect();
-    Ok(Json(devices))
-}
 
 /// Replaces the collection key, re-wrapping it and re-encrypting every object.
 ///

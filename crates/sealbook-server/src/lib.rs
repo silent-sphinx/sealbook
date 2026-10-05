@@ -809,7 +809,6 @@ fn router(state: Shared) -> Router<Shared> {
         .route("/v1/account/password/start", post(change_password_start))
         .route("/v1/account/password", post(change_password))
         .route("/v1/session", delete(revoke_session))
-        .route("/v1/account/devices", get(list_devices))
         .route("/v1/account", delete(delete_account))
         .layer(DefaultBodyLimit::max(MAX_BODY))
         .layer(TimeoutLayer::with_status_code(

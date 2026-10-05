@@ -2741,9 +2741,7 @@ async fn a_rotation_that_tombstones_a_live_object_is_refused() {
         wrap_collection_key, wrap_for_device, wrap_for_phrase, DeviceHpkePublic,
         PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE,
     };
-    use sealbook_protocol::{
-        DevicePublicKeys, ManifestBody, PhraseRecoveryBody, RotateRequest, RotatedObject,
-    };
+    use sealbook_protocol::{ManifestBody, PhraseRecoveryBody, RotateRequest, RotatedObject};
 
     let dir = std::env::temp_dir().join(format!("sealbook-rot-tomb-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -2769,16 +2767,10 @@ async fn a_rotation_that_tombstones_a_live_object_is_refused() {
         state.session_token.clone().unwrap(),
     );
     let http = reqwest::Client::new();
-    let devices: Vec<DevicePublicKeys> = http
-        .get(format!("{base}/v1/account/devices"))
-        .bearer_auth(&token)
-        .send()
+    let device = owner
+        .list_devices()
         .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let device = devices
+        .expect("roster")
         .into_iter()
         .find(|candidate| candidate.device_id == device_id)
         .expect("the registering device must be enrolled");
@@ -2924,7 +2916,7 @@ async fn a_rotation_whose_recovery_material_was_modified_after_signing_is_refuse
         wrap_for_phrase, DeviceHpkePublic, ObjectDigestEntry, WrapDigestEntry, PHRASE_CIPHERSUITE,
         PHRASE_SCHEME, RECOVERY_CIPHERSUITE,
     };
-    use sealbook_protocol::{DevicePublicKeys, ManifestBody, PhraseRecoveryBody, RotateRequest};
+    use sealbook_protocol::{ManifestBody, PhraseRecoveryBody, RotateRequest};
 
     let dir = std::env::temp_dir().join(format!("sealbook-rot-tamper-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -2951,16 +2943,10 @@ async fn a_rotation_whose_recovery_material_was_modified_after_signing_is_refuse
     let http = reqwest::Client::new();
 
     // The device's X-Wing public key, to wrap the new collection key to it.
-    let devices: Vec<DevicePublicKeys> = http
-        .get(format!("{base}/v1/account/devices"))
-        .bearer_auth(&token)
-        .send()
+    let device = owner
+        .list_devices()
         .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let device = devices
+        .expect("roster")
         .into_iter()
         .find(|candidate| candidate.device_id == device_id)
         .expect("the registering device must be enrolled");
@@ -4182,31 +4168,24 @@ async fn a_device_the_server_injects_never_receives_the_collection_key() {
         .unwrap();
 
     let injected = inject_device(&db, "injectalice").await;
-    let unsigned: Vec<sealbook_protocol::DevicePublicKeys> = reqwest::Client::new()
-        .get(format!("{base}/v1/account/devices"))
-        .bearer_auth(owner.state.as_ref().unwrap().session_token.clone().unwrap())
-        .send()
-        .await
-        .unwrap()
-        .json()
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
         .await
         .unwrap();
-    assert!(
-        unsigned.iter().any(|device| device.device_id == injected),
-        "the server's own list does show the injected device"
-    );
+    let enrolled: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM devices WHERE id = ?")
+        .bind(injected.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(enrolled, 1, "the server did enrol a device of its own");
     let verified = owner.list_devices().await.unwrap();
     assert!(
         verified.iter().all(|device| device.device_id != injected),
-        "the verified roster must not"
+        "the verified roster must not list it"
     );
 
     // A rotation wraps only for the roster, so the server, which expects a wrap
     // for its device too, refuses it. Refusing is the safe failure: no key left.
     assert!(owner.change_phrase(password).await.is_err());
-    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
-        .await
-        .unwrap();
     let wraps: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM key_wraps WHERE recipient_kind = 'device' AND recipient_id = ?",
     )
@@ -4219,6 +4198,39 @@ async fn a_device_the_server_injects_never_receives_the_collection_key() {
         "the injected device was wrapped the collection key"
     );
     pool.close().await;
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The unsigned device list is gone rather than merely unused by this client.
+///
+/// While it was served, a client could still take the account's devices from the
+/// server's own word for them, which is the substitution the roster exists to
+/// catch.
+#[tokio::test]
+async fn the_server_serves_no_unsigned_device_list() {
+    let dir = std::env::temp_dir().join(format!("sealbook-no-devlist-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut owner = SealbookClient::plaintext_http();
+    owner
+        .register(&base, "devlistalice", "correct horse battery")
+        .await
+        .unwrap();
+    let token = owner.state.as_ref().unwrap().session_token.clone().unwrap();
+
+    let response = reqwest::Client::new()
+        .get(format!("{base}/v1/account/devices"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::NOT_FOUND);
+
+    // The signed answer to the same question is the one that remains.
+    assert_eq!(owner.list_devices().await.unwrap().len(), 1);
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -5488,7 +5500,7 @@ async fn a_rotation_that_retires_a_tombstone_above_the_floor_is_refused() {
         DeviceSigningSecrets, ManifestDigestEntry, ObjectDigestEntry, WrapDigestEntry,
         PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
     };
-    use sealbook_protocol::{DevicePublicKeys, ManifestBody, PhraseRecoveryBody, RotateRequest};
+    use sealbook_protocol::{ManifestBody, PhraseRecoveryBody, RotateRequest};
 
     let dir = std::env::temp_dir().join(format!("sealbook-tombfloor-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -5537,16 +5549,10 @@ async fn a_rotation_that_retires_a_tombstone_above_the_floor_is_refused() {
         .unwrap();
     pool.close().await;
 
-    let devices: Vec<DevicePublicKeys> = http
-        .get(format!("{base}/v1/account/devices"))
-        .bearer_auth(&token)
-        .send()
+    let device = owner
+        .list_devices()
         .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let device = devices
+        .expect("roster")
         .into_iter()
         .find(|candidate| candidate.device_id == device_id)
         .expect("the registering device must be enrolled");
