@@ -9,7 +9,8 @@ use sealbook_crypto::{
     enrollment_transcript, entropy_from_phrase, generate_device_hpke, generate_device_signing,
     generate_kdf_salt, generate_phrase, key_rotation_transcript, key_wraps_digest,
     login_start_transcript, login_transcript, manifest_digest, manifest_transcript, object_aad,
-    open_login_challenge, pair_grant_transcript, password_change_payload, phrase_lookup_id,
+    open_login_challenge, pair_confirmation, pair_grant_transcript, password_change_payload,
+    phrase_lookup_id,
     phrase_recovery_public, phrase_recovery_transcript, recovery_password_payload,
     rotated_objects_digest, rotation_recovery_payload, sign, sign_phrase_recovery,
     unwrap_collection_key, unwrap_for_device, unwrap_for_phrase, username_change_payload, verify,
@@ -716,6 +717,33 @@ pub fn phrase_recovery_proof(
 pub struct DualSigResult {
     pub mldsa: String,
     pub ed25519: String,
+}
+
+/// The pairing code both screens show.
+///
+/// Derived here rather than in the client, because it commits to the roster the
+/// two devices are agreeing on and a second implementation of that transcript is
+/// how the clients drifted apart in the first place.
+#[uniffi::export]
+#[allow(clippy::too_many_arguments)]
+pub fn pair_confirmation_code(
+    pair_id: String,
+    device_id: String,
+    mldsa_pk_b64: String,
+    ed25519_pk_b64: String,
+    hpke_pk_b64: String,
+    roster_seq: u64,
+    roster_transcript_b64: String,
+) -> Result<String, CryptoError> {
+    Ok(pair_confirmation(
+        parse_uuid(&pair_id)?,
+        parse_uuid(&device_id)?,
+        &unb64(&mldsa_pk_b64)?,
+        &unb64(&ed25519_pk_b64)?,
+        &unb64(&hpke_pk_b64)?,
+        roster_seq,
+        &digest32(&roster_transcript_b64)?,
+    ))
 }
 
 #[uniffi::export]
