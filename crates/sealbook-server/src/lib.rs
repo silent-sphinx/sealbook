@@ -16,10 +16,8 @@ use tracing::info;
 use uuid::Uuid;
 
 use sealbook_crypto::opaque::{OpaqueServerLogin, OpaqueServerSetup};
-use sealbook_crypto::{
-    dummy_phrase_wrap, DeviceHpkePublic, DeviceSigningPublic, PHRASE_CIPHERSUITE,
-};
-use sealbook_protocol::{DevicePublicKeys, DualSignatureBody, ErrorBody, KeyWrapBody};
+use sealbook_crypto::{DeviceHpkePublic, DeviceSigningPublic, DECOY_KEY_LEN};
+use sealbook_protocol::{DevicePublicKeys, DualSignatureBody, ErrorBody};
 
 pub mod healthcheck;
 mod manifest;
@@ -30,6 +28,7 @@ mod account;
 mod auth;
 mod client_ip;
 mod db;
+mod decoy;
 mod devices;
 mod http;
 mod landing;
@@ -259,7 +258,7 @@ struct AppState {
     opaque: OpaqueServerSetup,
     dummy_record: Vec<u8>,
     dummy_hpke_pk: DeviceHpkePublic,
-    dummy_phrase_wrap: KeyWrapBody,
+    decoy_key: [u8; DECOY_KEY_LEN],
     dummy_phrase_recovery_pk: DeviceSigningPublic,
     pending_challenges: Mutex<HashMap<Uuid, PendingChallenge>>,
     pending_logins: Mutex<HashMap<Uuid, PendingLogin>>,
@@ -340,14 +339,7 @@ pub async fn app_with(
     let opaque = load_or_create_setup(&db).await?;
     let dummy_record = load_or_create_dummy(&db, &opaque).await?;
     let dummy_hpke_pk = load_or_create_dummy_hpke(&db).await?;
-    let dummy_phrase = dummy_phrase_wrap()?;
-    let dummy_phrase_wrap = KeyWrapBody {
-        recipient_kind: "phrase".into(),
-        recipient_id: "dummy".into(),
-        hpke_enc: dummy_phrase.nonce.to_vec(),
-        wrapped_ck: dummy_phrase.ciphertext,
-        ciphersuite: PHRASE_CIPHERSUITE.into(),
-    };
+    let decoy_key = load_or_create_decoy_key(&db).await?;
     let dummy_phrase_recovery_pk = load_or_create_dummy_phrase_pk(&db).await?;
     let state = Arc::new(AppState {
         db,
@@ -355,7 +347,7 @@ pub async fn app_with(
         opaque,
         dummy_record,
         dummy_hpke_pk,
-        dummy_phrase_wrap,
+        decoy_key,
         dummy_phrase_recovery_pk,
         pending_challenges: Mutex::new(HashMap::new()),
         pending_logins: Mutex::new(HashMap::new()),

@@ -1289,6 +1289,180 @@ async fn recover_start_does_not_disclose_recovery_public_keys() {
     );
 }
 
+/// A lookup that matched nothing must be answered like one that matched: the
+/// handler takes trouble over an indistinguishable OPAQUE evaluation and phrase
+/// wrap, which a response missing the collection and roster gives away. Anyone
+/// holding a lookup id but not the phrase it came from could otherwise ask which
+/// username it belongs to.
+#[tokio::test]
+async fn a_recovery_lookup_that_matched_nothing_is_answered_like_one_that_did() {
+    let dir = std::env::temp_dir().join(format!("sealbook-recover-decoy-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut owner = SealbookClient::plaintext_http();
+    let phrase = owner
+        .register(&base, "decoybob", "correct horse battery")
+        .await
+        .expect("register");
+    let entropy = entropy_from_phrase(&phrase).unwrap();
+
+    let http = reqwest::Client::new();
+    let start = |username: &'static str, lookup_id: Vec<u8>| {
+        let http = http.clone();
+        let base = base.clone();
+        async move {
+            http.post(format!("{base}/v1/recover/start"))
+                .json(&RecoverStartRequest {
+                    username: username.into(),
+                    lookup_id,
+                    opaque_request: client_register_start(b"correct horse battery").unwrap().0,
+                })
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json::<RecoverStartResponse>()
+                .await
+                .unwrap()
+        }
+    };
+
+    let hit = start("decoybob", phrase_lookup_id(&entropy).unwrap().to_vec()).await;
+    // A real username with a lookup id that is not its own, and a username that
+    // does not exist at all.
+    let wrong_lookup = start("decoybob", vec![1u8; 32]).await;
+    let no_account = start("decoynobody", vec![1u8; 32]).await;
+
+    for (case, username, miss) in [
+        ("wrong lookup id", "decoybob", &wrong_lookup),
+        ("no account", "decoynobody", &no_account),
+    ] {
+        let roster = miss
+            .roster
+            .as_ref()
+            .unwrap_or_else(|| panic!("{case}: the miss withheld the roster the hit carried"));
+        assert!(
+            miss.collection_id.is_some(),
+            "{case}: the miss withheld the collection id the hit carried"
+        );
+        // The dummy wrap used to name itself "dummy"; a real one names the
+        // account the caller asked about.
+        assert_eq!(miss.wrap.recipient_id, username);
+        assert_eq!(hit.wrap.recipient_id, "decoybob");
+        assert_eq!(miss.wrap.recipient_kind, hit.wrap.recipient_kind);
+        assert_eq!(miss.wrap.ciphersuite, hit.wrap.ciphersuite);
+        assert_eq!(miss.wrap.hpke_enc.len(), hit.wrap.hpke_enc.len());
+        assert_eq!(miss.wrap.wrapped_ck.len(), hit.wrap.wrapped_ck.len());
+        assert_eq!(miss.opaque_response.len(), hit.opaque_response.len());
+        // Stripped from both, so neither helps anyone guessing phrases.
+        assert!(roster.phrase_mldsa_pk.is_empty());
+        assert!(roster.phrase_ed25519_pk.is_empty());
+        assert_eq!(
+            roster.signature.mldsa.len(),
+            hit.roster.as_ref().unwrap().signature.mldsa.len()
+        );
+        for device in &roster.devices {
+            sealbook_crypto::validate_device_hpke_public(&sealbook_crypto::DeviceHpkePublic(
+                device.xwing_hpke_pk.clone(),
+            ))
+            .unwrap_or_else(|_| {
+                panic!("{case}: the decoy's keys are not real ones, which is checkable")
+            });
+        }
+    }
+
+    // Neither of the two ways of telling a decoy apart from an account: a decoy
+    // the whole server shares would be recognised from a lookup already known to
+    // be a miss, and one made up per request would be caught by asking twice.
+    assert_ne!(wrong_lookup.collection_id, no_account.collection_id);
+    let again = start("decoynobody", vec![1u8; 32]).await;
+    assert_eq!(no_account.collection_id, again.collection_id);
+    assert_eq!(
+        no_account.roster.as_ref().unwrap().mac,
+        again.roster.as_ref().unwrap().mac
+    );
+    assert_eq!(no_account.wrap.wrapped_ck, again.wrap.wrapped_ck);
+
+    // What the decoy must not change: the error for a phrase typed wrong is
+    // still the phrase, not a roster that failed to verify.
+    let (other_phrase, _) = sealbook_crypto::generate_phrase().unwrap();
+    let mut mistaken = SealbookClient::plaintext_http();
+    let error = mistaken
+        .recover(&base, "decoybob", &other_phrase, "new password please")
+        .await
+        .expect_err("a recovery under the wrong phrase must fail");
+    let message = error.to_string();
+    assert!(
+        !message.contains("roster"),
+        "a wrong phrase reported a roster problem: {message}"
+    );
+
+    // And the account still recovers under the right phrase.
+    let mut recovered = SealbookClient::plaintext_http();
+    recovered
+        .recover(&base, "decoybob", &phrase, "new password please")
+        .await
+        .expect("recover");
+}
+
+/// The OPAQUE evaluation must not depend on whether the lookup matched either.
+/// Evaluating a miss under a name of the server's own made the registration
+/// response differ from a hit's under the same request, so two lookups and one
+/// comparison answered the question the decoy exists to refuse: two misses
+/// agreed, a hit and a miss did not.
+#[tokio::test]
+async fn a_recovery_lookup_does_not_change_the_opaque_response_when_it_misses() {
+    let dir = std::env::temp_dir().join(format!("sealbook-recover-oprf-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut owner = SealbookClient::plaintext_http();
+    let phrase = owner
+        .register(&base, "oprfbob", "correct horse battery")
+        .await
+        .expect("register");
+    let entropy = entropy_from_phrase(&phrase).unwrap();
+
+    // One registration request, reused: the response is a function of the
+    // request and the name the server evaluates it under, so holding the request
+    // still is what exposes the name.
+    let (opaque_request, _) = client_register_start(b"correct horse battery").unwrap();
+    let http = reqwest::Client::new();
+    let start = |lookup_id: Vec<u8>| {
+        let (http, base, opaque_request) = (http.clone(), base.clone(), opaque_request.clone());
+        async move {
+            http.post(format!("{base}/v1/recover/start"))
+                .json(&RecoverStartRequest {
+                    username: "oprfbob".into(),
+                    lookup_id,
+                    opaque_request,
+                })
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json::<RecoverStartResponse>()
+                .await
+                .unwrap()
+                .opaque_response
+        }
+    };
+
+    let hit = start(phrase_lookup_id(&entropy).unwrap().to_vec()).await;
+    let miss = start(vec![1u8; 32]).await;
+    let other_miss = start(vec![2u8; 32]).await;
+    assert_eq!(
+        hit, miss,
+        "the OPAQUE response says whether the lookup matched"
+    );
+    assert_eq!(miss, other_miss);
+}
+
 /// Splitting login into a challenge request plus a start request must not halve
 /// how many login attempts a user gets per minute: the two steps use separate
 /// rate-limit buckets.

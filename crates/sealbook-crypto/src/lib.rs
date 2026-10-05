@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod aead;
+pub mod decoy;
 pub mod error;
 pub mod hpke_wrap;
 pub mod opaque;
@@ -11,19 +12,22 @@ pub mod sign;
 pub mod transcript;
 
 pub use aead::{
-    decrypt_object, encrypt_object, object_aad, CollectionKey, EncryptedObject, NONCE_LEN,
+    decrypt_object, encrypt_object, object_aad, CollectionKey, EncryptedObject, COLLECTION_KEY_LEN,
+    NONCE_LEN,
 };
+pub use decoy::{decoy_seed, DECOY_KEY_LEN, DECOY_SEED_LEN};
 pub use error::CryptoError;
 pub use hpke_wrap::{
-    ct_eq, generate_device_hpke, generate_login_challenge, hybrid_session_key,
-    open_login_challenge, seal_login_challenge, unwrap_for_device, validate_device_hpke_public,
-    wrap_for_device, DeviceHpkePublic, DeviceHpkeSecret, DeviceHpkeWrap, HPKE_AEAD_TAG_LEN,
-    XWING_CIPHERSUITE, XWING_ENCAPSULATED_KEY_LEN, XWING_PUBLIC_KEY_LEN,
+    ct_eq, device_hpke_public_from_ikm, generate_device_hpke, generate_login_challenge,
+    hybrid_session_key, open_login_challenge, seal_login_challenge, unwrap_for_device,
+    validate_device_hpke_public, wrap_for_device, DeviceHpkePublic, DeviceHpkeSecret,
+    DeviceHpkeWrap, HPKE_AEAD_TAG_LEN, XWING_CIPHERSUITE, XWING_ENCAPSULATED_KEY_LEN,
+    XWING_PUBLIC_KEY_LEN,
 };
 pub use phrase::{
-    dummy_phrase_recovery_public, dummy_phrase_wrap, entropy_from_phrase, generate_pair_code,
-    generate_phrase, phrase_lookup_id, phrase_recovery_keys, phrase_recovery_public,
-    sign_phrase_recovery, unwrap_for_phrase, verify_phrase_recovery, wrap_for_phrase,
+    dummy_phrase_recovery_public, entropy_from_phrase, generate_pair_code, generate_phrase,
+    phrase_lookup_id, phrase_recovery_keys, phrase_recovery_public, sign_phrase_recovery,
+    unwrap_for_phrase, verify_phrase_recovery, wrap_for_phrase, wrap_for_phrase_with_nonce,
     PHRASE_CIPHERSUITE, PHRASE_ENTROPY_LEN, PHRASE_LOOKUP_ID_LEN, PHRASE_SCHEME,
 };
 pub use recovery::{

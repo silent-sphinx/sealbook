@@ -60,6 +60,15 @@ pub fn generate_device_hpke() -> Result<(DeviceHpkeSecret, DeviceHpkePublic), Cr
     ))
 }
 
+/// Derives an HPKE public key from input keying material.
+///
+/// For material that has to be a real X-Wing encoding rather than random bytes
+/// of the right length, which is a difference the holder can check.
+pub fn device_hpke_public_from_ikm(ikm: &[u8]) -> DeviceHpkePublic {
+    let (_sk, pk) = Kem::derive_keypair(ikm);
+    DeviceHpkePublic(pk.to_bytes().to_vec())
+}
+
 pub fn validate_device_hpke_public(public: &DeviceHpkePublic) -> Result<(), CryptoError> {
     if public.0.len() != XWING_PUBLIC_KEY_LEN {
         return Err(CryptoError::Encoding);

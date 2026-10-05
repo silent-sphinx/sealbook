@@ -6,6 +6,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use anyhow::Context;
+use rand::RngCore;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Pool, Row, Sqlite};
 
@@ -15,7 +16,7 @@ use sealbook_crypto::opaque::{
 };
 use sealbook_crypto::{
     dummy_phrase_recovery_public, generate_device_hpke, DeviceHpkePublic, DeviceSigningPublic,
-    ED25519_PUBLIC_KEY_LEN, MLDSA65_PUBLIC_KEY_LEN,
+    DECOY_KEY_LEN, ED25519_PUBLIC_KEY_LEN, MLDSA65_PUBLIC_KEY_LEN,
 };
 
 pub(crate) async fn open_db(path: &str) -> anyhow::Result<Pool<Sqlite>> {
@@ -429,6 +430,34 @@ pub(crate) async fn load_or_create_dummy_hpke(
         .execute(db)
         .await?;
     Ok(pk)
+}
+
+/// The key the decoys served by `recover/start` are derived from.
+///
+/// Persisted rather than generated per start, because a decoy that changed when
+/// the server restarted would tell a caller polling across a restart which of
+/// its lookups were decoys.
+pub(crate) async fn load_or_create_decoy_key(
+    db: &Pool<Sqlite>,
+) -> anyhow::Result<[u8; DECOY_KEY_LEN]> {
+    let row = sqlx::query("SELECT v FROM meta WHERE k = 'recovery_decoy_key'")
+        .fetch_optional(db)
+        .await?;
+    let bytes: Vec<u8> = match row {
+        Some(row) => row.get("v"),
+        None => {
+            let mut key = [0u8; DECOY_KEY_LEN];
+            rand::thread_rng().fill_bytes(&mut key);
+            sqlx::query("INSERT INTO meta (k, v) VALUES ('recovery_decoy_key', ?)")
+                .bind(key.as_slice())
+                .execute(db)
+                .await?;
+            key.to_vec()
+        }
+    };
+    bytes
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("stored recovery decoy key has the wrong length"))
 }
 
 /// A stable recovery public key for accounts that do not exist, so that a

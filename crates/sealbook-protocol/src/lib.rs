@@ -786,9 +786,11 @@ pub struct RecoverStartResponse {
     pub recovery_id: Uuid,
     #[serde(with = "b64")]
     pub challenge: Vec<u8>,
-    /// The current roster and the collection it belongs to, present only when the
-    /// lookup id matched. A recovering device checks it with the collection key
-    /// the phrase wrap opens.
+    /// The current roster and the collection it belongs to. A recovering device
+    /// checks them with the collection key the phrase wrap opens; a lookup that
+    /// matched nothing is answered with a decoy, so their presence says nothing
+    /// about whether the account exists. Optional for the benefit of a server
+    /// that predates the decoy.
     pub roster: Option<RosterBody>,
     pub collection_id: Option<Uuid>,
     #[serde(with = "b64")]

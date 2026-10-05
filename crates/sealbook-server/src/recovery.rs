@@ -20,6 +20,7 @@ use sealbook_protocol::{
     RecoverStartRequest, RecoverStartResponse,
 };
 
+use crate::decoy::recovery_decoy;
 use crate::pairing::{insert_device, verify_enroll, DeviceCap};
 use crate::roster;
 use crate::*;
@@ -59,30 +60,32 @@ pub(crate) async fn recover_start(
     .fetch_optional(&state.db)
     .await
     .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-    let collection_id: Option<String> = row.as_ref().map(|r| r.get("id"));
+    // Built whether or not the lookup matched, so that a miss costs what a hit
+    // costs as well as looking like one. See `decoy`.
+    let decoy = recovery_decoy(&state.decoy_key, &body.username, &body.lookup_id)
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "decoy"))?;
+    let matched: Option<String> = row.as_ref().map(|r| r.get("id"));
+    let decoy_collection = decoy.collection_id.to_string();
     // Served without the phrase key, which is never handed out before a proof.
     // The recovering device derives it from the phrase and the roster's MAC and
     // signature bind it, so nothing is lost by leaving it out.
-    let roster = match &collection_id {
-        Some(id) => roster::latest(&state.db, id).await?.map(|mut roster| {
-            roster.phrase_mldsa_pk.clear();
-            roster.phrase_ed25519_pk.clear();
-            roster
-        }),
-        None => None,
-    };
-    let collection_id = collection_id.and_then(|id| Uuid::parse_str(&id).ok());
-    // Begin the password reset. Evaluated against the account's own username so
-    // the record this produces is usable for login, and against a fixed dummy
-    // name when there is no such account, so the two cases cost the same and look
-    // the same. Nothing here is derived from the existing password.
-    let opaque_name: &[u8] = if collection_id.is_some() {
-        body.username.as_bytes()
-    } else {
-        b"\x00sealbook-dummy"
-    };
-    let opaque_response = server_register_start(&state.opaque, &body.opaque_request, opaque_name)
-        .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid credentials"))?;
+    let mut roster = roster::latest(&state.db, matched.as_deref().unwrap_or(&decoy_collection))
+        .await?
+        .unwrap_or(decoy.roster);
+    roster.phrase_mldsa_pk.clear();
+    roster.phrase_ed25519_pk.clear();
+    let collection_id = matched.and_then(|id| Uuid::parse_str(&id).ok());
+    // Begin the password reset. Evaluated against the username whether or not the
+    // lookup matched: the response is a function of the request and the name, so
+    // a name of the server's own for a miss would let one request be sent twice
+    // and the two answers compared. Nothing here is derived from the existing
+    // password, and the evaluation needs no account to exist.
+    let opaque_response = server_register_start(
+        &state.opaque,
+        &body.opaque_request,
+        body.username.as_bytes(),
+    )
+    .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid credentials"))?;
     let wrap = row
         .map(|r| KeyWrapBody {
             recipient_kind: "phrase".into(),
@@ -91,7 +94,7 @@ pub(crate) async fn recover_start(
             wrapped_ck: r.get("wrapped_ck"),
             ciphersuite: r.get("ciphersuite"),
         })
-        .unwrap_or_else(|| state.dummy_phrase_wrap.clone());
+        .unwrap_or(decoy.wrap);
     let recovery_id = Uuid::new_v4();
     let challenge = generate_login_challenge();
     let mut pending = state.pending_recoveries.lock().await;
@@ -110,8 +113,8 @@ pub(crate) async fn recover_start(
         wrap,
         recovery_id,
         challenge: challenge.to_vec(),
-        roster,
-        collection_id,
+        roster: Some(roster),
+        collection_id: Some(collection_id.unwrap_or(decoy.collection_id)),
         opaque_response,
     }))
 }

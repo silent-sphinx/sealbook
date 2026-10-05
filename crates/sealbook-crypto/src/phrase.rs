@@ -123,13 +123,25 @@ pub fn wrap_for_phrase(
     entropy: &[u8; PHRASE_ENTROPY_LEN],
     key: &CollectionKey,
 ) -> Result<RecoveryWrap, CryptoError> {
-    let mut kek = phrase_kek(entropy)?;
     let mut nonce = [0u8; NONCE_LEN];
     rand::thread_rng().fill_bytes(&mut nonce);
+    wrap_for_phrase_with_nonce(entropy, key, &nonce)
+}
+
+/// Wraps under a caller-supplied nonce.
+///
+/// For a wrap that has to come out the same every time it is built. The nonce
+/// must not be reused under one `entropy`.
+pub fn wrap_for_phrase_with_nonce(
+    entropy: &[u8; PHRASE_ENTROPY_LEN],
+    key: &CollectionKey,
+    nonce: &[u8; NONCE_LEN],
+) -> Result<RecoveryWrap, CryptoError> {
+    let mut kek = phrase_kek(entropy)?;
     let cipher = XChaCha20Poly1305::new(Key::from_slice(&kek));
     let ciphertext = cipher
         .encrypt(
-            XNonce::from_slice(&nonce),
+            XNonce::from_slice(nonce),
             Payload {
                 msg: &key.0,
                 aad: AAD,
@@ -138,7 +150,7 @@ pub fn wrap_for_phrase(
         .map_err(|_| CryptoError::AeadEncrypt)?;
     kek.zeroize();
     Ok(RecoveryWrap {
-        nonce,
+        nonce: *nonce,
         ciphertext,
         ciphersuite: PHRASE_CIPHERSUITE.to_string(),
     })
@@ -166,13 +178,6 @@ pub fn unwrap_for_phrase(
     let mut bytes = [0u8; COLLECTION_KEY_LEN];
     bytes.copy_from_slice(&plaintext);
     Ok(CollectionKey::from_bytes(bytes))
-}
-
-pub fn dummy_phrase_wrap() -> Result<RecoveryWrap, CryptoError> {
-    let key = CollectionKey::generate();
-    let mut entropy = [0u8; PHRASE_ENTROPY_LEN];
-    rand::thread_rng().fill_bytes(&mut entropy);
-    wrap_for_phrase(&entropy, &key)
 }
 
 fn phrase_kek(entropy: &[u8; PHRASE_ENTROPY_LEN]) -> Result<[u8; COLLECTION_KEY_LEN], CryptoError> {
