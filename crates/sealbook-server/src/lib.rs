@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -551,6 +551,30 @@ pub(crate) fn is_production() -> bool {
         .unwrap_or(false)
 }
 
+/// Writes the certificate where a pinning client can find it.
+///
+/// Exported only where asked: writing it into the working directory on every
+/// start is surprising and scatters stale copies that clients then pin to. A
+/// development copy that no longer matches is replaced, since a stale pin fails
+/// as a name mismatch rather than as the mismatch it is.
+fn export_certificate(cert_pem: &str, production: bool) -> anyhow::Result<()> {
+    if let Some(export) = std::env::var_os("SEALBOOK_CERT_EXPORT") {
+        let export = Path::new(&export);
+        std::fs::write(export, cert_pem).with_context(|| format!("write {}", export.display()))?;
+        info!(path = %export.display(), "exported server certificate");
+    } else if !production {
+        // Development convenience: the CLI pins ./cert.pem by default.
+        let cwd_cert = Path::new("cert.pem");
+        let stale = std::fs::read_to_string(cwd_cert)
+            .map(|existing| existing != cert_pem)
+            .unwrap_or(true);
+        if stale {
+            std::fs::write(cwd_cert, cert_pem)?;
+        }
+    }
+    Ok(())
+}
+
 pub async fn serve(db_path: &str, bind: &str) -> anyhow::Result<()> {
     tls::install_crypto_provider();
     let tls_dir = std::env::var("SEALBOOK_TLS_DIR").unwrap_or_else(|_| "tls".into());
@@ -581,6 +605,9 @@ pub async fn serve(db_path: &str, bind: &str) -> anyhow::Result<()> {
             names = %tls_sans.names().join(", "),
             "certificate covers these names; add yours with SEALBOOK_TLS_SANS"
         );
+    }
+    if let Some(not_after) = material.not_after {
+        tls::report_expiry(not_after, tls_mode);
     }
     // The rotation budget is the real ceiling on a vault, so say what it works out
     // to rather than leaving an operator to infer it from three separate numbers.
@@ -628,21 +655,7 @@ pub async fn serve(db_path: &str, bind: &str) -> anyhow::Result<()> {
              will be attributed to the proxy and the whole deployment will share one rate limit"
         );
     }
-    // Export the certificate for pinning only where asked. Previously this was
-    // written into the working directory on every start, which is surprising
-    // and can scatter stale copies that clients then pin to.
-    if let Some(export) = std::env::var_os("SEALBOOK_CERT_EXPORT") {
-        let export = Path::new(&export);
-        std::fs::write(export, &material.cert_pem)
-            .with_context(|| format!("write {}", export.display()))?;
-        info!(path = %export.display(), "exported server certificate");
-    } else if !production {
-        // Development convenience: the CLI pins ./cert.pem by default.
-        let cwd_cert = Path::new("cert.pem");
-        if !cwd_cert.exists() {
-            std::fs::write(cwd_cert, &material.cert_pem)?;
-        }
-    }
+    export_certificate(&material.cert_pem, production)?;
     if trusted_proxy_count > 0 {
         info!(
             count = trusted_proxy_count,
@@ -654,13 +667,29 @@ pub async fn serve(db_path: &str, bind: &str) -> anyhow::Result<()> {
     info!("sealbook listening on https://{bind} (TLS 1.3, X25519MLKEM768 preferred)");
     let handle = axum_server::Handle::new();
     tokio::spawn(shutdown_on_signal(handle.clone()));
-    axum_server::bind_rustls(
-        addr,
-        axum_server::tls_rustls::RustlsConfig::from_config(material.server_config),
-    )
-    .handle(handle)
-    .serve(app.into_make_service_with_connect_info::<SocketAddr>())
-    .await?;
+    let tls_config =
+        axum_server::tls_rustls::RustlsConfig::from_config(material.server_config.clone());
+    if let Some(not_after) = material
+        .not_after
+        .filter(|_| tls_mode.generates_certificate())
+    {
+        tls::spawn_renewal(
+            tls_config.clone(),
+            PathBuf::from(&tls_dir),
+            tls_mode,
+            tls_sans,
+            not_after,
+            move |cert_pem| {
+                if let Err(error) = export_certificate(cert_pem, production) {
+                    tracing::warn!(%error, "exporting the replaced certificate failed");
+                }
+            },
+        );
+    }
+    axum_server::bind_rustls(addr, tls_config)
+        .handle(handle)
+        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+        .await?;
     info!("shutdown complete");
     Ok(())
 }

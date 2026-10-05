@@ -1,7 +1,7 @@
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::net::IpAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -9,6 +9,7 @@ use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair, PKCS_ECDSA_P2
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use rustls::version::TLS13;
 use rustls::ServerConfig;
+use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime};
 
 pub struct TlsMaterial {
@@ -16,6 +17,9 @@ pub struct TlsMaterial {
     pub key_pem: String,
     pub cert_der: CertificateDer<'static>,
     pub server_config: Arc<ServerConfig>,
+    /// When the certificate stops being accepted, where that is known. A
+    /// certificate the operator supplied is not parsed, so it is `None`.
+    pub not_after: Option<OffsetDateTime>,
 }
 
 pub fn install_crypto_provider() {
@@ -90,6 +94,21 @@ impl TlsMode {
     /// and therefore need to be given a copy of it.
     pub fn clients_pin(&self) -> bool {
         matches!(self, Self::SelfSigned)
+    }
+
+    /// How long before expiry a generated certificate is replaced.
+    ///
+    /// Replacing one changes the fingerprint, which costs every pinning client a
+    /// re-pin. Letting it expire costs the same, so a pinning deployment keeps
+    /// its certificate until the handshake would fail anyway rather than
+    /// breaking on a date nobody chose. Nothing pins the certificate on the
+    /// proxy hop, so that one is replaced before the hop can break.
+    pub fn renew_before(&self) -> Duration {
+        if self.clients_pin() {
+            Duration::ZERO
+        } else {
+            Duration::days(RENEW_BEFORE_DAYS)
+        }
     }
 }
 
@@ -224,6 +243,26 @@ pub fn fingerprint(cert: &CertificateDer<'_>) -> String {
 /// could recover the private key from the public certificate.
 pub const CERT_VALIDITY_DAYS: i64 = 365;
 
+/// How long before expiry a certificate nothing pins is replaced.
+pub const RENEW_BEFORE_DAYS: i64 = 30;
+
+/// How long before expiry the approaching date is worth an operator's attention.
+pub const EXPIRY_WARNING_DAYS: i64 = 30;
+
+/// Records when the stored certificate expires.
+///
+/// Kept beside the certificate rather than read back out of it: parsing the
+/// certificate would put an x509 parser in the dependency tree, and rcgen does
+/// not parse. Same reasoning as [`SANS_FILE`].
+const NOT_AFTER_FILE: &str = "cert-not-after";
+
+/// How long a running server waits before looking at the certificate again.
+///
+/// Capped rather than sleeping straight to the renewal date so that a process
+/// which outlives its certificate repeats the warning while there is still time
+/// to act on it.
+const RENEWAL_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
 pub fn generate_self_signed() -> anyhow::Result<TlsMaterial> {
     generate_self_signed_for(&TlsSans::default())
 }
@@ -238,8 +277,9 @@ pub fn generate_self_signed_for(sans: &TlsSans) -> anyhow::Result<TlsMaterial> {
         .distinguished_name
         .push(DnType::CommonName, "sealbook");
     let now = OffsetDateTime::now_utc();
+    let not_after = now + Duration::days(CERT_VALIDITY_DAYS);
     params.not_before = now - Duration::hours(1);
-    params.not_after = now + Duration::days(CERT_VALIDITY_DAYS);
+    params.not_after = not_after;
     // Pin the key algorithm explicitly so that changing it is a deliberate act
     // rather than a side effect of an rcgen default changing.
     let key_pair = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256)?;
@@ -252,6 +292,7 @@ pub fn generate_self_signed_for(sans: &TlsSans) -> anyhow::Result<TlsMaterial> {
         key_pem: key_pair.serialize_pem(),
         cert_der,
         server_config: Arc::new(server_config),
+        not_after: Some(not_after),
     })
 }
 
@@ -280,15 +321,21 @@ pub fn load_for_mode(dir: &Path, mode: TlsMode, sans: &TlsSans) -> anyhow::Resul
         }
         return load_existing(dir);
     }
-    load_or_create(dir, sans)
+    load_or_create(dir, sans, mode.renew_before())
 }
 
 /// Loads the stored certificate, replacing it when it does not cover the
-/// configured names.
+/// configured names or has reached the end of its life.
 ///
 /// Regenerating changes the fingerprint clients pin, so it happens only on a
-/// configuration change and says so.
-pub fn load_or_create(dir: &Path, sans: &TlsSans) -> anyhow::Result<TlsMaterial> {
+/// configuration change or an expiry, and says so. `renew_before` is how long
+/// before the expiry date that replacement is due; see
+/// [`TlsMode::renew_before`].
+pub fn load_or_create(
+    dir: &Path,
+    sans: &TlsSans,
+    renew_before: Duration,
+) -> anyhow::Result<TlsMaterial> {
     std::fs::create_dir_all(dir)?;
     let cert_path = dir.join("cert.pem");
     let key_path = dir.join("key.pem");
@@ -300,20 +347,163 @@ pub fn load_or_create(dir: &Path, sans: &TlsSans) -> anyhow::Result<TlsMaterial>
         Err(_) => TlsSans::default(),
     };
     if cert_path.exists() && key_path.exists() {
-        if stored == *sans {
-            return load_existing(dir);
+        if stored != *sans {
+            tracing::warn!(
+                names = %sans.names().join(", "),
+                "SEALBOOK_TLS_SANS changed; regenerating the certificate, so pinning clients \
+                 need the new one"
+            );
+        } else {
+            let not_after = recorded_not_after(dir, &cert_path)?;
+            if OffsetDateTime::now_utc() + renew_before < not_after {
+                let mut material = load_existing(dir)?;
+                material.not_after = Some(not_after);
+                return Ok(material);
+            }
+            tracing::warn!(
+                expires = %format_timestamp(not_after),
+                "the generated certificate has reached the end of its life; replacing it, so \
+                 pinning clients need the new one"
+            );
         }
-        tracing::warn!(
-            names = %sans.names().join(", "),
-            "SEALBOOK_TLS_SANS changed; regenerating the certificate, so pinning clients \
-             need the new one"
-        );
     }
     let material = generate_self_signed_for(sans)?;
     write_private_file(&cert_path, material.cert_pem.as_bytes(), 0o644)?;
     write_private_file(&key_path, material.key_pem.as_bytes(), 0o600)?;
     write_private_file(&sans_path, sans.stored_form().as_bytes(), 0o644)?;
+    if let Some(not_after) = material.not_after {
+        write_private_file(
+            &dir.join(NOT_AFTER_FILE),
+            format_timestamp(not_after).as_bytes(),
+            0o644,
+        )?;
+    }
     Ok(material)
+}
+
+/// When the stored certificate expires.
+///
+/// A certificate written before this record existed is dated from the file
+/// itself, which is when `write_private_file` created it. That is a guess, taken
+/// because the alternatives are to replace a pinned certificate for no reason or
+/// to treat it as fresh for ever; it is written down so it is made once.
+fn recorded_not_after(dir: &Path, cert_path: &Path) -> anyhow::Result<OffsetDateTime> {
+    let path = dir.join(NOT_AFTER_FILE);
+    if let Some(recorded) = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|contents| OffsetDateTime::parse(contents.trim(), &Rfc3339).ok())
+    {
+        return Ok(recorded);
+    }
+    let generated = std::fs::metadata(cert_path)
+        .and_then(|meta| meta.modified())
+        .map(OffsetDateTime::from)
+        .unwrap_or_else(|_| OffsetDateTime::now_utc());
+    let not_after = generated + Duration::days(CERT_VALIDITY_DAYS);
+    write_private_file(&path, format_timestamp(not_after).as_bytes(), 0o644)?;
+    Ok(not_after)
+}
+
+fn format_timestamp(stamp: OffsetDateTime) -> String {
+    stamp.format(&Rfc3339).unwrap_or_else(|_| stamp.to_string())
+}
+
+/// Logs when a generated certificate expires, warning while that is close enough
+/// to need the operator.
+pub fn report_expiry(not_after: OffsetDateTime, mode: TlsMode) {
+    if !warn_if_expiring(not_after, mode) {
+        tracing::info!(
+            expires = %format_timestamp(not_after),
+            days_left = (not_after - OffsetDateTime::now_utc()).whole_days(),
+            "certificate validity"
+        );
+    }
+}
+
+/// Warns while the certificate is close enough to expiry that the operator has
+/// something to do about it, reporting whether it had anything to say.
+fn warn_if_expiring(not_after: OffsetDateTime, mode: TlsMode) -> bool {
+    let remaining = not_after - OffsetDateTime::now_utc();
+    if remaining > Duration::days(EXPIRY_WARNING_DAYS) {
+        return false;
+    }
+    let expires = format_timestamp(not_after);
+    if mode.clients_pin() {
+        tracing::warn!(
+            %expires,
+            days_left = remaining.whole_days(),
+            "this certificate is near expiry and will be replaced when it expires; every \
+             pinning client then needs the new copy, so plan the re-pin or replace it sooner \
+             by deleting the tls directory"
+        );
+    } else {
+        tracing::warn!(
+            %expires,
+            days_left = remaining.whole_days(),
+            replaced_in_days = (remaining - mode.renew_before()).whole_days(),
+            "this certificate is near expiry and will be replaced automatically; nothing pins \
+             it in this mode"
+        );
+    }
+    true
+}
+
+/// How long to wait before looking at the certificate again.
+fn until_renewal(not_after: OffsetDateTime, renew_before: Duration) -> std::time::Duration {
+    let remaining = (not_after - renew_before) - OffsetDateTime::now_utc();
+    std::time::Duration::try_from(remaining)
+        .unwrap_or(std::time::Duration::ZERO)
+        .min(RENEWAL_CHECK_INTERVAL)
+}
+
+/// Replaces the generated certificate when it reaches the end of its life,
+/// without needing a restart.
+///
+/// The certificate is otherwise read once at startup, so a server that outlives
+/// [`CERT_VALIDITY_DAYS`] serves an expired one until someone restarts it.
+pub fn spawn_renewal(
+    config: axum_server::tls_rustls::RustlsConfig,
+    dir: PathBuf,
+    mode: TlsMode,
+    sans: TlsSans,
+    not_after: OffsetDateTime,
+    export: impl Fn(&str) + Send + 'static,
+) {
+    tokio::spawn(async move {
+        let mut not_after = not_after;
+        loop {
+            tokio::time::sleep(until_renewal(not_after, mode.renew_before())).await;
+            if OffsetDateTime::now_utc() + mode.renew_before() < not_after {
+                warn_if_expiring(not_after, mode);
+                continue;
+            }
+            match load_or_create(&dir, &sans, mode.renew_before()) {
+                Ok(material) => {
+                    config.reload_from_config(material.server_config.clone());
+                    if mode.clients_pin() {
+                        tracing::warn!(
+                            fingerprint = %fingerprint(&material.cert_der),
+                            "replaced the expired certificate; clients must pin the new one \
+                             (sha256)"
+                        );
+                    } else {
+                        tracing::info!("replaced the expired certificate");
+                    }
+                    export(&material.cert_pem);
+                    match material.not_after {
+                        Some(renewed) => not_after = renewed,
+                        // Unreachable for a generated certificate, and looping
+                        // on an unknown date would spin.
+                        None => return,
+                    }
+                }
+                Err(error) => {
+                    tracing::error!(%error, "replacing the expired certificate failed");
+                    tokio::time::sleep(RENEWAL_CHECK_INTERVAL).await;
+                }
+            }
+        }
+    });
 }
 
 fn load_existing(dir: &Path) -> anyhow::Result<TlsMaterial> {
@@ -362,6 +552,7 @@ pub fn from_pem(cert_pem: &str, key_pem: &str) -> anyhow::Result<TlsMaterial> {
         key_pem: key_pem.to_string(),
         cert_der,
         server_config: Arc::new(server_config),
+        not_after: None,
     })
 }
 
@@ -525,9 +716,10 @@ mod tests {
     fn a_stored_certificate_survives_a_restart_but_not_a_san_change() {
         let dir = std::env::temp_dir().join(format!("sealbook-sans-{}", uuid::Uuid::new_v4()));
         let default = TlsSans::default();
+        let renew_before = TlsMode::SelfSigned.renew_before();
 
-        let first = load_or_create(&dir, &default).unwrap();
-        let restarted = load_or_create(&dir, &default).unwrap();
+        let first = load_or_create(&dir, &default, renew_before).unwrap();
+        let restarted = load_or_create(&dir, &default, renew_before).unwrap();
         assert_eq!(
             fingerprint(&first.cert_der),
             fingerprint(&restarted.cert_der),
@@ -535,14 +727,14 @@ mod tests {
         );
 
         let widened = TlsSans::parse("sealbook.lan").unwrap();
-        let regenerated = load_or_create(&dir, &widened).unwrap();
+        let regenerated = load_or_create(&dir, &widened, renew_before).unwrap();
         assert_ne!(
             fingerprint(&first.cert_der),
             fingerprint(&regenerated.cert_der),
             "a widened set must produce a certificate that covers it"
         );
         // And the new set is what is now stored, so the next start is a reuse.
-        let after = load_or_create(&dir, &widened).unwrap();
+        let after = load_or_create(&dir, &widened, renew_before).unwrap();
         assert_eq!(
             fingerprint(&regenerated.cert_der),
             fingerprint(&after.cert_der)
@@ -557,16 +749,149 @@ mod tests {
     fn an_unrecorded_certificate_is_kept_on_the_default_set() {
         let dir = std::env::temp_dir().join(format!("sealbook-sans-old-{}", uuid::Uuid::new_v4()));
         let default = TlsSans::default();
-        let original = load_or_create(&dir, &default).unwrap();
+        let renew_before = TlsMode::SelfSigned.renew_before();
+        let original = load_or_create(&dir, &default, renew_before).unwrap();
         std::fs::remove_file(dir.join(SANS_FILE)).unwrap();
 
-        let loaded = load_or_create(&dir, &default).unwrap();
+        let loaded = load_or_create(&dir, &default, renew_before).unwrap();
         assert_eq!(
             fingerprint(&original.cert_der),
             fingerprint(&loaded.cert_der)
         );
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("sealbook-{tag}-{}", uuid::Uuid::new_v4()))
+    }
+
+    fn record_expiry(dir: &Path, not_after: OffsetDateTime) {
+        std::fs::write(dir.join(NOT_AFTER_FILE), format_timestamp(not_after)).unwrap();
+    }
+
+    fn recorded_expiry(dir: &Path) -> OffsetDateTime {
+        let contents = std::fs::read_to_string(dir.join(NOT_AFTER_FILE)).unwrap();
+        OffsetDateTime::parse(contents.trim(), &Rfc3339).unwrap()
+    }
+
+    #[test]
+    fn generating_a_certificate_records_when_it_expires() {
+        let dir = temp_dir("expiry");
+        let material = load_or_create(&dir, &TlsSans::default(), Duration::ZERO).unwrap();
+
+        let expected = material
+            .not_after
+            .expect("a generated certificate has a date");
+        assert_eq!(recorded_expiry(&dir), expected);
+        assert_eq!(
+            (expected - OffsetDateTime::now_utc()).whole_days(),
+            CERT_VALIDITY_DAYS - 1,
+            "the record must be the certificate's own lifetime"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The bug this closes: a certificate at the end of its life was reused for
+    /// ever, so the server came back up serving one no client would accept.
+    #[test]
+    fn an_expired_certificate_is_replaced() {
+        let dir = temp_dir("expired");
+        let sans = TlsSans::default();
+        let original = load_or_create(&dir, &sans, Duration::ZERO).unwrap();
+        record_expiry(&dir, OffsetDateTime::now_utc() - Duration::hours(1));
+
+        let replaced = load_or_create(&dir, &sans, Duration::ZERO).unwrap();
+        assert_ne!(
+            fingerprint(&original.cert_der),
+            fingerprint(&replaced.cert_der),
+            "an expired certificate must not be served again"
+        );
+        assert!(recorded_expiry(&dir) > OffsetDateTime::now_utc());
+        // And the replacement is what the next start reuses.
+        let reused = load_or_create(&dir, &sans, Duration::ZERO).unwrap();
+        assert_eq!(
+            fingerprint(&replaced.cert_der),
+            fingerprint(&reused.cert_der)
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Replacing one early costs every pinning client a re-pin, which letting it
+    /// expire costs anyway, so only the mode where nothing pins it renews ahead
+    /// of the date.
+    #[test]
+    fn the_renewal_window_applies_only_where_nothing_pins_the_certificate() {
+        let sans = TlsSans::default();
+        let soon = OffsetDateTime::now_utc() + Duration::days(RENEW_BEFORE_DAYS - 1);
+
+        let pinned_dir = temp_dir("renew-pinned");
+        let pinned =
+            load_or_create(&pinned_dir, &sans, TlsMode::SelfSigned.renew_before()).unwrap();
+        record_expiry(&pinned_dir, soon);
+        let kept = load_or_create(&pinned_dir, &sans, TlsMode::SelfSigned.renew_before()).unwrap();
+        assert_eq!(fingerprint(&pinned.cert_der), fingerprint(&kept.cert_der));
+        assert_eq!(kept.not_after, Some(soon));
+
+        let proxy_dir = temp_dir("renew-proxy");
+        let proxied = load_or_create(&proxy_dir, &sans, TlsMode::Proxy.renew_before()).unwrap();
+        record_expiry(&proxy_dir, soon);
+        let renewed = load_or_create(&proxy_dir, &sans, TlsMode::Proxy.renew_before()).unwrap();
+        assert_ne!(
+            fingerprint(&proxied.cert_der),
+            fingerprint(&renewed.cert_der)
+        );
+
+        std::fs::remove_dir_all(&pinned_dir).ok();
+        std::fs::remove_dir_all(&proxy_dir).ok();
+    }
+
+    /// A certificate generated before the record existed must not be thrown away
+    /// on the upgrade, and must not be treated as fresh for ever either.
+    #[test]
+    fn an_unrecorded_certificate_is_dated_from_its_file() {
+        let dir = temp_dir("expiry-old");
+        let sans = TlsSans::default();
+        let original = load_or_create(&dir, &sans, Duration::ZERO).unwrap();
+        std::fs::remove_file(dir.join(NOT_AFTER_FILE)).unwrap();
+
+        let loaded = load_or_create(&dir, &sans, Duration::ZERO).unwrap();
+        assert_eq!(
+            fingerprint(&original.cert_der),
+            fingerprint(&loaded.cert_der),
+            "upgrading must not invalidate a pinned certificate"
+        );
+        assert_eq!(
+            (recorded_expiry(&dir) - OffsetDateTime::now_utc()).whole_days(),
+            CERT_VALIDITY_DAYS - 1,
+            "the guess must be written down so it is made once"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn renewal_is_rechecked_daily_and_not_waited_for_once_due() {
+        let now = OffsetDateTime::now_utc();
+        assert_eq!(
+            until_renewal(now + Duration::days(CERT_VALIDITY_DAYS), Duration::ZERO),
+            RENEWAL_CHECK_INTERVAL,
+            "a long wait is capped so the warning repeats"
+        );
+        assert_eq!(
+            until_renewal(now - Duration::days(1), Duration::ZERO),
+            std::time::Duration::ZERO
+        );
+        // Due now because the window has been reached, not because it expired.
+        assert_eq!(
+            until_renewal(
+                now + Duration::days(RENEW_BEFORE_DAYS - 1),
+                Duration::days(RENEW_BEFORE_DAYS)
+            ),
+            std::time::Duration::ZERO
+        );
     }
 
     #[test]
