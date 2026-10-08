@@ -336,6 +336,7 @@ pub async fn app_with(
 ) -> anyhow::Result<Router> {
     let db = open_migrated(db_path).await?;
     verify_db_integrity(&db).await?;
+    db::log_contents(&db).await?;
     let opaque = load_or_create_setup(&db).await?;
     let dummy_record = load_or_create_dummy(&db, &opaque).await?;
     let dummy_hpke_pk = load_or_create_dummy_hpke(&db).await?;
@@ -507,6 +508,11 @@ pub async fn prune_oversized_revision_logs(
 fn spawn_session_sweeper(state: Shared) {
     tokio::spawn(async move {
         let retention = revision_retention();
+        info!(
+            revision_retention_days = retention.as_secs() / 86_400,
+            sweep_interval_secs = SESSION_SWEEP_INTERVAL.as_secs(),
+            "housekeeping; a client away longer than the retention window resyncs in full"
+        );
         loop {
             match sweep_expired_sessions(&state.db).await {
                 Ok(deleted) if deleted > 0 => {
@@ -571,14 +577,46 @@ fn export_certificate(cert_pem: &str, production: bool) -> anyhow::Result<()> {
         if stale {
             std::fs::write(cwd_cert, cert_pem)?;
         }
+        info!(
+            path = %logged_path(cwd_cert),
+            "development certificate on disk; this is what the CLI pins by default"
+        );
     }
     Ok(())
+}
+
+/// An absolute path for the log, falling back to the path as given.
+///
+/// Every path the server takes may be relative, so the log would otherwise name
+/// a file whose location depends on where the process was started from.
+fn logged_path(path: impl AsRef<Path>) -> String {
+    let path = path.as_ref();
+    std::path::absolute(path)
+        .unwrap_or_else(|_| path.to_path_buf())
+        .display()
+        .to_string()
 }
 
 pub async fn serve(db_path: &str, bind: &str) -> anyhow::Result<()> {
     tls::install_crypto_provider();
     let tls_dir = std::env::var("SEALBOOK_TLS_DIR").unwrap_or_else(|_| "tls".into());
     let production = is_production();
+    info!(
+        version = env!("CARGO_PKG_VERSION"),
+        env = if production {
+            "production"
+        } else {
+            "development"
+        },
+        "starting sealbook-server; set SEALBOOK_ENV=production to tighten defaults"
+    );
+    // Both are created if missing, so a mistyped path starts a server on an empty
+    // database rather than failing. Naming them makes that visible on the first run.
+    info!(
+        database = %logged_path(db_path),
+        tls_dir = %logged_path(&tls_dir),
+        "state locations"
+    );
     let tls_mode = tls::TlsMode::from_env(production)?;
     let tls_sans = tls::TlsSans::from_env()?;
     let material = tls::load_for_mode(Path::new(&tls_dir), tls_mode, &tls_sans)?;

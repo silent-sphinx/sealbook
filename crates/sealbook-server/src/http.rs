@@ -87,6 +87,11 @@ pub(crate) fn cors_layer() -> CorsLayer {
         tracing::warn!(
             "no CORS origins configured; set SEALBOOK_CORS_ORIGINS to the web client's origin or browsers will block it"
         );
+    } else {
+        tracing::info!(
+            count = origins.len(),
+            "cross-origin requests allowed; add the web client's origin with SEALBOOK_CORS_ORIGINS"
+        );
     }
 
     CorsLayer::new()

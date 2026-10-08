@@ -96,7 +96,28 @@ pub(crate) async fn migrate(db: &Pool<Sqlite>) -> anyhow::Result<()> {
     }
     if version < 1 {
         migrate_to_v1(db).await?;
+    } else {
+        tracing::info!(version, "database schema up to date");
     }
+    Ok(())
+}
+
+/// Logs what the database already holds.
+///
+/// The one startup line that distinguishes a fresh database from the wrong one:
+/// the path alone does not, since a mistyped `SEALBOOK_DB` is created silently
+/// rather than refused.
+pub(crate) async fn log_contents(db: &Pool<Sqlite>) -> anyhow::Result<()> {
+    async fn count(db: &Pool<Sqlite>, query: &str) -> anyhow::Result<i64> {
+        Ok(sqlx::query_scalar::<_, i64>(query).fetch_one(db).await?)
+    }
+    tracing::info!(
+        accounts = count(db, "SELECT COUNT(*) FROM accounts").await?,
+        devices = count(db, "SELECT COUNT(*) FROM devices").await?,
+        objects = count(db, "SELECT COUNT(*) FROM objects WHERE tombstone = 0").await?,
+        sessions = count(db, "SELECT COUNT(*) FROM sessions").await?,
+        "database contents"
+    );
     Ok(())
 }
 
