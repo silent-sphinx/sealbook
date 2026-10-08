@@ -17,7 +17,7 @@ use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::CertificateDer;
 use sealbook_client::{
     LocalState, SealbookClient, ADDRESS_BOOK_ID_PROP, DEFAULT_ADDRESS_BOOK_ID,
-    DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_NOTEBOOK_NAME,
+    DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_CALENDAR_COLOR, DEFAULT_CALENDAR_ID, DEFAULT_NOTEBOOK_NAME,
 };
 use sha2::{Digest, Sha256};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
@@ -220,7 +220,7 @@ enum CalendarCommand {
     Create {
         #[arg(long)]
         name: String,
-        #[arg(long, default_value = "#7aa2f7")]
+        #[arg(long, default_value = DEFAULT_CALENDAR_COLOR)]
         color: String,
     },
     ListCalendars,
@@ -493,6 +493,10 @@ async fn main() -> Result<()> {
             let mut client =
                 SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
             sign_in(&mut client, &password).await?;
+            client
+                .ensure_default_calendar()
+                .await
+                .context("default calendar")?;
             match command {
                 CalendarCommand::Create { name, color } => {
                     let id = Uuid::new_v4();
@@ -513,7 +517,8 @@ async fn main() -> Result<()> {
                 } => {
                     let event = serde_json::json!({
                         "@type": "CalendarEvent", "version": "1.0", "title": title,
-                        "start": start, "end": end, "notes": notes, "calendarId": calendar,
+                        "start": start, "end": end, "notes": notes,
+                        "calendarId": calendar.unwrap_or(DEFAULT_CALENDAR_ID),
                     });
                     let id = Uuid::new_v4();
                     let revision = client.put_calendar_event(id, &event.to_string()).await?;

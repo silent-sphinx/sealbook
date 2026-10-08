@@ -15,7 +15,8 @@ use sealbook_protocol::{
 };
 use sealbook_protocol::{
     ADDRESS_BOOK_CONTENT_TYPE, CALENDAR_CONTENT_TYPE, CALENDAR_EVENT_CONTENT_TYPE,
-    DEFAULT_ADDRESS_BOOK_ID, DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_NOTEBOOK_ID, DEFAULT_NOTEBOOK_NAME,
+    DEFAULT_ADDRESS_BOOK_ID, DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_CALENDAR_COLOR,
+    DEFAULT_CALENDAR_ID, DEFAULT_CALENDAR_NAME, DEFAULT_NOTEBOOK_ID, DEFAULT_NOTEBOOK_NAME,
     JSCONTACT_CONTENT_TYPE, NOTEBOOK_CONTENT_TYPE, NOTE_CONTENT_TYPE, SEALED_CONTENT_TYPE,
 };
 
@@ -195,6 +196,24 @@ impl SealbookClient {
             CALENDAR_CONTENT_TYPE,
         )
         .await
+    }
+
+    /// Creates the reserved default calendar if the collection has none.
+    ///
+    /// The identity check is by id rather than by name, so a renamed default is
+    /// still the default and a second one is never written.
+    pub async fn ensure_default_calendar(&mut self) -> Result<Uuid, ClientError> {
+        let calendars = self.list_calendars().await?;
+        if calendars.iter().any(|(id, _)| *id == DEFAULT_CALENDAR_ID) {
+            return Ok(DEFAULT_CALENDAR_ID);
+        }
+        self.put_calendar(
+            DEFAULT_CALENDAR_ID,
+            DEFAULT_CALENDAR_NAME,
+            DEFAULT_CALENDAR_COLOR,
+        )
+        .await?;
+        Ok(DEFAULT_CALENDAR_ID)
     }
 
     pub async fn list_calendars(&mut self) -> Result<Vec<(Uuid, String)>, ClientError> {

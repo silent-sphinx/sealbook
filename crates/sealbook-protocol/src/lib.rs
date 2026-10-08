@@ -38,10 +38,19 @@ pub const MIN_PADDED_OBJECT_SIZE: usize = 256;
 pub const MAX_PADDED_OBJECT_SIZE: usize = 8 * 1024 * 1024;
 pub const DEFAULT_ADDRESS_BOOK_NAME: &str = "Default Address Book";
 pub const DEFAULT_NOTEBOOK_NAME: &str = "Default Notebook";
+pub const DEFAULT_CALENDAR_NAME: &str = "Default Calendar";
+
+/// Colour the default calendar is created with. Unlike a name, a calendar's
+/// colour is part of its payload, so the clients have to agree on one for the
+/// container they each create independently.
+pub const DEFAULT_CALENDAR_COLOR: &str = "#7aa2f7";
+
 /// Reserved container ids: 1 is the default address book, 2 the default
-/// notebook. A new feature takes the next free number rather than reusing one.
+/// notebook, 3 the default calendar. A new feature takes the next free number
+/// rather than reusing one.
 pub const DEFAULT_ADDRESS_BOOK_ID: Uuid = Uuid::from_u128(1);
 pub const DEFAULT_NOTEBOOK_ID: Uuid = Uuid::from_u128(2);
+pub const DEFAULT_CALENDAR_ID: Uuid = Uuid::from_u128(3);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ErrorBody {
@@ -943,6 +952,14 @@ mod tests {
         assert_eq!(
             DEFAULT_NOTEBOOK_ID.to_string(),
             "00000000-0000-0000-0000-000000000002"
+        );
+    }
+
+    #[test]
+    fn default_calendar_id_is_stable() {
+        assert_eq!(
+            DEFAULT_CALENDAR_ID.to_string(),
+            "00000000-0000-0000-0000-000000000003"
         );
     }
 

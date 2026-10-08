@@ -5215,6 +5215,85 @@ async fn an_approval_is_refused_once_the_roster_has_moved_on() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The default calendar is reserved by id, so it is created once and a rename
+/// does not produce a second one. An event lands in it without being told which
+/// calendar to use, which is the point: a new account can hold an event before
+/// the user has made a calendar.
+#[tokio::test]
+async fn the_default_calendar_is_created_once_and_keyed_by_id() {
+    let dir = std::env::temp_dir().join(format!("sealbook-calendar-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "calalice", "correct horse battery")
+        .await
+        .expect("register");
+
+    let default_id = client
+        .ensure_default_calendar()
+        .await
+        .expect("default calendar");
+    assert_eq!(default_id, sealbook_client::DEFAULT_CALENDAR_ID);
+
+    let calendars = client.list_calendars().await.expect("calendars");
+    assert_eq!(calendars.len(), 1);
+    assert!(
+        calendars[0].1.contains(sealbook_client::DEFAULT_CALENDAR_NAME),
+        "the default calendar carries its reserved name: {}",
+        calendars[0].1
+    );
+    assert!(
+        calendars[0].1.contains(sealbook_client::DEFAULT_CALENDAR_COLOR),
+        "and the colour every client creates it with: {}",
+        calendars[0].1
+    );
+
+    // A second ensure is a no-op rather than a second container.
+    assert_eq!(
+        client.ensure_default_calendar().await.expect("second"),
+        default_id
+    );
+    assert_eq!(client.list_calendars().await.expect("calendars").len(), 1);
+
+    // Renamed, it is still the default: the identity is the id, not the name.
+    client
+        .put_calendar(default_id, "Work", "#ff0000")
+        .await
+        .expect("rename");
+    assert_eq!(
+        client.ensure_default_calendar().await.expect("after rename"),
+        default_id
+    );
+    let calendars = client.list_calendars().await.expect("calendars");
+    assert_eq!(calendars.len(), 1);
+    assert!(calendars[0].1.contains("Work"));
+
+    // An event written without a calendar of its own is readable from the
+    // default one.
+    client
+        .put_calendar_event(
+            Uuid::new_v4(),
+            &serde_json::json!({
+                "@type": "CalendarEvent",
+                "version": "1.0",
+                "title": "Standup",
+                "start": "2026-10-07T09:00:00Z",
+                "calendarId": default_id.to_string(),
+            })
+            .to_string(),
+        )
+        .await
+        .expect("event");
+    let events = client.list_calendar_events().await.expect("events");
+    assert_eq!(events.len(), 1);
+    assert!(events[0].1.contains(&default_id.to_string()));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The server is told one content type for every object, so it cannot tell a
 /// contact from a calendar event from a note, and a tombstone does not say what
 /// kind of object it replaced. The real type is sealed inside the ciphertext.
