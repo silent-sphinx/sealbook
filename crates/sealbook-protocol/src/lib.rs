@@ -46,12 +46,16 @@ pub const DEFAULT_CALENDAR_NAME: &str = "Default Calendar";
 /// container they each create independently.
 pub const DEFAULT_CALENDAR_COLOR: &str = "#7aa2f7";
 
-/// Reserved container ids: 1 is the default address book, 2 the default
-/// notebook, 3 the default calendar. A new feature takes the next free number
-/// rather than reusing one.
+/// Reserved object ids: 1 is the default address book, 2 the default notebook,
+/// 3 the default calendar, 4 the account settings object. A new feature takes
+/// the next free number rather than reusing one: the settings object sat on 3
+/// in the web client before the default calendar existed, and the two writers
+/// then overwrote each other. Ids are listed here even when only one client
+/// writes the object, so the next one cannot pick a number that is taken.
 pub const DEFAULT_ADDRESS_BOOK_ID: Uuid = Uuid::from_u128(1);
 pub const DEFAULT_NOTEBOOK_ID: Uuid = Uuid::from_u128(2);
 pub const DEFAULT_CALENDAR_ID: Uuid = Uuid::from_u128(3);
+pub const ACCOUNT_SETTINGS_ID: Uuid = Uuid::from_u128(4);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ErrorBody {
@@ -961,6 +965,14 @@ mod tests {
         assert_eq!(
             DEFAULT_CALENDAR_ID.to_string(),
             "00000000-0000-0000-0000-000000000003"
+        );
+    }
+
+    #[test]
+    fn account_settings_id_is_stable() {
+        assert_eq!(
+            ACCOUNT_SETTINGS_ID.to_string(),
+            "00000000-0000-0000-0000-000000000004"
         );
     }
 
