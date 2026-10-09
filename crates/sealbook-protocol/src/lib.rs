@@ -1,14 +1,15 @@
 mod b64;
 pub mod envelope;
+pub mod version;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Wire protocol version, reported by `GET /health/crypto`.
-///
-/// Clients and servers must agree exactly. There has been one released protocol,
-/// so a client that sees anything else is talking to a build it does not know.
-pub const PROTOCOL_VERSION: &str = "sealbook-v1";
+pub use version::{
+    merge_payload, payload_schema_readable, speaks_protocol, ProtocolReport,
+    PAYLOAD_SCHEMA_VERSION, PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS,
+};
+
 pub const SEALED_CONTENT_TYPE: &str = "application/vnd.sealbook.sealed";
 
 pub const JSCONTACT_CONTENT_TYPE: &str = "application/jscontact+json";

@@ -43,6 +43,11 @@ pub enum ClientError {
     NonUtf8Object(uuid::Uuid),
     #[error("object {0} has an envelope this build cannot read")]
     Envelope(uuid::Uuid),
+    #[error(
+        "server speaks protocol {0}, this build speaks {expected}; update whichever is older",
+        expected = sealbook_protocol::PROTOCOL_VERSION
+    )]
+    ProtocolVersion(String),
     #[error("pairing is still waiting")]
     PairPending,
     /// Pages of a sync come from separate transactions, so a write landing

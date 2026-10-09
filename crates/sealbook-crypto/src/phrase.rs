@@ -14,7 +14,7 @@ use crate::sign::{signing_from_seeds, DeviceSigningPublic, DualSignature, SIGNIN
 
 pub const PHRASE_CIPHERSUITE: &str = "aead-phrase-hkdf-sha256";
 /// Identifies the recovery-proof key scheme carried in `phrase_scheme`.
-pub const PHRASE_SCHEME: &str = "hybrid-mldsa65-ed25519-v2";
+pub const PHRASE_SCHEME: &str = "hybrid-mldsa65-ed25519-v1";
 pub const PHRASE_ENTROPY_LEN: usize = 32;
 pub const PHRASE_LOOKUP_ID_LEN: usize = 32;
 const WRAP_INFO: &[u8] = b"sealbook-phrase-wrap-v1";

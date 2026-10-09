@@ -416,11 +416,24 @@ pub fn sealed_content_type() -> String {
     SEALED_CONTENT_TYPE.to_string()
 }
 
+/// The protocol generation and payload schema this build speaks.
+///
+/// Exported so `sealbook-web` can check its own copies of these strings against
+/// the Rust ones in a test, rather than the two drifting unnoticed.
+#[wasm_bindgen]
+pub fn protocol_version() -> String {
+    sealbook_protocol::PROTOCOL_VERSION.to_string()
+}
+
+#[wasm_bindgen]
+pub fn payload_schema_version() -> String {
+    sealbook_protocol::PAYLOAD_SCHEMA_VERSION.to_string()
+}
+
 #[derive(Serialize)]
 struct OpenedOut {
-    sealed: bool,
     #[serde(rename = "contentType")]
-    content_type: Option<String>,
+    content_type: String,
     tombstone: bool,
     payload: String,
 }
@@ -470,16 +483,9 @@ pub fn open_object(
             tombstone,
             payload,
         } => OpenedOut {
-            sealed: true,
-            content_type: Some(content_type),
+            content_type,
             tombstone,
             payload: text(payload)?,
-        },
-        Unsealed::Legacy => OpenedOut {
-            sealed: false,
-            content_type: None,
-            tombstone: false,
-            payload: text(plain)?,
         },
         Unsealed::Unreadable => {
             return Err(JsError::new(
@@ -499,9 +505,7 @@ fn text(bytes: Vec<u8>) -> Result<String, JsError> {
 ///
 /// The plaintext never becomes a JavaScript string: a rotation that decoded it
 /// as text would rewrite any payload that is not valid UTF-8, and a rotation
-/// touches the whole vault at once. `served_content_type` is only used for an
-/// object stored before the envelope existed, which is sealed under that type
-/// here so the collection stops depending on the server's label.
+/// touches the whole vault at once.
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
 pub fn reseal_object(
@@ -512,7 +516,6 @@ pub fn reseal_object(
     nonce_b64: &str,
     ciphertext_b64: &str,
     padded_size: usize,
-    served_content_type: &str,
 ) -> Result<String, JsError> {
     let plain = decrypt_contact_bytes(
         old_ck_b64,
@@ -524,7 +527,6 @@ pub fn reseal_object(
     )?;
     let stored = match open_envelope(&plain) {
         Unsealed::Envelope { .. } => plain,
-        Unsealed::Legacy => seal_envelope(served_content_type, &plain),
         Unsealed::Unreadable => {
             return Err(JsError::new(
                 "object has an envelope this build cannot read",

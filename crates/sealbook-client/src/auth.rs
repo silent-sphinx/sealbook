@@ -31,6 +31,7 @@ impl SealbookClient {
         username: &str,
         password: &str,
     ) -> Result<String, ClientError> {
+        self.check_protocol(server).await?;
         let (req, reg_state) = client_register_start(password.as_bytes())?;
         let start: sealbook_protocol::RegisterStartResponse = self
             .post_json(
@@ -212,6 +213,7 @@ impl SealbookClient {
                 state.device_id,
             )
         };
+        self.check_protocol(&server).await?;
         let (hpke_sk, secrets) = {
             let state = self.state.as_ref().ok_or(ClientError::NoState)?;
             (
@@ -341,6 +343,7 @@ impl SealbookClient {
         phrase: &str,
         new_password: &str,
     ) -> Result<String, ClientError> {
+        self.check_protocol(server).await?;
         let password = new_password;
         let entropy = entropy_from_phrase(phrase)?;
         // Begin registering the replacement password, so the server can answer

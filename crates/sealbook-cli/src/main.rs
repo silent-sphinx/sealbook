@@ -16,8 +16,9 @@ use rand::RngCore;
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::CertificateDer;
 use sealbook_client::{
-    LocalState, SealbookClient, ADDRESS_BOOK_ID_PROP, DEFAULT_ADDRESS_BOOK_ID,
+    merge_payload, LocalState, SealbookClient, ADDRESS_BOOK_ID_PROP, DEFAULT_ADDRESS_BOOK_ID,
     DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_CALENDAR_COLOR, DEFAULT_CALENDAR_ID, DEFAULT_NOTEBOOK_NAME,
+    PAYLOAD_SCHEMA_VERSION,
 };
 use sha2::{Digest, Sha256};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
@@ -349,7 +350,7 @@ async fn main() -> Result<()> {
                 let books = client.list_address_books().await.context("books")?;
                 let book_id =
                     resolve_book(&books, book.as_deref())?.unwrap_or(DEFAULT_ADDRESS_BOOK_ID);
-                let contact = jscontact(&name, email.as_deref(), book_id);
+                let contact = jscontact(&name, email.as_deref(), book_id, None);
                 let id = Uuid::new_v4();
                 let revision = client.put_contact(id, &contact).await.context("put")?;
                 println!("stored encrypted contact {id} at revision {revision}");
@@ -374,7 +375,11 @@ async fn main() -> Result<()> {
                 let books = client.list_address_books().await.context("books")?;
                 let book_id =
                     resolve_book(&books, book.as_deref())?.unwrap_or(DEFAULT_ADDRESS_BOOK_ID);
-                let contact = jscontact(&name, email.as_deref(), book_id);
+                // Merged onto the stored card, so the fields this command does
+                // not take are kept. Rebuilding from the three it does took a
+                // card with a job, an address and a photo down to a name.
+                let existing = find_contact(&mut client, id).await?;
+                let contact = jscontact(&name, email.as_deref(), book_id, Some(&existing));
                 let revision = client.put_contact(id, &contact).await.context("update")?;
                 println!("updated encrypted contact {id} at revision {revision}");
                 save_state(&cli.state, client.state.as_ref().unwrap())?;
@@ -516,7 +521,7 @@ async fn main() -> Result<()> {
                     calendar,
                 } => {
                     let event = serde_json::json!({
-                        "@type": "CalendarEvent", "version": "1.0", "title": title,
+                        "@type": "CalendarEvent", "version": PAYLOAD_SCHEMA_VERSION, "title": title,
                         "start": start, "end": end, "notes": notes,
                         "calendarId": calendar.unwrap_or(DEFAULT_CALENDAR_ID),
                     });
@@ -587,7 +592,13 @@ async fn main() -> Result<()> {
                 } => {
                     let body = read_note_body(body, file)?;
                     let id = Uuid::new_v4();
-                    let note = note_json(&title, &body, notebook.unwrap_or(default_notebook), None);
+                    let note = note_json(
+                        &title,
+                        &body,
+                        notebook.unwrap_or(default_notebook),
+                        None,
+                        None,
+                    );
                     let revision = client.put_note(id, &note).await.context("add note")?;
                     println!("stored encrypted note {id} at revision {revision}");
                 }
@@ -604,11 +615,15 @@ async fn main() -> Result<()> {
                     // original forward loses it.
                     let existing = find_note(&mut client, id).await?;
                     let created = note_created_at(&existing);
+                    // Merged onto the stored note, so a field this build does
+                    // not write — `pinned`, `parentId`, anything newer — survives
+                    // an edit made from here rather than being dropped.
                     let note = note_json(
                         &title,
                         &body,
                         notebook.unwrap_or_else(|| note_notebook_id(&existing, default_notebook)),
                         created.as_deref(),
+                        Some(&existing),
                     );
                     let revision = client.put_note(id, &note).await.context("update note")?;
                     println!("updated encrypted note {id} at revision {revision}");
@@ -704,6 +719,17 @@ async fn sign_in(client: &mut SealbookClient, password: &str) -> Result<()> {
     }
 }
 
+async fn find_contact(client: &mut SealbookClient, id: Uuid) -> Result<String> {
+    client
+        .list_contacts()
+        .await
+        .context("contacts")?
+        .into_iter()
+        .find(|(candidate, _)| *candidate == id)
+        .map(|(_, json)| json)
+        .with_context(|| format!("no contact with id {id}"))
+}
+
 async fn find_note(client: &mut SealbookClient, id: Uuid) -> Result<String> {
     client
         .list_notes()
@@ -715,19 +741,44 @@ async fn find_note(client: &mut SealbookClient, id: Uuid) -> Result<String> {
         .with_context(|| format!("no note with id {id}"))
 }
 
-fn note_json(title: &str, body: &str, notebook_id: Uuid, created_at: Option<&str>) -> String {
+/// Every key this CLI writes for a note.
+///
+/// Shorter than the web client's list: `pinned` and `parentId` are the web's to
+/// manage, and leaving them out of this set is what carries them through an edit
+/// made here.
+const NOTE_KEYS: &[&str] = &[
+    "@type",
+    "version",
+    "title",
+    "body",
+    "notebookId",
+    "createdAt",
+    "updatedAt",
+];
+
+fn note_json(
+    title: &str,
+    body: &str,
+    notebook_id: Uuid,
+    created_at: Option<&str>,
+    previous: Option<&str>,
+) -> String {
     let now = OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .unwrap_or_default();
-    serde_json::json!({
-        "@type": "Note",
-        "version": "1.0",
-        "title": title,
-        "body": body,
-        "notebookId": notebook_id.to_string(),
-        "createdAt": created_at.unwrap_or(&now),
-        "updatedAt": now,
-    })
+    merge_payload(
+        previous,
+        serde_json::json!({
+            "@type": "Note",
+            "version": PAYLOAD_SCHEMA_VERSION,
+            "title": title,
+            "body": body,
+            "notebookId": notebook_id.to_string(),
+            "createdAt": created_at.unwrap_or(&now),
+            "updatedAt": now,
+        }),
+        NOTE_KEYS,
+    )
     .to_string()
 }
 
@@ -763,17 +814,24 @@ fn note_notebook_id(json: &str, fallback: Uuid) -> Uuid {
         .unwrap_or(fallback)
 }
 
-fn jscontact(name: &str, email: Option<&str>, book_id: Uuid) -> String {
+/// Every key this CLI writes for a card.
+///
+/// Far shorter than the web client's: everything else a card can hold is the
+/// web's to manage, and leaving it out of this set is what stops an update from
+/// here flattening a card down to the three fields this command takes.
+const CARD_KEYS: &[&str] = &["@type", "version", "name", ADDRESS_BOOK_ID_PROP, "emails"];
+
+fn jscontact(name: &str, email: Option<&str>, book_id: Uuid, previous: Option<&str>) -> String {
     let mut card = serde_json::json!({
         "@type": "Card",
-        "version": "1.0",
+        "version": PAYLOAD_SCHEMA_VERSION,
         "name": { "full": name },
     });
     card[ADDRESS_BOOK_ID_PROP] = serde_json::Value::String(book_id.to_string());
     if let Some(email) = email {
         card["emails"] = serde_json::json!({ "e1": { "address": email } });
     }
-    card.to_string()
+    merge_payload(previous, card, CARD_KEYS).to_string()
 }
 
 fn contact_book_id(json: &str) -> Uuid {
@@ -1031,7 +1089,13 @@ mod tests {
     #[test]
     fn a_note_payload_carries_every_field_exactly_once() {
         let notebook = Uuid::from_u128(2);
-        let json = note_json("  Weekly plan  ", "# Monday\n\n- ship\n", notebook, None);
+        let json = note_json(
+            "  Weekly plan  ",
+            "# Monday\n\n- ship\n",
+            notebook,
+            None,
+            None,
+        );
         let value: serde_json::Value = serde_json::from_str(&json).expect("valid json");
         assert_eq!(value["@type"], "Note");
         assert_eq!(value["version"], "1.0");
@@ -1047,11 +1111,72 @@ mod tests {
     #[test]
     fn an_update_keeps_the_original_creation_time() {
         let created = "2020-05-04T03:02:01Z";
-        let json = note_json("t", "b", Uuid::from_u128(2), Some(created));
+        let json = note_json("t", "b", Uuid::from_u128(2), Some(created), None);
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(value["createdAt"], created);
         assert_ne!(value["updatedAt"], created);
         assert_eq!(note_created_at(&json).as_deref(), Some(created));
+    }
+
+    #[test]
+    fn an_update_keeps_the_fields_this_cli_does_not_write() {
+        // `pinned` and `parentId` are the web client's, and a newer build may add
+        // more. Rebuilding the payload from the fields this command takes used to
+        // drop all of them, which is data loss with nothing to show for it.
+        let stored = serde_json::json!({
+            "@type": "Note",
+            "version": "1.0",
+            "title": "old",
+            "body": "old body",
+            "notebookId": Uuid::from_u128(2).to_string(),
+            "createdAt": "2020-05-04T03:02:01Z",
+            "updatedAt": "2020-05-04T03:02:01Z",
+            "pinned": true,
+            "parentId": Uuid::from_u128(9).to_string(),
+            "tableOfContents": true,
+        })
+        .to_string();
+
+        let json = note_json(
+            "new",
+            "new body",
+            Uuid::from_u128(2),
+            Some("2020-05-04T03:02:01Z"),
+            Some(&stored),
+        );
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["title"], "new");
+        assert_eq!(value["body"], "new body");
+        assert_eq!(value["pinned"], true);
+        assert_eq!(value["parentId"], Uuid::from_u128(9).to_string());
+        assert_eq!(value["tableOfContents"], true);
+    }
+
+    #[test]
+    fn a_contact_update_keeps_the_fields_this_cli_does_not_write() {
+        let stored = serde_json::json!({
+            "@type": "Card",
+            "version": "1.0",
+            "name": { "full": "Ada Lovelace" },
+            "titles": { "t1": { "name": "Mathematician" } },
+            "media": { "avatar": { "kind": "photo", "uri": "data:," } },
+            "sealbook:profile": { "note": "kept" },
+        })
+        .to_string();
+
+        let card = jscontact(
+            "Ada King",
+            Some("ada@example.com"),
+            DEFAULT_ADDRESS_BOOK_ID,
+            Some(&stored),
+        );
+        let value: serde_json::Value = serde_json::from_str(&card).unwrap();
+        assert_eq!(value["name"]["full"], "Ada King");
+        assert_eq!(value["emails"]["e1"]["address"], "ada@example.com");
+        // Everything this command cannot express survives it.
+        assert_eq!(value["titles"]["t1"]["name"], "Mathematician");
+        assert_eq!(value["media"]["avatar"]["kind"], "photo");
+        assert_eq!(value["sealbook:profile"]["note"], "kept");
     }
 
     #[test]

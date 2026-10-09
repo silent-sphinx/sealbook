@@ -219,8 +219,8 @@ fn validate_encrypted(
     // tombstone's type would say what kind of object was deleted.
     //
     // This also gates rotation, via `validate_rotated_object`. A rotation re-sends
-    // the whole object set, and it seals a type into anything still stored without
-    // one, so it has no reason to send another label either.
+    // the whole object set, already sealed, so it has no reason to send another
+    // label either.
     if content_type != SEALED_CONTENT_TYPE {
         return Err(err(StatusCode::BAD_REQUEST, "invalid content type"));
     }

@@ -10,11 +10,15 @@
 //! before it can decrypt, so an AAD-bound type would have to stay in the clear.
 //! Inside the sealed plaintext the AEAD authenticates it just as firmly and the
 //! server learns nothing.
+//!
+//! [`SEALED_CONTENT_TYPE`]: crate::SEALED_CONTENT_TYPE
 
-use serde::Deserialize;
-
-/// The envelope version clients write.
-pub const ENVELOPE_VERSION: u8 = 2;
+/// The envelope version clients write, and the only one they read.
+///
+/// A future version adds an arm to [`open_envelope`] rather than replacing one:
+/// stored objects carry the version they were written under until something
+/// rewrites them.
+pub const ENVELOPE_VERSION: u8 = 1;
 
 /// What a stored plaintext turned out to be.
 pub enum Unsealed {
@@ -23,11 +27,11 @@ pub enum Unsealed {
         tombstone: bool,
         payload: Vec<u8>,
     },
-    /// A raw payload from before the envelope existed.
-    Legacy,
     /// An envelope this build cannot read, by version or because it is damaged.
-    /// Never treated as legacy: the type inside it is the authenticated one, and
-    /// falling back to the server's label would be trusting the server instead.
+    ///
+    /// Never resolved by falling back to the content type the server serves: the
+    /// type inside the envelope is the authenticated one, and preferring the
+    /// server's label would hand it the choice of how a payload is parsed.
     Unreadable,
 }
 
@@ -55,34 +59,16 @@ fn seal_envelope_inner(content_type: &str, payload: &[u8], tombstone: bool) -> V
     out
 }
 
-#[derive(Deserialize)]
-struct EnvelopeV1 {
-    version: u8,
-    #[serde(rename = "contentType")]
-    content_type: String,
-    #[serde(default)]
-    tombstone: bool,
-    payload: String,
-}
-
 pub fn open_envelope(plain: &[u8]) -> Unsealed {
-    if plain.first() == Some(&ENVELOPE_VERSION) {
-        return open_v2(plain);
-    }
-    match serde_json::from_slice::<EnvelopeV1>(plain) {
-        Ok(envelope) if envelope.version == 1 => Unsealed::Envelope {
-            content_type: envelope.content_type,
-            tombstone: envelope.tombstone,
-            payload: envelope.payload.into_bytes(),
-        },
-        // A JSON object that declares a version this build does not know is an
-        // envelope all the same, so its payload is not readable here.
-        Ok(_) => Unsealed::Unreadable,
-        Err(_) => Unsealed::Legacy,
+    // The leading byte is the only dispatch: a version this build does not know
+    // is unreadable, not guessed at.
+    match plain.first() {
+        Some(&ENVELOPE_VERSION) => open_v1(plain),
+        _ => Unsealed::Unreadable,
     }
 }
 
-fn open_v2(plain: &[u8]) -> Unsealed {
+fn open_v1(plain: &[u8]) -> Unsealed {
     if plain.len() < 4 {
         return Unsealed::Unreadable;
     }
@@ -121,7 +107,7 @@ mod tests {
     }
 
     #[test]
-    fn a_v2_envelope_round_trips() {
+    fn an_envelope_round_trips() {
         let sealed = seal_envelope(NOTE, br#"{"@type":"Note"}"#);
         assert_eq!(
             opened(&sealed),
@@ -130,45 +116,50 @@ mod tests {
     }
 
     #[test]
-    fn a_v2_payload_that_is_not_text_survives() {
+    fn a_payload_that_is_not_text_survives() {
         let payload = vec![0x00, 0xff, 0xfe, 0x7b];
         let sealed = seal_envelope(NOTE, &payload);
         assert_eq!(opened(&sealed).2, payload);
     }
 
     #[test]
-    fn a_v2_tombstone_is_flagged() {
+    fn a_tombstone_is_flagged() {
         let sealed = seal_tombstone_envelope(NOTE);
         assert_eq!(opened(&sealed), (NOTE.to_string(), true, Vec::new()));
     }
 
     #[test]
-    fn a_web_written_v1_envelope_still_opens() {
-        let plain = br#"{"version":1,"contentType":"application/sealbook.note+json","tombstone":false,"revision":7,"payload":"hi"}"#;
-        assert_eq!(opened(plain), (NOTE.to_string(), false, b"hi".to_vec()));
-    }
-
-    #[test]
-    fn a_raw_payload_is_legacy() {
+    fn a_raw_payload_is_unreadable() {
+        // Not an envelope at all: without a version byte there is nothing to
+        // authenticate the type, so it is refused rather than read under the
+        // type the server happens to serve.
         assert!(matches!(
             open_envelope(br#"{"@type":"Card"}"#),
-            Unsealed::Legacy
+            Unsealed::Unreadable
+        ));
+        assert!(matches!(open_envelope(&[]), Unsealed::Unreadable));
+    }
+
+    #[test]
+    fn an_envelope_version_this_build_does_not_know_is_unreadable() {
+        assert!(matches!(
+            open_envelope(&[ENVELOPE_VERSION + 1, 0, 0, 0]),
+            Unsealed::Unreadable
         ));
     }
 
     #[test]
-    fn an_envelope_version_this_build_does_not_know_is_not_legacy() {
+    fn a_truncated_or_overlong_envelope_is_unreadable() {
         assert!(matches!(
-            open_envelope(br#"{"version":9,"contentType":"x","tombstone":false,"payload":"hi"}"#),
-            Unsealed::Unreadable
-        ));
-        assert!(matches!(open_envelope(&[2u8, 0, 0]), Unsealed::Unreadable));
-        assert!(matches!(
-            open_envelope(&[2u8, 0, 0xff, 0xff, b'x']),
+            open_envelope(&[ENVELOPE_VERSION, 0, 0]),
             Unsealed::Unreadable
         ));
         assert!(matches!(
-            open_envelope(&[2u8, 0, 0, 1, 0xff]),
+            open_envelope(&[ENVELOPE_VERSION, 0, 0xff, 0xff, b'x']),
+            Unsealed::Unreadable
+        ));
+        assert!(matches!(
+            open_envelope(&[ENVELOPE_VERSION, 0, 0, 1, 0xff]),
             Unsealed::Unreadable
         ));
     }

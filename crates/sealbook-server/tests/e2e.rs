@@ -5241,12 +5241,16 @@ async fn the_default_calendar_is_created_once_and_keyed_by_id() {
     let calendars = client.list_calendars().await.expect("calendars");
     assert_eq!(calendars.len(), 1);
     assert!(
-        calendars[0].1.contains(sealbook_client::DEFAULT_CALENDAR_NAME),
+        calendars[0]
+            .1
+            .contains(sealbook_client::DEFAULT_CALENDAR_NAME),
         "the default calendar carries its reserved name: {}",
         calendars[0].1
     );
     assert!(
-        calendars[0].1.contains(sealbook_client::DEFAULT_CALENDAR_COLOR),
+        calendars[0]
+            .1
+            .contains(sealbook_client::DEFAULT_CALENDAR_COLOR),
         "and the colour every client creates it with: {}",
         calendars[0].1
     );
@@ -5264,7 +5268,10 @@ async fn the_default_calendar_is_created_once_and_keyed_by_id() {
         .await
         .expect("rename");
     assert_eq!(
-        client.ensure_default_calendar().await.expect("after rename"),
+        client
+            .ensure_default_calendar()
+            .await
+            .expect("after rename"),
         default_id
     );
     let calendars = client.list_calendars().await.expect("calendars");
@@ -6493,4 +6500,53 @@ async fn the_root_refuses_a_host_that_is_not_a_host() {
     assert!(!body.contains("<script"));
     assert!(!body.contains("Server address"));
     assert!(body.contains("Server running"));
+}
+
+/// A server reporting a protocol generation this build does not know is refused
+/// before any account material is sent.
+#[tokio::test]
+async fn a_server_speaking_another_protocol_is_refused_up_front() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    let reached = Arc::new(AtomicUsize::new(0));
+    let counted = reached.clone();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let fake = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        let app = axum::Router::new().route(
+            "/health/crypto",
+            axum::routing::get(move || {
+                let counted = counted.clone();
+                async move {
+                    counted.fetch_add(1, Ordering::SeqCst);
+                    axum::Json(serde_json::json!({ "protocol": "sealbook-v99" }))
+                }
+            }),
+        );
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let mut client = SealbookClient::plaintext_http();
+    let error = client
+        .register(&fake, "ada", "correct horse battery staple")
+        .await
+        .expect_err("a protocol this build does not speak must not be registered against");
+    match error {
+        sealbook_client::ClientError::ProtocolVersion(reported) => {
+            assert_eq!(reported, "sealbook-v99");
+            // Named in the message, so the person reading it knows which side to
+            // update rather than seeing a decode failure from some later field.
+            let shown = sealbook_client::ClientError::ProtocolVersion(reported).to_string();
+            assert!(shown.contains("sealbook-v99"), "got: {shown}");
+            assert!(
+                shown.contains(sealbook_protocol::PROTOCOL_VERSION),
+                "got: {shown}"
+            );
+        }
+        other => panic!("expected a protocol mismatch, got: {other}"),
+    }
+    // The stub serves nothing else: had the check come later, registration would
+    // have 404'd on an OPAQUE route instead, after sending a username.
+    assert_eq!(reached.load(Ordering::SeqCst), 1);
 }

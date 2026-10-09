@@ -10,14 +10,14 @@ use sealbook_crypto::{
     generate_kdf_salt, generate_phrase, key_rotation_transcript, key_wraps_digest,
     login_start_transcript, login_transcript, manifest_digest, manifest_transcript, object_aad,
     open_login_challenge, pair_confirmation, pair_grant_transcript, password_change_payload,
-    phrase_lookup_id,
-    phrase_recovery_public, phrase_recovery_transcript, recovery_password_payload,
-    rotated_objects_digest, rotation_recovery_payload, sign, sign_phrase_recovery,
-    unwrap_collection_key, unwrap_for_device, unwrap_for_phrase, username_change_payload, verify,
-    wrap_collection_key, wrap_for_device, wrap_for_phrase, CollectionKey, DeviceHpkePublic,
-    DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningPublic, DeviceSigningSecrets, DualSignature,
-    EncryptedObject, ManifestDigestEntry, ObjectDigestEntry, RecoveryWrap, WrapDigestEntry,
-    PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
+    phrase_lookup_id, phrase_recovery_public, phrase_recovery_transcript,
+    recovery_password_payload, rotated_objects_digest, rotation_recovery_payload, sign,
+    sign_phrase_recovery, unwrap_collection_key, unwrap_for_device, unwrap_for_phrase,
+    username_change_payload, verify, wrap_collection_key, wrap_for_device, wrap_for_phrase,
+    CollectionKey, DeviceHpkePublic, DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningPublic,
+    DeviceSigningSecrets, DualSignature, EncryptedObject, ManifestDigestEntry, ObjectDigestEntry,
+    RecoveryWrap, WrapDigestEntry, PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE,
+    XWING_CIPHERSUITE,
 };
 use sealbook_crypto::{phrase_recovery_keys, RosterPin};
 use sealbook_protocol::envelope::{open_envelope, seal_envelope, Unsealed};
@@ -471,11 +471,9 @@ pub fn sealed_content_type() -> String {
 
 #[derive(uniffi::Record)]
 pub struct OpenedObject {
-    /// False for an object stored before the envelope existed. Its type is only
-    /// the label the server serves, which nothing authenticates, and the next
-    /// rotation seals a type into it.
-    pub sealed: bool,
-    pub content_type: Option<String>,
+    /// Authenticated by the AEAD along with the payload, so it is the type a
+    /// caller parses by rather than the label the server serves.
+    pub content_type: String,
     pub tombstone: bool,
     pub payload: String,
 }
@@ -528,16 +526,9 @@ pub fn open_object(
             tombstone,
             payload,
         } => Ok(OpenedObject {
-            sealed: true,
-            content_type: Some(content_type),
+            content_type,
             tombstone,
             payload: text(payload)?,
-        }),
-        Unsealed::Legacy => Ok(OpenedObject {
-            sealed: false,
-            content_type: None,
-            tombstone: false,
-            payload: text(plain)?,
         }),
         Unsealed::Unreadable => Err(CryptoError::General {
             msg: "object has an envelope this build cannot read".into(),
@@ -548,6 +539,49 @@ pub fn open_object(
 fn text(bytes: Vec<u8>) -> Result<String, CryptoError> {
     String::from_utf8(bytes).map_err(|_| CryptoError::General {
         msg: "object payload is not valid UTF-8".into(),
+    })
+}
+
+/// Re-encrypts one stored object from the old collection key to the new one,
+/// for a rotation.
+///
+/// The plaintext never becomes a Kotlin string: a rotation that decoded it as
+/// text would rewrite any payload that is not valid UTF-8, and a rotation
+/// touches the whole vault at once.
+#[uniffi::export]
+pub fn reseal_object(
+    old_ck_b64: String,
+    new_ck_b64: String,
+    object_id: String,
+    collection_id: String,
+    nonce_b64: String,
+    ciphertext_b64: String,
+    padded_size: u64,
+) -> Result<EncryptedResult, CryptoError> {
+    let plain = decrypt_object_bytes(
+        &old_ck_b64,
+        &object_id,
+        &collection_id,
+        &nonce_b64,
+        &ciphertext_b64,
+        padded_size,
+    )?;
+    let stored = match open_envelope(&plain) {
+        Unsealed::Envelope { .. } => plain,
+        Unsealed::Unreadable => {
+            return Err(CryptoError::General {
+                msg: "object has an envelope this build cannot read".into(),
+            })
+        }
+    };
+    let oid = parse_uuid(&object_id)?;
+    let cid = parse_uuid(&collection_id)?;
+    let aad = object_aad(oid.as_bytes(), cid.as_bytes());
+    let enc = encrypt_object(&ck_from_b64(&new_ck_b64)?, &stored, &aad)?;
+    Ok(EncryptedResult {
+        nonce: b64(&enc.nonce),
+        ciphertext: b64(&enc.ciphertext),
+        padded_size: enc.padded_size as u64,
     })
 }
 

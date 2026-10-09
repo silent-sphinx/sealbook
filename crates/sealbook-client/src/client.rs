@@ -4,7 +4,7 @@
 use rustls::pki_types::CertificateDer;
 
 use sealbook_crypto::CollectionKey;
-use sealbook_protocol::DevicePublicKeys;
+use sealbook_protocol::{speaks_protocol, DevicePublicKeys, ProtocolReport};
 
 use crate::tls::https_client;
 use crate::{ClientError, LocalState};
@@ -80,6 +80,22 @@ impl SealbookClient {
 
     pub fn collection_key(&self) -> Option<&CollectionKey> {
         self.collection_key.as_ref()
+    }
+
+    /// Refuses a server speaking a protocol generation this build does not know.
+    ///
+    /// Called before the first exchange that carries real material, so that a
+    /// version mismatch is reported as itself. Without it the two builds get as
+    /// far as some field one of them encodes differently, and the failure
+    /// surfaces as whatever that field happens to be.
+    pub async fn check_protocol(&self, server: &str) -> Result<(), ClientError> {
+        let report: ProtocolReport = self
+            .get_json(&format!("{server}/health/crypto"), None)
+            .await?;
+        if !speaks_protocol(&report.protocol) {
+            return Err(ClientError::ProtocolVersion(report.protocol));
+        }
+        Ok(())
     }
     pub(crate) async fn post_json<T: serde::Serialize, R: serde::de::DeserializeOwned>(
         &self,

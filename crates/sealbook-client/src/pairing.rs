@@ -21,6 +21,7 @@ impl SealbookClient {
         server: &str,
         username: &str,
     ) -> Result<(String, String), ClientError> {
+        self.check_protocol(server).await?;
         let (hpke_sk, hpke_pk) = generate_device_hpke()?;
         let (sign_sk, sign_pk) = generate_device_signing()?;
         let device_id = Uuid::new_v4();

@@ -459,15 +459,10 @@ impl SealbookClient {
             };
             let aad = object_aad(obj.id.as_bytes(), collection_id.as_bytes());
             let plain = decrypt_object(key, &encrypted, &aad)?;
-            // A rotation is where a vault stops depending on the server's label.
-            // An object written before the envelope existed is wrapped in one
-            // here, from the only type on offer for it, so what goes back under
-            // the new key carries its own type. After one rotation nothing in
-            // the collection needs the label, and the server is told none.
-            let unsealed = open_envelope(&plain);
-            let stored = match unsealed {
+            // Re-encrypted as it stands: the envelope already carries the type,
+            // so a rotation never has to consult the label the server serves.
+            let stored = match open_envelope(&plain) {
                 Unsealed::Envelope { .. } => plain,
-                Unsealed::Legacy => seal_envelope(&obj.content_type, &plain),
                 Unsealed::Unreadable => return Err(ClientError::Envelope(obj.id)),
             };
             contents.live.push(StoredObject { id: obj.id, stored });
@@ -503,8 +498,7 @@ impl SealbookClient {
             };
             let aad = object_aad(obj.id.as_bytes(), collection_id.as_bytes());
             let plain = decrypt_object(key, &encrypted, &aad)?;
-            let unsealed = open_envelope(&plain);
-            let (content_type, plaintext) = match unsealed {
+            let (content_type, plaintext) = match open_envelope(&plain) {
                 // A sealed tombstone, which `sealbook-web` writes: a row with a
                 // body but nothing to read.
                 Unsealed::Envelope {
@@ -515,10 +509,6 @@ impl SealbookClient {
                     payload,
                     ..
                 } => (content_type, payload),
-                // Written before the envelope existed, so the server's label is
-                // the only type on offer and nothing authenticates it. The next
-                // rotation seals it in and this stops being reachable.
-                Unsealed::Legacy => (obj.content_type, plain),
                 Unsealed::Unreadable => return Err(ClientError::Envelope(obj.id)),
             };
             out.push(PlainObject {
