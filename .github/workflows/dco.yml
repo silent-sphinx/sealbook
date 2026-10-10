@@ -1,0 +1,44 @@
+name: DCO
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# Every commit in a pull request carries a `Signed-off-by` line, which is how a
+# contributor certifies the Developer Certificate of Origin. See CONTRIBUTING.md.
+jobs:
+  sign-off:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The merge commit GitHub synthesises carries no sign-off of its own,
+          # so the branch's own commits are what gets read. The whole history is
+          # needed to walk from the base to the head.
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Every commit carries a sign-off
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          missing=0
+          # Merges are skipped: a contributor merging the default branch back in
+          # did not author the result.
+          for sha in $(git rev-list --no-merges "$BASE".."$HEAD"); do
+            if git show -s --format=%B "$sha" \
+              | grep -qiE '^Signed-off-by: .+ <[^>]+@[^>]+>[[:space:]]*$'; then
+              continue
+            fi
+            echo "::error::no Signed-off-by line: $(git show -s --format='%h %s' "$sha")"
+            missing=1
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo ""
+            echo "Add one to the last commit with:  git commit --amend -s --no-edit"
+            echo "or to the whole branch with:      git rebase --signoff $BASE"
+            exit 1
+          fi
+          echo "every commit is signed off"
