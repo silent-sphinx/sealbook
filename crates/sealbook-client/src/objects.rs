@@ -62,6 +62,14 @@ struct PlainObject {
     plaintext: Vec<u8>,
 }
 
+/// One object as an export sees it: its id, the content type its envelope
+/// carries, and its plaintext payload.
+pub struct ExportedObject {
+    pub id: Uuid,
+    pub content_type: String,
+    pub payload: String,
+}
+
 /// The distinct, sorted ids of a batch, refusing one the manifest could not
 /// describe: it holds one entry per id, and it is signed once for the whole
 /// batch.
@@ -317,6 +325,27 @@ impl SealbookClient {
                 out.push((obj.id, obj.into_text()?));
             }
         }
+        Ok(out)
+    }
+
+    /// Every live object in the collection, whatever its content type.
+    ///
+    /// The typed `list_*` helpers each filter to one content type and so cannot
+    /// answer "all of it": an object written by a newer client, or by a feature
+    /// this build does not have, belongs in an export of the account even though
+    /// nothing here can read it. Sorted by content type then id, so an export
+    /// written twice from the same vault is the same bytes.
+    pub async fn export_objects(&mut self) -> Result<Vec<ExportedObject>, ClientError> {
+        let mut out = Vec::new();
+        for obj in self.list_objects().await? {
+            let content_type = obj.content_type.clone();
+            out.push(ExportedObject {
+                id: obj.id,
+                content_type,
+                payload: obj.into_text()?,
+            });
+        }
+        out.sort_by(|a, b| a.content_type.cmp(&b.content_type).then(a.id.cmp(&b.id)));
         Ok(out)
     }
 

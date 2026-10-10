@@ -16,7 +16,8 @@ use rand::RngCore;
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::CertificateDer;
 use sealbook_client::{
-    merge_payload, LocalState, SealbookClient, ADDRESS_BOOK_ID_PROP, DEFAULT_ADDRESS_BOOK_ID,
+    merge_payload, ExportedObject, LocalState, SealbookClient, ACCOUNT_EXPORT_TYPE,
+    ACCOUNT_EXPORT_VERSION, ADDRESS_BOOK_ID_PROP, DEFAULT_ADDRESS_BOOK_ID,
     DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_CALENDAR_COLOR, DEFAULT_CALENDAR_ID, DEFAULT_NOTEBOOK_NAME,
     PAYLOAD_SCHEMA_VERSION,
 };
@@ -80,6 +81,15 @@ enum Command {
     /// seen the old one still able to decrypt, because the key it unwraps would
     /// not have changed.
     Phrase {},
+    /// Write the whole decrypted vault to one JSON file.
+    ///
+    /// The file is plaintext: everything the vault protects is readable in it,
+    /// so it is written 0600 and belongs somewhere encrypted.
+    Export {
+        /// File to write, replacing it if it exists. Omit to write to stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
     Contacts {
         #[command(subcommand)]
         command: ContactsCommand,
@@ -334,6 +344,34 @@ async fn main() -> Result<()> {
                  works.\nWrite these words down. They are shown once:"
             );
             println!("{new_phrase}");
+        }
+        Command::Export { out } => {
+            let state = load_state(&cli.state)?;
+            let password = read_secret("Password: ", "SEALBOOK_PASSWORD")?;
+            let mut client =
+                SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
+            sign_in(&mut client, &password).await?;
+            let objects = client.export_objects().await.context("export")?;
+            let count = objects.len();
+            let document = account_export(
+                client.state.as_ref().unwrap(),
+                objects,
+                &OffsetDateTime::now_utc().format(&Rfc3339)?,
+            );
+            let json = serde_json::to_vec_pretty(&document)?;
+            save_state(&cli.state, client.state.as_ref().unwrap())?;
+            match out {
+                Some(path) => {
+                    write_private(&path, &json)
+                        .with_context(|| format!("write {}", path.display()))?;
+                    println!("exported {count} objects to {}", path.display());
+                }
+                None => {
+                    let mut stdout = std::io::stdout();
+                    stdout.write_all(&json)?;
+                    stdout.write_all(b"\n")?;
+                }
+            }
         }
         Command::Contacts { command } => match command {
             ContactsCommand::Put { name, email, book } => {
@@ -834,6 +872,46 @@ fn jscontact(name: &str, email: Option<&str>, book_id: Uuid, previous: Option<&s
     merge_payload(previous, card, CARD_KEYS).to_string()
 }
 
+/// The whole vault as one JSON document.
+///
+/// Payloads go out as stored, not as the fields this build reads, so one written
+/// by a newer client is in the backup intact. A payload that is not JSON is
+/// carried as `text` rather than dropped.
+fn account_export(
+    state: &LocalState,
+    objects: Vec<ExportedObject>,
+    exported_at: &str,
+) -> serde_json::Value {
+    let objects: Vec<serde_json::Value> = objects
+        .into_iter()
+        .map(|object| {
+            let mut entry = serde_json::Map::new();
+            entry.insert("id".to_string(), object.id.to_string().into());
+            entry.insert("contentType".to_string(), object.content_type.into());
+            match serde_json::from_str::<serde_json::Value>(&object.payload) {
+                Ok(payload) => entry.insert("payload".to_string(), payload),
+                Err(_) => entry.insert("text".to_string(), object.payload.into()),
+            };
+            serde_json::Value::Object(entry)
+        })
+        .collect();
+    let object_count = objects.len();
+    serde_json::json!({
+        "@type": ACCOUNT_EXPORT_TYPE,
+        "version": ACCOUNT_EXPORT_VERSION,
+        "exportedAt": exported_at,
+        "account": {
+            "server": state.server,
+            "username": state.username,
+            "accountId": state.account_id.to_string(),
+            "collectionId": state.collection_id.to_string(),
+            "deviceId": state.device_id.to_string(),
+        },
+        "objectCount": object_count,
+        "objects": objects,
+    })
+}
+
 fn contact_book_id(json: &str) -> Uuid {
     serde_json::from_str::<serde_json::Value>(json)
         .ok()
@@ -905,6 +983,13 @@ fn save_state(path: &Path, state: &LocalState) -> Result<()> {
         nonce: nonce.to_vec(),
         ciphertext,
     })?;
+    write_private(path, &json)
+}
+
+/// Writes `bytes` to `path` through a 0600 temporary file, replacing whatever
+/// was there. The mode is set at creation rather than after the write, so the
+/// contents are never briefly world-readable.
+fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
     let temporary = path.with_extension(format!("tmp-{}", Uuid::new_v4()));
     let mut file = OpenOptions::new();
     file.write(true).create_new(true);
@@ -914,7 +999,7 @@ fn save_state(path: &Path, state: &LocalState) -> Result<()> {
         file.mode(0o600);
     }
     let mut output = file.open(&temporary)?;
-    output.write_all(&json)?;
+    output.write_all(bytes)?;
     output.sync_all()?;
     drop(output);
     std::fs::rename(temporary, path)?;
@@ -1218,5 +1303,92 @@ mod tests {
 
         let missing = std::env::temp_dir().join(format!("sealbook-absent-{}.md", Uuid::new_v4()));
         assert!(read_note_body(None, Some(missing)).is_err());
+    }
+
+    fn export_state() -> LocalState {
+        LocalState {
+            server: "https://vault.example".into(),
+            username: "alice".into(),
+            account_id: Uuid::from_u128(10),
+            collection_id: Uuid::from_u128(11),
+            device_id: Uuid::from_u128(12),
+            session_token: None,
+            kdf_salt: Vec::new(),
+            hpke_sk: Vec::new(),
+            mldsa_seed: Vec::new(),
+            ed25519_sk: Vec::new(),
+            manifest_seq: 0,
+            roster_seq: 0,
+            roster_transcript: Vec::new(),
+        }
+    }
+
+    fn exported(id: u128, content_type: &str, payload: &str) -> ExportedObject {
+        ExportedObject {
+            id: Uuid::from_u128(id),
+            content_type: content_type.to_string(),
+            payload: payload.to_string(),
+        }
+    }
+
+    #[test]
+    fn an_export_carries_every_object_including_a_type_this_build_cannot_read() {
+        let objects = vec![
+            exported(1, "application/jscontact+json", r#"{"@type":"Card"}"#),
+            exported(
+                2,
+                "application/sealbook.note+json",
+                r#"{"@type":"Note","title":"Plan","pinned":true}"#,
+            ),
+            exported(3, "application/sealbook.future+json", r#"{"keep":"me"}"#),
+        ];
+        let document = account_export(&export_state(), objects, "2026-10-10T00:00:00Z");
+
+        assert_eq!(document["@type"], ACCOUNT_EXPORT_TYPE);
+        assert_eq!(document["version"], ACCOUNT_EXPORT_VERSION);
+        assert_eq!(document["exportedAt"], "2026-10-10T00:00:00Z");
+        assert_eq!(document["account"]["username"], "alice");
+        assert_eq!(document["account"]["server"], "https://vault.example");
+        assert_eq!(
+            document["account"]["collectionId"],
+            Uuid::from_u128(11).to_string()
+        );
+        assert_eq!(document["objectCount"], 3);
+
+        let objects = document["objects"].as_array().expect("objects");
+        assert_eq!(objects.len(), 3);
+        assert_eq!(objects[1]["id"], Uuid::from_u128(2).to_string());
+        assert_eq!(objects[1]["contentType"], "application/sealbook.note+json");
+        // Stored fields the CLI itself never writes are in the backup.
+        assert_eq!(objects[1]["payload"]["pinned"], true);
+        assert_eq!(objects[2]["payload"]["keep"], "me");
+    }
+
+    #[test]
+    fn an_export_keeps_a_payload_that_is_not_json_rather_than_dropping_it() {
+        let objects = vec![exported(1, "application/octet-stream", "not json at all")];
+        let document = account_export(&export_state(), objects, "2026-10-10T00:00:00Z");
+        let entry = &document["objects"][0];
+        assert_eq!(entry["text"], "not json at all");
+        assert!(entry["payload"].is_null());
+    }
+
+    #[test]
+    fn an_export_file_is_not_readable_by_anyone_else() {
+        let dir = std::env::temp_dir().join(format!("sealbook-export-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("account.json");
+        std::fs::write(&path, b"stale").unwrap();
+
+        write_private(&path, b"{}").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"{}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

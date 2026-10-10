@@ -20,6 +20,13 @@ pub const NOTE_CONTENT_TYPE: &str = "application/sealbook.note+json";
 pub const NOTEBOOK_CONTENT_TYPE: &str = "application/sealbook.notebook+json";
 pub const ADDRESS_BOOK_ID_PROP: &str = "sealbook:addressBookId";
 
+/// The `@type` and `version` of a full account export, the one file that carries
+/// a whole vault decrypted. Every client that writes one writes these, so an
+/// export from the CLI and one from `sealbook-web` are the same document;
+/// `sealbook-web` mirrors them in `src/lib/accountExport.ts`.
+pub const ACCOUNT_EXPORT_TYPE: &str = "SealbookAccountExport";
+pub const ACCOUNT_EXPORT_VERSION: &str = "1.0";
+
 /// Smallest and largest padded plaintext an object may carry.
 ///
 /// These are part of the wire contract rather than a server detail: a client

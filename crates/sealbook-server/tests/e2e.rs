@@ -603,6 +603,107 @@ async fn notes_and_notebooks_are_encrypted_and_hidden_from_the_contact_list() {
     assert!(!hay.contains("Quetzalcoatlus"), "note body leaked");
 }
 
+/// A full account export has to see the whole vault, not the parts any one
+/// typed helper filters to, and must leave out what was deleted.
+#[tokio::test]
+async fn an_account_export_carries_every_live_object_and_no_deleted_one() {
+    let dir = std::env::temp_dir().join(format!("sealbook-export-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "exportalice", "correct horse battery")
+        .await
+        .expect("register");
+
+    let book = client
+        .ensure_default_address_book()
+        .await
+        .expect("default address book");
+    let notebook = client
+        .ensure_default_notebook()
+        .await
+        .expect("default notebook");
+    let calendar = client
+        .ensure_default_calendar()
+        .await
+        .expect("default calendar");
+
+    let contact_id = Uuid::new_v4();
+    client
+        .put_contact(
+            contact_id,
+            r#"{"@type":"Card","name":{"full":"Ada Lovelace"}}"#,
+        )
+        .await
+        .expect("contact");
+    let note_id = Uuid::new_v4();
+    client
+        .put_note(note_id, &note_json("Weekly plan", "- ship\n", notebook))
+        .await
+        .expect("note");
+    let event_id = Uuid::new_v4();
+    client
+        .put_calendar_event(
+            event_id,
+            r#"{"@type":"CalendarEvent","title":"Launch","start":"2026-10-10T09:00:00Z"}"#,
+        )
+        .await
+        .expect("event");
+    let deleted_id = Uuid::new_v4();
+    client
+        .put_note(deleted_id, &note_json("Draft", "scratch", notebook))
+        .await
+        .expect("draft note");
+    client.delete_note(deleted_id).await.expect("delete note");
+
+    let exported = client.export_objects().await.expect("export");
+    let ids: Vec<Uuid> = exported.iter().map(|object| object.id).collect();
+    assert_eq!(
+        ids.len(),
+        6,
+        "export missed an object: {:?}",
+        exported
+            .iter()
+            .map(|object| (object.id, object.content_type.clone()))
+            .collect::<Vec<_>>()
+    );
+    for expected in [book, notebook, calendar, contact_id, note_id, event_id] {
+        assert!(
+            ids.contains(&expected),
+            "{expected} is missing from the export"
+        );
+    }
+    assert!(
+        !ids.contains(&deleted_id),
+        "a deleted object was carried into the export"
+    );
+
+    let note = exported
+        .iter()
+        .find(|object| object.id == note_id)
+        .expect("note exported");
+    assert_eq!(note.content_type, "application/sealbook.note+json");
+    assert!(note.payload.contains("Weekly plan"));
+
+    // Sorted by content type then id, so two exports of one vault are the same
+    // bytes and a diff between them means the vault changed.
+    let mut sorted = exported
+        .iter()
+        .map(|object| (object.content_type.clone(), object.id))
+        .collect::<Vec<_>>();
+    sorted.sort();
+    assert_eq!(
+        sorted,
+        exported
+            .iter()
+            .map(|object| (object.content_type.clone(), object.id))
+            .collect::<Vec<_>>()
+    );
+}
+
 /// A note is the first content type that can realistically exceed what used to
 /// be the per-object ceiling, which is why the ceiling moved. This is the test
 /// that fails on the old constant.
