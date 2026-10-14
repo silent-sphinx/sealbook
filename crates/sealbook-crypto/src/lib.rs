@@ -12,8 +12,8 @@ pub mod sign;
 pub mod transcript;
 
 pub use aead::{
-    decrypt_object, encrypt_object, object_aad, CollectionKey, EncryptedObject, COLLECTION_KEY_LEN,
-    NONCE_LEN,
+    decrypt_object, encrypt_object, object_aad, padded_len, CollectionKey, EncryptedObject,
+    COLLECTION_KEY_LEN, NONCE_LEN,
 };
 pub use decoy::{decoy_seed, DECOY_KEY_LEN, DECOY_SEED_LEN};
 pub use error::CryptoError;

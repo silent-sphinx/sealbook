@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::{
     fs::{File, OpenOptions},
-    io::{Seek, SeekFrom, Write},
+    io::{Read, Seek, SeekFrom, Write},
 };
 
 use anyhow::{Context, Result};
@@ -89,6 +89,19 @@ enum Command {
         /// File to write, replacing it if it exists. Omit to write to stdout.
         #[arg(long)]
         out: Option<PathBuf>,
+    },
+    /// Write the objects from an export file back into the vault.
+    ///
+    /// Ids come from the file, so an import into the account the file came from
+    /// restores it rather than duplicating it. An object already in the vault is
+    /// left alone unless `--overwrite` says otherwise.
+    Import {
+        /// File to read. Omit to read from stdin.
+        #[arg(long)]
+        file: Option<PathBuf>,
+        /// Replace objects the vault already holds at the same id.
+        #[arg(long)]
+        overwrite: bool,
     },
     Contacts {
         #[command(subcommand)]
@@ -439,6 +452,52 @@ async fn main() -> Result<()> {
                     stdout.write_all(&json)?;
                     stdout.write_all(b"\n")?;
                 }
+            }
+        }
+        Command::Import { file, overwrite } => {
+            let document = match &file {
+                Some(path) => std::fs::read_to_string(path)
+                    .with_context(|| format!("read {}", path.display()))?,
+                None => {
+                    let mut buf = String::new();
+                    std::io::stdin()
+                        .read_to_string(&mut buf)
+                        .context("read stdin")?;
+                    buf
+                }
+            };
+            let import = parse_account_export(&document)?;
+            let state = load_state(&cli.state)?;
+            let password = read_secret("Password: ", "SEALBOOK_PASSWORD")?;
+            let mut client =
+                SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
+            sign_in(&mut client, &password).await?;
+
+            // Read first: an id already in the vault is someone's current object,
+            // and overwriting it is a data loss the flag has to ask for.
+            let present: std::collections::HashSet<Uuid> = client
+                .export_objects()
+                .await
+                .context("read the vault")?
+                .into_iter()
+                .map(|object| object.id)
+                .collect();
+            let (writes, skipped) = split_for_import(import.objects, &present, overwrite);
+
+            client.import_objects(&writes).await.context("import")?;
+            save_state(&cli.state, client.state.as_ref().unwrap())?;
+
+            println!(
+                "imported {} object{} from {}",
+                writes.len(),
+                if writes.len() == 1 { "" } else { "s" },
+                import.source
+            );
+            if !skipped.is_empty() {
+                println!(
+                    "left {} already in the vault alone; pass --overwrite to replace them",
+                    skipped.len()
+                );
             }
         }
         Command::Contacts { command } => match command {
@@ -1233,6 +1292,98 @@ fn account_export(
     })
 }
 
+/// Splits a file's objects into the ones to write and the ones to leave.
+///
+/// An id already live in the vault is someone's current object, and the file's
+/// copy of it may be older, so replacing it is a data loss `--overwrite` has to
+/// ask for. A tombstoned id is not live and so is written: restoring something
+/// that was deleted after the backup is the point of a restore.
+fn split_for_import(
+    objects: Vec<ExportedObject>,
+    present: &std::collections::HashSet<Uuid>,
+    overwrite: bool,
+) -> (Vec<ExportedObject>, Vec<ExportedObject>) {
+    objects
+        .into_iter()
+        .partition(|object| overwrite || !present.contains(&object.id))
+}
+
+/// An export file, read back.
+struct AccountImport {
+    objects: Vec<ExportedObject>,
+    /// The account the file was written from, for the line the import prints.
+    source: String,
+}
+
+/// Reads an export document, refusing one this build cannot be trusted to
+/// restore.
+///
+/// A payload is carried as it is written in the file, so a field this build does
+/// not know survives the round trip. `text` is the escape hatch `account_export`
+/// uses for a payload that was not JSON, and is restored as those same bytes.
+/// A newer minor version is accepted: the format only ever gains fields, and
+/// objects go back untouched whether or not this build understands them. A newer
+/// major version is refused, because the meaning of what is already there may
+/// have changed.
+fn parse_account_export(document: &str) -> Result<AccountImport> {
+    let document: serde_json::Value =
+        serde_json::from_str(document).context("this is not a JSON document")?;
+    let document_type = document["@type"].as_str().unwrap_or_default();
+    if document_type != ACCOUNT_EXPORT_TYPE {
+        anyhow::bail!("not a {ACCOUNT_EXPORT_TYPE} file (@type is {document_type:?})");
+    }
+    let version = document["version"]
+        .as_str()
+        .context("the file has no version")?;
+    let major = |value: &str| value.split('.').next().unwrap_or_default().to_string();
+    if major(version) != major(ACCOUNT_EXPORT_VERSION) {
+        anyhow::bail!(
+            "the file is version {version} and this build reads \
+             {ACCOUNT_EXPORT_VERSION}; update whichever is older"
+        );
+    }
+
+    let entries = document["objects"]
+        .as_array()
+        .context("the file has no objects")?;
+    let mut objects = Vec::with_capacity(entries.len());
+    let mut seen = std::collections::HashSet::new();
+    for (index, entry) in entries.iter().enumerate() {
+        let position = index + 1;
+        let id = entry["id"]
+            .as_str()
+            .with_context(|| format!("object {position} has no id"))?;
+        let id = Uuid::parse_str(id)
+            .with_context(|| format!("object {position} has an id that is not a UUID: {id}"))?;
+        if !seen.insert(id) {
+            anyhow::bail!("object {position} repeats id {id}");
+        }
+        let content_type = entry["contentType"]
+            .as_str()
+            .with_context(|| format!("object {id} has no contentType"))?
+            .to_string();
+        let payload = match (&entry["payload"], entry["text"].as_str()) {
+            (serde_json::Value::Null, Some(text)) => text.to_string(),
+            (serde_json::Value::Null, None) => {
+                anyhow::bail!("object {id} has neither a payload nor text")
+            }
+            (payload, _) => serde_json::to_string(payload)?,
+        };
+        objects.push(ExportedObject {
+            id,
+            content_type,
+            payload,
+        });
+    }
+
+    let account = &document["account"];
+    let source = match (account["username"].as_str(), account["server"].as_str()) {
+        (Some(username), Some(server)) => format!("{username} at {server}"),
+        _ => "an export with no account block".to_string(),
+    };
+    Ok(AccountImport { objects, source })
+}
+
 fn contact_book_id(json: &str) -> Uuid {
     serde_json::from_str::<serde_json::Value>(json)
         .ok()
@@ -1792,6 +1943,172 @@ mod tests {
         let entry = &document["objects"][0];
         assert_eq!(entry["text"], "not json at all");
         assert!(entry["payload"].is_null());
+    }
+
+    #[test]
+    fn an_export_reads_back_as_the_objects_it_was_written_from() {
+        let objects = vec![
+            exported(1, "application/jscontact+json", r#"{"@type":"Card"}"#),
+            exported(2, "application/sealbook.future+json", r#"{"keep":"me"}"#),
+            exported(3, "application/octet-stream", "not json at all"),
+        ];
+        let document = account_export(&export_state(), objects, "2026-10-10T00:00:00Z");
+        let import = parse_account_export(&document.to_string()).unwrap();
+
+        assert_eq!(import.source, "alice at https://vault.example");
+        let read: Vec<(Uuid, String, String)> = import
+            .objects
+            .into_iter()
+            .map(|object| (object.id, object.content_type, object.payload))
+            .collect();
+        assert_eq!(
+            read,
+            vec![
+                (
+                    Uuid::from_u128(1),
+                    "application/jscontact+json".to_string(),
+                    r#"{"@type":"Card"}"#.to_string()
+                ),
+                (
+                    Uuid::from_u128(2),
+                    "application/sealbook.future+json".to_string(),
+                    r#"{"keep":"me"}"#.to_string()
+                ),
+                // The `text` escape hatch comes back as those bytes, not as JSON.
+                (
+                    Uuid::from_u128(3),
+                    "application/octet-stream".to_string(),
+                    "not json at all".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_import_refuses_a_file_it_cannot_restore() {
+        assert!(parse_account_export("}{").is_err());
+        assert!(parse_account_export(r#"{"@type":"SomethingElse"}"#).is_err());
+        // A version whose major this build does not read.
+        assert!(parse_account_export(
+            r#"{"@type":"SealbookAccountExport","version":"2.0","objects":[]}"#
+        )
+        .is_err());
+        // An object with no id, and one with no payload of either kind.
+        assert!(parse_account_export(
+            r#"{"@type":"SealbookAccountExport","version":"1.0","objects":[{"contentType":"a"}]}"#
+        )
+        .is_err());
+        assert!(parse_account_export(
+            r#"{"@type":"SealbookAccountExport","version":"1.0","objects":[
+                 {"id":"00000000-0000-0000-0000-000000000001","contentType":"a"}]}"#
+        )
+        .is_err());
+        // Two objects at one id: the batch write would refuse it later, and the
+        // file is wrong either way.
+        assert!(parse_account_export(
+            r#"{"@type":"SealbookAccountExport","version":"1.0","objects":[
+                 {"id":"00000000-0000-0000-0000-000000000001","contentType":"a","payload":{}},
+                 {"id":"00000000-0000-0000-0000-000000000001","contentType":"a","payload":{}}]}"#
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn an_import_reads_a_newer_minor_version() {
+        let import = parse_account_export(
+            r#"{"@type":"SealbookAccountExport","version":"1.7","objects":[
+                 {"id":"00000000-0000-0000-0000-000000000001","contentType":"a","payload":{},
+                  "writtenByANewerClient":true}]}"#,
+        )
+        .unwrap();
+        assert_eq!(import.objects.len(), 1);
+    }
+
+    /// The released v1.0.0 writer's own output, generated by that build and kept
+    /// as a fixture, read by this build's parser. A diff saying the writer has
+    /// not changed is weaker than this: it would not catch the parser drifting
+    /// away from the file the release in the wild actually produces.
+    #[test]
+    fn an_import_leaves_a_live_object_alone_unless_overwriting() {
+        let objects = vec![
+            exported(1, "application/jscontact+json", r#"{"@type":"Card"}"#),
+            exported(2, "application/jscontact+json", r#"{"@type":"Card"}"#),
+        ];
+        // Object 1 is live on the instance: signing in before importing creates
+        // the default containers, so this is the ordinary case, not a rare one.
+        let present = std::collections::HashSet::from([Uuid::from_u128(1)]);
+
+        let (writes, skipped) = split_for_import(objects.clone(), &present, false);
+        assert_eq!(
+            writes.iter().map(|object| object.id).collect::<Vec<_>>(),
+            vec![Uuid::from_u128(2)]
+        );
+        assert_eq!(
+            skipped.iter().map(|object| object.id).collect::<Vec<_>>(),
+            vec![Uuid::from_u128(1)]
+        );
+
+        let (writes, skipped) = split_for_import(objects, &present, true);
+        assert_eq!(writes.len(), 2);
+        assert!(skipped.is_empty());
+    }
+
+    #[test]
+    fn an_import_into_an_empty_vault_writes_everything() {
+        let objects = vec![exported(
+            1,
+            "application/jscontact+json",
+            r#"{"@type":"Card"}"#,
+        )];
+        let (writes, skipped) = split_for_import(objects, &std::collections::HashSet::new(), false);
+        assert_eq!(writes.len(), 1);
+        assert!(skipped.is_empty());
+    }
+
+    #[test]
+    fn a_v1_release_export_parses_into_every_object_it_carries() {
+        let fixture = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/v1.0.0-account-export.json"
+        );
+        let document = std::fs::read_to_string(fixture).expect("the v1.0.0 fixture");
+        let import = parse_account_export(&document).expect("a v1.0.0 export must import");
+
+        assert_eq!(import.source, "alice at https://vault.example");
+        let read: Vec<(Uuid, String, String)> = import
+            .objects
+            .into_iter()
+            .map(|object| (object.id, object.content_type, object.payload))
+            .collect();
+        assert_eq!(read.len(), 6, "an object from the v1.0.0 file was dropped");
+
+        // Every content type the release could write, including one it had no
+        // parser for and one whose payload was not JSON.
+        let types: Vec<&str> = read.iter().map(|(_, ct, _)| ct.as_str()).collect();
+        assert_eq!(
+            types,
+            vec![
+                "application/jscontact+json",
+                "application/sealbook.addressbook+json",
+                "application/sealbook.note+json",
+                "application/sealbook.calendarevent+json",
+                "application/sealbook.future+json",
+                "application/octet-stream",
+            ]
+        );
+        assert_eq!(read[0].0, Uuid::from_u128(1));
+
+        // Fields the CLI never writes itself are still in what goes back.
+        let note = &read[2].2;
+        assert!(
+            note.contains(r#""pinned":true"#),
+            "note payload was rewritten: {note}"
+        );
+        assert!(note.contains("Weekly plan"));
+        // The unparseable type goes back as it was stored.
+        assert_eq!(read[4].2, r#"{"keep":"me"}"#);
+        // The `text` escape hatch comes back as those bytes, not as JSON.
+        assert_eq!(read[5].2, "not json at all");
     }
 
     #[test]

@@ -95,16 +95,25 @@ pub fn object_aad(object_id: &[u8], collection_id: &[u8]) -> Vec<u8> {
     aad
 }
 
+/// The bucket a plaintext of this length pads into, without doing the padding.
+///
+/// What a caller batching writes needs: the request it is about to send is
+/// bounded by the padded sizes, and sealing each object to find out would mean
+/// sealing before knowing whether it fits.
+pub fn padded_len(plaintext_len: usize) -> usize {
+    let len = plaintext_len + PAD_LEN_PREFIX;
+    BUCKETS
+        .iter()
+        .copied()
+        .find(|bucket| *bucket >= len)
+        .unwrap_or_else(|| len.next_power_of_two().max(len))
+}
+
 fn pad(plaintext: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(plaintext.len() + PAD_LEN_PREFIX);
     out.extend_from_slice(&(plaintext.len() as u32).to_be_bytes());
     out.extend_from_slice(plaintext);
-    let target = BUCKETS
-        .iter()
-        .copied()
-        .find(|bucket| *bucket >= out.len())
-        .unwrap_or_else(|| out.len().next_power_of_two().max(out.len()));
-    out.resize(target, 0);
+    out.resize(padded_len(plaintext.len()), 0);
     out
 }
 
@@ -137,6 +146,17 @@ mod tests {
 
         let bad_aad = object_aad(b"obj", b"other");
         assert!(decrypt_object(&key, &enc, &bad_aad).is_err());
+    }
+
+    #[test]
+    fn the_predicted_padded_length_is_the_one_padding_produces() {
+        for len in [0, 1, 255, 252, 253, 4096, 600 * 1024, 5 * 1024 * 1024] {
+            assert_eq!(
+                pad(&vec![0u8; len]).len(),
+                padded_len(len),
+                "padded_len disagrees with pad at {len}"
+            );
+        }
     }
 
     #[test]

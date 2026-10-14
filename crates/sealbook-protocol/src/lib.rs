@@ -556,6 +556,20 @@ pub struct PutObjectResponse {
 /// contacts is.
 pub const MAX_BATCH_OBJECTS: usize = 256;
 
+/// Most padded bytes one batch write may carry.
+///
+/// The count cap alone is not enough: 256 objects of any real size is a request
+/// far past the server's `MAX_OBJECT_BODY`, which is how an import of a vault of
+/// large notes once died on a broken pipe. A caller batching writes adds objects
+/// until either bound is reached.
+///
+/// Set to `MAX_PADDED_OBJECT_SIZE` so that a batch is never larger than the
+/// single largest object the server must already accept, which is the one body
+/// size `the_object_body_limit_covers_a_maximum_object` pins down. A batch whose
+/// first object is bigger than this is still sent: one object has to go
+/// somewhere, and that single write is within the limit by the same argument.
+pub const MAX_BATCH_BYTES: usize = MAX_PADDED_OBJECT_SIZE;
+
 /// One object inside a batch write.
 ///
 /// The same fields `PutObjectRequest` carries per object, without the manifest:

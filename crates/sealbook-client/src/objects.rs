@@ -6,12 +6,12 @@ use uuid::Uuid;
 use std::collections::HashMap;
 
 use sealbook_crypto::{
-    content_digest, decrypt_object, encrypt_object, object_aad, EncryptedObject,
+    content_digest, decrypt_object, encrypt_object, object_aad, padded_len, EncryptedObject,
 };
 use sealbook_protocol::envelope::{open_envelope, seal_envelope, Unsealed};
 use sealbook_protocol::{
     BatchObject, ChangesResponse, ManifestEntry, PutObjectRequest, PutObjectsRequest,
-    PutObjectsResponse, MAX_BATCH_OBJECTS,
+    PutObjectsResponse, MAX_BATCH_BYTES, MAX_BATCH_OBJECTS,
 };
 use sealbook_protocol::{
     ADDRESS_BOOK_CONTENT_TYPE, BOOKMARK_COLLECTION_CONTENT_TYPE, BOOKMARK_CONTENT_TYPE,
@@ -66,10 +66,44 @@ struct PlainObject {
 
 /// One object as an export sees it: its id, the content type its envelope
 /// carries, and its plaintext payload.
+#[derive(Clone)]
 pub struct ExportedObject {
     pub id: Uuid,
     pub content_type: String,
     pub payload: String,
+}
+
+/// Splits objects into batches that fit a single request.
+///
+/// Bounded by object count and by padded bytes: `MAX_BATCH_OBJECTS` alone lets a
+/// batch of large objects exceed the server's body limit, which fails the write
+/// rather than splitting it. Sizes come from `padded_len` rather than from
+/// sealing, so a batch is sized before any of it is encrypted.
+///
+/// An object larger than the whole budget still goes, alone: it is within the
+/// body limit as a single write, and refusing it here would mean an object that
+/// can be exported but never imported.
+fn import_chunks(objects: &[ExportedObject]) -> Vec<&[ExportedObject]> {
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    let mut bytes = 0;
+    for (index, object) in objects.iter().enumerate() {
+        let size = padded_len(object.payload.len());
+        let full = index - start == MAX_BATCH_OBJECTS;
+        let over = bytes + size > MAX_BATCH_BYTES;
+        // `index > start` keeps a single oversized object from closing an empty
+        // chunk, which would loop forever on it.
+        if full || (over && index > start) {
+            chunks.push(&objects[start..index]);
+            start = index;
+            bytes = 0;
+        }
+        bytes += size;
+    }
+    if start < objects.len() {
+        chunks.push(&objects[start..]);
+    }
+    chunks
 }
 
 /// The distinct, sorted ids of a batch, refusing one the manifest could not
@@ -455,6 +489,39 @@ impl SealbookClient {
         }
         out.sort_by(|a, b| a.content_type.cmp(&b.content_type).then(a.id.cmp(&b.id)));
         Ok(out)
+    }
+
+    /// Writes objects of any mix of content types back into the collection.
+    ///
+    /// The counterpart of `export_objects`: an import carries whatever the file
+    /// holds, including a content type this build cannot read, so it cannot go
+    /// through the typed `put_*` helpers or `put_sealed_batch`, which each seal a
+    /// batch under one type. Ids are taken from the file rather than minted, so
+    /// an object that is already in the collection takes a new revision.
+    ///
+    /// Sent in chunks bounded by both `MAX_BATCH_OBJECTS` and `MAX_BATCH_BYTES`,
+    /// each its own request and manifest signature. A chunk that fails leaves the
+    /// chunks before it written: there is no transaction spanning them, and a
+    /// rerun is harmless because the ids are fixed.
+    ///
+    /// Returns the revision the last object took, or 0 if there was nothing to
+    /// write.
+    pub async fn import_objects(&mut self, objects: &[ExportedObject]) -> Result<u64, ClientError> {
+        let mut revision = 0;
+        for chunk in import_chunks(objects) {
+            let ids = batch_ids(chunk.iter().map(|object| object.id).collect())?;
+            let state = self.prepare_write(&ids).await?;
+            let mut writes = Vec::with_capacity(chunk.len());
+            for object in chunk {
+                writes.push(self.seal_write(
+                    object.id,
+                    object.payload.as_bytes(),
+                    &object.content_type,
+                )?);
+            }
+            revision = self.write_batch_prepared(state, writes).await?;
+        }
+        Ok(revision)
     }
 
     async fn put_sealed(
@@ -995,8 +1062,74 @@ pub(crate) fn container_name(plaintext: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{latest_revisions, PlainObject};
+    use super::{import_chunks, latest_revisions, ExportedObject, PlainObject};
+    use sealbook_protocol::{MAX_BATCH_BYTES, MAX_BATCH_OBJECTS};
     use uuid::Uuid;
+
+    fn sized(bytes: usize) -> ExportedObject {
+        ExportedObject {
+            id: Uuid::new_v4(),
+            content_type: "application/sealbook.note+json".to_string(),
+            payload: "x".repeat(bytes),
+        }
+    }
+
+    #[test]
+    fn a_batch_of_small_objects_is_bounded_by_the_count() {
+        let objects: Vec<ExportedObject> =
+            (0..MAX_BATCH_OBJECTS * 2 + 5).map(|_| sized(8)).collect();
+        let chunks = import_chunks(&objects);
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks[0].len(), MAX_BATCH_OBJECTS);
+        assert_eq!(chunks[1].len(), MAX_BATCH_OBJECTS);
+        assert_eq!(chunks[2].len(), 5);
+        assert_eq!(
+            chunks.iter().map(|chunk| chunk.len()).sum::<usize>(),
+            objects.len()
+        );
+    }
+
+    /// The bug this guards: batching on count alone sent a request past the
+    /// server's body limit, and a vault of large notes could not be imported at
+    /// all.
+    #[test]
+    fn a_batch_of_large_objects_is_bounded_by_the_bytes() {
+        let megabyte = 1024 * 1024;
+        let objects: Vec<ExportedObject> = (0..20).map(|_| sized(megabyte)).collect();
+        let chunks = import_chunks(&objects);
+        assert!(chunks.len() > 1, "20 MiB went out as one request");
+        for chunk in &chunks {
+            let bytes: usize = chunk
+                .iter()
+                .map(|object| sealbook_crypto::padded_len(object.payload.len()))
+                .sum();
+            assert!(
+                bytes <= MAX_BATCH_BYTES,
+                "a chunk carries {bytes} padded bytes, over the {MAX_BATCH_BYTES} budget"
+            );
+        }
+        assert_eq!(
+            chunks.iter().map(|chunk| chunk.len()).sum::<usize>(),
+            objects.len()
+        );
+    }
+
+    /// An object past the whole budget has to go out on its own rather than
+    /// close an empty chunk, which would loop forever, or be dropped.
+    #[test]
+    fn an_object_larger_than_the_budget_goes_out_alone() {
+        let objects = vec![sized(8), sized(MAX_BATCH_BYTES + 1), sized(8)];
+        let chunks = import_chunks(&objects);
+        assert_eq!(
+            chunks.iter().map(|chunk| chunk.len()).collect::<Vec<_>>(),
+            vec![1, 1, 1]
+        );
+    }
+
+    #[test]
+    fn nothing_to_import_is_no_requests() {
+        assert!(import_chunks(&[]).is_empty());
+    }
 
     fn change(id: Uuid, revision: u64) -> sealbook_protocol::ObjectChange {
         sealbook_protocol::ObjectChange {

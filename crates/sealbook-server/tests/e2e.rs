@@ -6,7 +6,7 @@ use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::CertificateDer;
 use rustls::version::TLS13;
 use rustls::{ClientConfig, RootCertStore};
-use sealbook_client::SealbookClient;
+use sealbook_client::{ExportedObject, SealbookClient};
 use sealbook_crypto::opaque::{
     client_login_start, client_register_finish, client_register_start, SealbookCipherSuite,
 };
@@ -909,6 +909,305 @@ async fn an_account_export_carries_every_live_object_and_no_deleted_one() {
             .map(|object| (object.content_type.clone(), object.id))
             .collect::<Vec<_>>()
     );
+}
+
+/// An export is only a backup if it goes back in. The restore is into a second,
+/// empty account, which is also the migration path: ids come from the file, so
+/// the objects arrive as themselves rather than as copies.
+#[tokio::test]
+async fn an_account_export_imports_into_another_account_whole() {
+    let dir = std::env::temp_dir().join(format!("sealbook-import-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut source = SealbookClient::plaintext_http();
+    source
+        .register(&base, "importalice", "correct horse battery")
+        .await
+        .expect("register source");
+    let notebook = source
+        .ensure_default_notebook()
+        .await
+        .expect("default notebook");
+    source
+        .ensure_default_address_book()
+        .await
+        .expect("default address book");
+    let contact_id = Uuid::new_v4();
+    source
+        .put_contact(
+            contact_id,
+            r#"{"@type":"Card","name":{"full":"Ada Lovelace"}}"#,
+        )
+        .await
+        .expect("contact");
+    let note_id = Uuid::new_v4();
+    source
+        .put_note(note_id, &note_json("Weekly plan", "- ship\n", notebook))
+        .await
+        .expect("note");
+    // A content type this build has no helper for still has to arrive.
+    let future_id = Uuid::new_v4();
+    source
+        .import_objects(&[ExportedObject {
+            id: future_id,
+            content_type: "application/sealbook.future+json".to_string(),
+            payload: r#"{"keep":"me"}"#.to_string(),
+        }])
+        .await
+        .expect("future object");
+    let exported = source.export_objects().await.expect("export");
+
+    let mut target = SealbookClient::plaintext_http();
+    target
+        .register(&base, "importbob", "correct horse battery")
+        .await
+        .expect("register target");
+    target.import_objects(&exported).await.expect("import");
+
+    let imported = target.export_objects().await.expect("re-export");
+    let as_tuples = |objects: &[ExportedObject]| {
+        objects
+            .iter()
+            .map(|object| {
+                (
+                    object.id,
+                    object.content_type.clone(),
+                    object.payload.clone(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        as_tuples(&imported),
+        as_tuples(&exported),
+        "the imported vault is not the exported one"
+    );
+
+    // Importing the same file again is a restore, not a duplication: the ids are
+    // fixed, so the objects take a new revision and the count holds.
+    target.import_objects(&exported).await.expect("reimport");
+    let again = target.export_objects().await.expect("third export");
+    assert_eq!(as_tuples(&again), as_tuples(&exported));
+}
+
+/// Signing in to a new instance before importing creates the default containers,
+/// which hold the reserved ids a backup also carries. Whether to keep the live
+/// one is the caller's policy (`split_for_import` in the CLI); what this layer
+/// has to provide is the write that replaces it, which is what an overwriting
+/// import is built on.
+#[tokio::test]
+async fn importing_over_a_live_container_replaces_it() {
+    let dir = std::env::temp_dir().join(format!("sealbook-defaults-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "defaults", "correct horse battery")
+        .await
+        .expect("register");
+    let book = client
+        .ensure_default_address_book()
+        .await
+        .expect("the app's first sign-in creates this");
+
+    // The backup renamed its default address book, as a user would have.
+    let backup = vec![ExportedObject {
+        id: book,
+        content_type: "application/sealbook.addressbook+json".to_string(),
+        payload: r#"{"@type":"AddressBook","version":"1.0","name":"Work"}"#.to_string(),
+    }];
+
+    client.import_objects(&backup).await.expect("import");
+
+    let books = client.list_address_books().await.expect("books");
+    // One container, not two: the id came from the file, so the write landed on
+    // the container that was already there instead of adding a second default.
+    assert_eq!(books.len(), 1);
+    assert_eq!(
+        books
+            .iter()
+            .find(|(id, _)| *id == book)
+            .map(|(_, name)| name.as_str()),
+        Some("Work"),
+    );
+}
+
+/// A backup written by the released v1.0.0 build, restored onto a server and an
+/// account that have never seen it: the self-hosting migration path.
+///
+/// The fixture is that release's own output, so this fails if the import drifts
+/// away from what is already in the wild.
+#[tokio::test]
+async fn a_v1_release_backup_restores_onto_a_new_instance() {
+    let fixture = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../sealbook-cli/tests/fixtures/v1.0.0-account-export.json"
+    );
+    let document: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(fixture).expect("the v1.0.0 fixture"))
+            .expect("the fixture is JSON");
+    // Read straight out of the file rather than through the CLI's parser, which
+    // is a private helper of that binary and tested there.
+    let from_file: Vec<ExportedObject> = document["objects"]
+        .as_array()
+        .expect("objects")
+        .iter()
+        .map(|entry| ExportedObject {
+            id: Uuid::parse_str(entry["id"].as_str().unwrap()).unwrap(),
+            content_type: entry["contentType"].as_str().unwrap().to_string(),
+            payload: match entry["text"].as_str() {
+                Some(text) => text.to_string(),
+                None => serde_json::to_string(&entry["payload"]).unwrap(),
+            },
+        })
+        .collect();
+    assert_eq!(from_file.len(), 6);
+
+    // A new instance: its own database, and an account registered on it now.
+    let dir = std::env::temp_dir().join(format!("sealbook-v1restore-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "restored", "correct horse battery")
+        .await
+        .expect("register on the new instance");
+    client
+        .import_objects(&from_file)
+        .await
+        .expect("a v1.0.0 backup must restore");
+
+    let restored = client.export_objects().await.expect("re-export");
+    let as_tuples = |objects: &[ExportedObject]| {
+        let mut out = objects
+            .iter()
+            .map(|object| {
+                (
+                    object.id,
+                    object.content_type.clone(),
+                    object.payload.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        out.sort();
+        out
+    };
+    assert_eq!(
+        as_tuples(&restored),
+        as_tuples(&from_file),
+        "the restored vault is not the backup"
+    );
+
+    // The objects are reachable as themselves, not just as rows: the contact and
+    // the note come back through the typed helpers this build reads them with.
+    let contacts = client.list_contacts().await.expect("contacts");
+    assert!(
+        contacts
+            .iter()
+            .any(|(_, card)| card.contains("Ada Lovelace")),
+        "the restored contact is not readable as a contact"
+    );
+    let notes = client.list_notes().await.expect("notes");
+    assert!(
+        notes.iter().any(|(_, note)| note.contains("Weekly plan")),
+        "the restored note is not readable as a note"
+    );
+}
+
+/// The restore that matters most: a backup going back into the account it came
+/// from, after something was deleted. The deleted id is a tombstone, not a live
+/// object, so the import has to write over it.
+#[tokio::test]
+async fn an_import_restores_an_object_that_was_deleted_since_the_export() {
+    let dir = std::env::temp_dir().join(format!("sealbook-undelete-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "undelete", "correct horse battery")
+        .await
+        .expect("register");
+    let notebook = client
+        .ensure_default_notebook()
+        .await
+        .expect("default notebook");
+    let note_id = Uuid::new_v4();
+    client
+        .put_note(note_id, &note_json("Weekly plan", "- ship\n", notebook))
+        .await
+        .expect("note");
+
+    let exported = client.export_objects().await.expect("export");
+    client.delete_note(note_id).await.expect("delete");
+    assert!(
+        !client
+            .export_objects()
+            .await
+            .expect("export after delete")
+            .iter()
+            .any(|object| object.id == note_id),
+        "the note is still live, so the restore below proves nothing"
+    );
+
+    client.import_objects(&exported).await.expect("import");
+
+    let restored = client.export_objects().await.expect("export after import");
+    let note = restored
+        .iter()
+        .find(|object| object.id == note_id)
+        .expect("the deleted note was not restored");
+    assert!(note.payload.contains("Weekly plan"));
+}
+
+/// A vault of large notes exports fine and has to import fine too: batching on
+/// count alone sends a request the server's body limit refuses.
+#[tokio::test]
+async fn an_account_export_of_large_objects_imports() {
+    let dir = std::env::temp_dir().join(format!("sealbook-bigimport-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut source = SealbookClient::plaintext_http();
+    source
+        .register(&base, "bigalice", "correct horse battery")
+        .await
+        .expect("register source");
+    let notebook = source
+        .ensure_default_notebook()
+        .await
+        .expect("default notebook");
+    // Twenty notes of roughly a megabyte: well inside the per-object ceiling and
+    // inside any sane account quota, but far past a 12 MiB request if they go in
+    // one batch.
+    for index in 0..20 {
+        source
+            .put_note(
+                Uuid::new_v4(),
+                &note_json(&format!("Big {index}"), &"x".repeat(1024 * 1024), notebook),
+            )
+            .await
+            .expect("big note");
+    }
+    let exported = source.export_objects().await.expect("export");
+
+    let mut target = SealbookClient::plaintext_http();
+    target
+        .register(&base, "bigbob", "correct horse battery")
+        .await
+        .expect("register target");
+    target.import_objects(&exported).await.expect("import");
+
+    let imported = target.export_objects().await.expect("re-export");
+    assert_eq!(imported.len(), exported.len());
 }
 
 /// A note is the first content type that can realistically exceed what used to

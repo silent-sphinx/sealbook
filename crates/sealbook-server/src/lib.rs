@@ -1241,6 +1241,19 @@ mod tests {
         );
     }
 
+    /// The other half of the same pairing: a client fills a batch up to
+    /// `MAX_BATCH_BYTES`, so that has to encode inside the route limit too, or a
+    /// full batch is a request this server hangs up on.
+    #[test]
+    fn the_object_body_limit_covers_a_full_batch() {
+        let encoded = (sealbook_protocol::MAX_BATCH_BYTES + 16 * 256).div_ceil(3) * 4;
+        assert!(
+            MAX_OBJECT_BODY > encoded + 64 * 1024,
+            "a full batch encodes to {encoded} bytes, which {MAX_OBJECT_BODY} \
+             does not cover with room for a signed manifest"
+        );
+    }
+
     /// Base64 is four bytes out for every three in, so the estimate has to be
     /// above the raw ciphertext or the check it guards is worthless.
     #[test]
