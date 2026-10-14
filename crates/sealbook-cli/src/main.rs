@@ -18,8 +18,8 @@ use rustls_pki_types::CertificateDer;
 use sealbook_client::{
     merge_payload, ExportedObject, LocalState, SealbookClient, ACCOUNT_EXPORT_TYPE,
     ACCOUNT_EXPORT_VERSION, ADDRESS_BOOK_ID_PROP, DEFAULT_ADDRESS_BOOK_ID,
-    DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_CALENDAR_COLOR, DEFAULT_CALENDAR_ID, DEFAULT_NOTEBOOK_NAME,
-    PAYLOAD_SCHEMA_VERSION,
+    DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_BOOKMARK_COLLECTION_NAME, DEFAULT_CALENDAR_COLOR,
+    DEFAULT_CALENDAR_ID, DEFAULT_NOTEBOOK_NAME, PAYLOAD_SCHEMA_VERSION,
 };
 use sha2::{Digest, Sha256};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
@@ -39,7 +39,7 @@ struct EncryptedState {
 #[derive(Parser)]
 #[command(
     name = "sealbook",
-    about = "E2EE vault client: contacts, calendars and notes"
+    about = "E2EE vault client: contacts, calendars, notes and bookmarks"
 )]
 struct Cli {
     #[arg(long, default_value = "https://127.0.0.1:8443")]
@@ -109,6 +109,14 @@ enum Command {
     Notebook {
         #[command(subcommand)]
         command: NotebookCommand,
+    },
+    Bookmarks {
+        #[command(subcommand)]
+        command: BookmarksCommand,
+    },
+    Collection {
+        #[command(subcommand)]
+        command: CollectionCommand,
     },
     Devices {
         #[command(subcommand)]
@@ -216,6 +224,66 @@ enum NotesCommand {
         notebook: Option<Uuid>,
     },
     /// Print one note's markdown body on stdout, unchanged.
+    Show {
+        #[arg(long)]
+        id: Uuid,
+    },
+    Delete {
+        #[arg(long)]
+        id: Uuid,
+    },
+}
+
+#[derive(Subcommand)]
+enum CollectionCommand {
+    List,
+    Create {
+        #[arg(long)]
+        name: String,
+    },
+    /// Rename a collection, leaving its place in the tree alone.
+    Rename {
+        #[arg(long)]
+        id: Uuid,
+        #[arg(long)]
+        name: String,
+    },
+    Delete {
+        #[arg(long)]
+        id: Uuid,
+    },
+}
+
+#[derive(Subcommand)]
+enum BookmarksCommand {
+    /// Save a URL.
+    Add {
+        #[arg(long)]
+        url: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        collection: Option<Uuid>,
+    },
+    /// Replace a bookmark's URL and title, keeping its original creation time.
+    ///
+    /// The notes and tags a bookmark carries are not written from here, so an
+    /// update made with this command leaves them as they were.
+    Update {
+        #[arg(long)]
+        id: Uuid,
+        #[arg(long)]
+        url: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        collection: Option<Uuid>,
+    },
+    List {
+        #[arg(long)]
+        collection: Option<Uuid>,
+    },
+    /// Print one bookmark's URL on stdout.
     Show {
         #[arg(long)]
         id: Uuid,
@@ -489,6 +557,156 @@ async fn main() -> Result<()> {
                         .await
                         .context("create address book")?;
                     println!("created address book {id} {name}");
+                }
+            }
+            save_state(&cli.state, client.state.as_ref().unwrap())?;
+        }
+        Command::Collection { command } => {
+            let state = load_state(&cli.state)?;
+            let password = std::env::var("SEALBOOK_PASSWORD")
+                .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+            let mut client =
+                SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
+            sign_in(&mut client, &password).await?;
+            client
+                .ensure_default_bookmark_collection()
+                .await
+                .context("default collection")?;
+            match command {
+                CollectionCommand::List => {
+                    for (id, name) in client
+                        .list_bookmark_collections()
+                        .await
+                        .context("collections")?
+                    {
+                        println!("{id} {name}");
+                    }
+                }
+                CollectionCommand::Create { name } => {
+                    let id = Uuid::new_v4();
+                    client
+                        .put_bookmark_collection(id, &name, None)
+                        .await
+                        .context("create collection")?;
+                    println!("created collection {id} {name}");
+                }
+                CollectionCommand::Rename { id, name } => {
+                    // Merged onto the stored payload so `parentId`, which the web
+                    // client owns, survives a rename made from here.
+                    let existing = find_bookmark_collection(&mut client, id).await?;
+                    client
+                        .put_bookmark_collection(id, &name, Some(&existing))
+                        .await
+                        .context("rename collection")?;
+                    println!("renamed collection {id} {name}");
+                }
+                CollectionCommand::Delete { id } => {
+                    let revision = client
+                        .delete_bookmark_collection(id)
+                        .await
+                        .context("delete collection")?;
+                    println!("deleted collection {id} at revision {revision}");
+                }
+            }
+            save_state(&cli.state, client.state.as_ref().unwrap())?;
+        }
+        Command::Bookmarks { command } => {
+            let state = load_state(&cli.state)?;
+            let password = std::env::var("SEALBOOK_PASSWORD")
+                .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+            let mut client =
+                SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
+            sign_in(&mut client, &password).await?;
+            let default_collection = client
+                .ensure_default_bookmark_collection()
+                .await
+                .context("default collection")?;
+            match command {
+                BookmarksCommand::Add {
+                    url,
+                    title,
+                    collection,
+                } => {
+                    let id = Uuid::new_v4();
+                    let bookmark = bookmark_json(
+                        &url,
+                        title.as_deref(),
+                        collection.unwrap_or(default_collection),
+                        None,
+                        None,
+                    );
+                    let revision = client
+                        .put_bookmark(id, &bookmark)
+                        .await
+                        .context("add bookmark")?;
+                    println!("stored encrypted bookmark {id} at revision {revision}");
+                }
+                BookmarksCommand::Update {
+                    id,
+                    url,
+                    title,
+                    collection,
+                } => {
+                    // Only a client knows when a bookmark was saved: the server
+                    // keeps no user timestamps, so an update that does not carry
+                    // the original forward loses it.
+                    let existing = find_bookmark(&mut client, id).await?;
+                    let created = bookmark_field(&existing, "createdAt");
+                    // Merged onto the stored bookmark, so `notes`, `tags` and
+                    // anything newer survive an edit made from here.
+                    let bookmark = bookmark_json(
+                        &url,
+                        title.as_deref(),
+                        collection.unwrap_or_else(|| {
+                            bookmark_collection_id(&existing, default_collection)
+                        }),
+                        created.as_deref(),
+                        Some(&existing),
+                    );
+                    let revision = client
+                        .put_bookmark(id, &bookmark)
+                        .await
+                        .context("update bookmark")?;
+                    println!("updated encrypted bookmark {id} at revision {revision}");
+                }
+                BookmarksCommand::List { collection } => {
+                    let collections = client
+                        .list_bookmark_collections()
+                        .await
+                        .context("collections")?;
+                    let bookmarks = client.list_bookmarks().await.context("bookmarks")?;
+                    let mut shown = 0;
+                    for (id, json) in bookmarks {
+                        let holder = bookmark_collection_id(&json, default_collection);
+                        if collection.is_some_and(|want| want != holder) {
+                            continue;
+                        }
+                        let name = collections
+                            .iter()
+                            .find(|(candidate, _)| *candidate == holder)
+                            .map(|(_, name)| name.as_str())
+                            .unwrap_or(DEFAULT_BOOKMARK_COLLECTION_NAME);
+                        println!(
+                            "{id} [{name}] {} {}",
+                            bookmark_title(&json),
+                            bookmark_url(&json)
+                        );
+                        shown += 1;
+                    }
+                    if shown == 0 {
+                        println!("(no bookmarks)");
+                    }
+                }
+                BookmarksCommand::Show { id } => {
+                    let bookmark = find_bookmark(&mut client, id).await?;
+                    println!("{}", bookmark_url(&bookmark));
+                }
+                BookmarksCommand::Delete { id } => {
+                    let revision = client
+                        .delete_bookmark(id)
+                        .await
+                        .context("delete bookmark")?;
+                    println!("deleted encrypted bookmark {id} at revision {revision}");
                 }
             }
             save_state(&cli.state, client.state.as_ref().unwrap())?;
@@ -777,6 +995,109 @@ async fn find_note(client: &mut SealbookClient, id: Uuid) -> Result<String> {
         .find(|(candidate, _)| *candidate == id)
         .map(|(_, json)| json)
         .with_context(|| format!("no note with id {id}"))
+}
+
+async fn find_bookmark(client: &mut SealbookClient, id: Uuid) -> Result<String> {
+    client
+        .list_bookmarks()
+        .await
+        .context("bookmarks")?
+        .into_iter()
+        .find(|(candidate, _)| *candidate == id)
+        .map(|(_, json)| json)
+        .with_context(|| format!("no bookmark with id {id}"))
+}
+
+async fn find_bookmark_collection(client: &mut SealbookClient, id: Uuid) -> Result<String> {
+    let collections = client
+        .list_bookmark_collections()
+        .await
+        .context("collections")?;
+    if !collections.iter().any(|(candidate, _)| *candidate == id) {
+        anyhow::bail!("no collection with id {id}");
+    }
+    // `list_bookmark_collections` yields names, not payloads, and a rename has to
+    // merge onto the stored JSON to keep `parentId`. So read the object itself.
+    client
+        .export_objects()
+        .await
+        .context("collections")?
+        .into_iter()
+        .find(|object| object.id == id)
+        .map(|object| object.payload)
+        .with_context(|| format!("no collection with id {id}"))
+}
+
+/// Every key this CLI writes for a bookmark.
+///
+/// Shorter than the web client's list: `notes` and `tags` are the web's to
+/// manage, and leaving them out of this set is what carries them through an edit
+/// made here.
+const BOOKMARK_KEYS: &[&str] = &[
+    "@type",
+    "version",
+    "url",
+    "title",
+    "collectionId",
+    "createdAt",
+    "updatedAt",
+];
+
+fn bookmark_json(
+    url: &str,
+    title: Option<&str>,
+    collection_id: Uuid,
+    created_at: Option<&str>,
+    previous: Option<&str>,
+) -> String {
+    let now = OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_default();
+    // An omitted title falls back to the URL rather than to an empty string, so
+    // a bookmark added from here still lists as something readable.
+    let title = title.map(str::trim).filter(|title| !title.is_empty());
+    merge_payload(
+        previous,
+        serde_json::json!({
+            "@type": "Bookmark",
+            "version": PAYLOAD_SCHEMA_VERSION,
+            "url": url.trim(),
+            "title": title.unwrap_or(url.trim()),
+            "collectionId": collection_id.to_string(),
+            "createdAt": created_at.unwrap_or(&now),
+            "updatedAt": now,
+        }),
+        BOOKMARK_KEYS,
+    )
+    .to_string()
+}
+
+fn bookmark_field(json: &str, field: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|value| {
+            value
+                .get(field)
+                .and_then(|found| found.as_str())
+                .map(ToOwned::to_owned)
+        })
+}
+
+fn bookmark_url(json: &str) -> String {
+    bookmark_field(json, "url").unwrap_or_default()
+}
+
+fn bookmark_title(json: &str) -> String {
+    bookmark_field(json, "title")
+        .map(|title| title.trim().to_string())
+        .filter(|title| !title.is_empty())
+        .unwrap_or_else(|| "Untitled".to_string())
+}
+
+fn bookmark_collection_id(json: &str, fallback: Uuid) -> Uuid {
+    bookmark_field(json, "collectionId")
+        .and_then(|id| Uuid::parse_str(&id).ok())
+        .unwrap_or(fallback)
 }
 
 /// Every key this CLI writes for a note.
@@ -1235,6 +1556,106 @@ mod tests {
         assert_eq!(value["pinned"], true);
         assert_eq!(value["parentId"], Uuid::from_u128(9).to_string());
         assert_eq!(value["tableOfContents"], true);
+    }
+
+    #[test]
+    fn a_bookmark_carries_its_url_title_and_collection() {
+        let collection = Uuid::from_u128(5);
+        let json = bookmark_json(
+            "https://example.com/a",
+            Some("Example"),
+            collection,
+            None,
+            None,
+        );
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["@type"], "Bookmark");
+        assert_eq!(value["version"], PAYLOAD_SCHEMA_VERSION);
+        assert_eq!(value["url"], "https://example.com/a");
+        assert_eq!(value["title"], "Example");
+        assert_eq!(value["collectionId"], collection.to_string());
+        assert_eq!(json.matches("\"collectionId\"").count(), 1);
+        assert_eq!(bookmark_url(&json), "https://example.com/a");
+        assert_eq!(bookmark_title(&json), "Example");
+        assert_eq!(
+            bookmark_collection_id(&json, Uuid::from_u128(1)),
+            collection
+        );
+    }
+
+    #[test]
+    fn a_bookmark_without_a_title_falls_back_to_its_url() {
+        for title in [None, Some(""), Some("   ")] {
+            let json = bookmark_json(
+                "https://example.com/b",
+                title,
+                Uuid::from_u128(5),
+                None,
+                None,
+            );
+            let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(value["title"], "https://example.com/b");
+        }
+    }
+
+    #[test]
+    fn a_bookmark_update_keeps_the_original_creation_time() {
+        let created = "2020-05-04T03:02:01Z";
+        let json = bookmark_json(
+            "https://example.com/c",
+            Some("t"),
+            Uuid::from_u128(5),
+            Some(created),
+            None,
+        );
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["createdAt"], created);
+        assert_ne!(value["updatedAt"], created);
+    }
+
+    #[test]
+    fn a_bookmark_update_keeps_the_fields_this_cli_does_not_write() {
+        // `notes` and `tags` are the web client's, and a newer build may add
+        // more. Rebuilding the payload from the fields this command takes would
+        // drop all of them, which is silent data loss.
+        let stored = serde_json::json!({
+            "@type": "Bookmark",
+            "version": "1.0",
+            "url": "https://example.com/old",
+            "title": "old",
+            "collectionId": Uuid::from_u128(5).to_string(),
+            "createdAt": "2020-05-04T03:02:01Z",
+            "updatedAt": "2020-05-04T03:02:01Z",
+            "notes": "why I saved it",
+            "tags": ["rust", "reading"],
+            "favicon": "data:,",
+        })
+        .to_string();
+
+        let json = bookmark_json(
+            "https://example.com/new",
+            Some("new"),
+            Uuid::from_u128(5),
+            Some("2020-05-04T03:02:01Z"),
+            Some(&stored),
+        );
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["url"], "https://example.com/new");
+        assert_eq!(value["title"], "new");
+        assert_eq!(value["notes"], "why I saved it");
+        assert_eq!(value["tags"], serde_json::json!(["rust", "reading"]));
+        assert_eq!(value["favicon"], "data:,");
+    }
+
+    #[test]
+    fn an_unreadable_bookmark_resolves_to_the_default_collection() {
+        let fallback = Uuid::from_u128(5);
+        assert_eq!(bookmark_collection_id("not json", fallback), fallback);
+        assert_eq!(bookmark_collection_id("{}", fallback), fallback);
+        assert_eq!(
+            bookmark_collection_id(r#"{"collectionId":"nope"}"#, fallback),
+            fallback
+        );
     }
 
     #[test]

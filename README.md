@@ -2,8 +2,8 @@
 
 <img src="Logo.png" width="200" alt="Sealbook logo">
 
-Sealbook is a fully end-to-end encrypted vault for your contacts, calendars and
-notes, built to be self-hosted. Your data is encrypted on your device and the
+Sealbook is a fully end-to-end encrypted vault for your contacts, calendars,
+notes and bookmarks, built to be self-hosted. Your data is encrypted on your device and the
 server only ever sees ciphertext.
 
 The [threat model](https://github.com/silent-sphinx/sealbook/wiki/Threat-Model)

@@ -14,10 +14,12 @@ use sealbook_protocol::{
     PutObjectsResponse, MAX_BATCH_OBJECTS,
 };
 use sealbook_protocol::{
-    ADDRESS_BOOK_CONTENT_TYPE, CALENDAR_CONTENT_TYPE, CALENDAR_EVENT_CONTENT_TYPE,
-    DEFAULT_ADDRESS_BOOK_ID, DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_CALENDAR_COLOR,
-    DEFAULT_CALENDAR_ID, DEFAULT_CALENDAR_NAME, DEFAULT_NOTEBOOK_ID, DEFAULT_NOTEBOOK_NAME,
-    JSCONTACT_CONTENT_TYPE, NOTEBOOK_CONTENT_TYPE, NOTE_CONTENT_TYPE, SEALED_CONTENT_TYPE,
+    ADDRESS_BOOK_CONTENT_TYPE, BOOKMARK_COLLECTION_CONTENT_TYPE, BOOKMARK_CONTENT_TYPE,
+    CALENDAR_CONTENT_TYPE, CALENDAR_EVENT_CONTENT_TYPE, DEFAULT_ADDRESS_BOOK_ID,
+    DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_BOOKMARK_COLLECTION_ID, DEFAULT_BOOKMARK_COLLECTION_NAME,
+    DEFAULT_CALENDAR_COLOR, DEFAULT_CALENDAR_ID, DEFAULT_CALENDAR_NAME, DEFAULT_NOTEBOOK_ID,
+    DEFAULT_NOTEBOOK_NAME, JSCONTACT_CONTENT_TYPE, NOTEBOOK_CONTENT_TYPE, NOTE_CONTENT_TYPE,
+    SEALED_CONTENT_TYPE,
 };
 
 use crate::manifest::BucketedManifest;
@@ -325,6 +327,112 @@ impl SealbookClient {
                 out.push((obj.id, obj.into_text()?));
             }
         }
+        Ok(out)
+    }
+
+    pub async fn put_bookmark(
+        &mut self,
+        object_id: Uuid,
+        bookmark: &str,
+    ) -> Result<u64, ClientError> {
+        self.put_sealed(object_id, bookmark.as_bytes(), BOOKMARK_CONTENT_TYPE)
+            .await
+    }
+
+    /// Writes up to `MAX_BATCH_OBJECTS` bookmarks in one request, as
+    /// `put_contacts` does for contacts. What an import of a browser's exported
+    /// bookmarks should use.
+    pub async fn put_bookmarks(&mut self, bookmarks: &[(Uuid, &str)]) -> Result<u64, ClientError> {
+        self.put_sealed_batch(bookmarks, BOOKMARK_CONTENT_TYPE)
+            .await
+    }
+
+    pub async fn delete_bookmark(&mut self, object_id: Uuid) -> Result<u64, ClientError> {
+        self.write_object(object_id, Vec::new(), Vec::new(), 0, true)
+            .await
+    }
+
+    pub async fn list_bookmarks(&mut self) -> Result<Vec<(Uuid, String)>, ClientError> {
+        let mut out = Vec::new();
+        for obj in self.list_objects().await? {
+            if obj.content_type == BOOKMARK_CONTENT_TYPE {
+                out.push((obj.id, obj.into_text()?));
+            }
+        }
+        Ok(out)
+    }
+
+    /// Writes a collection, carrying through any field this build does not own.
+    ///
+    /// `parentId` is the one that matters: collections nest, but the nesting is
+    /// the web client's to manage, so a rename from here must not flatten the
+    /// tree. `previous` is the stored payload, or `None` when creating.
+    pub async fn put_bookmark_collection(
+        &mut self,
+        object_id: Uuid,
+        name: &str,
+        previous: Option<&str>,
+    ) -> Result<u64, ClientError> {
+        let plaintext = sealbook_protocol::merge_payload(
+            previous,
+            serde_json::json!({
+                "@type": "BookmarkCollection",
+                "version": sealbook_protocol::PAYLOAD_SCHEMA_VERSION,
+                "name": name,
+            }),
+            BOOKMARK_COLLECTION_KEYS,
+        )
+        .to_string();
+        self.put_sealed(
+            object_id,
+            plaintext.as_bytes(),
+            BOOKMARK_COLLECTION_CONTENT_TYPE,
+        )
+        .await
+    }
+
+    pub async fn delete_bookmark_collection(
+        &mut self,
+        object_id: Uuid,
+    ) -> Result<u64, ClientError> {
+        self.write_object(object_id, Vec::new(), Vec::new(), 0, true)
+            .await
+    }
+
+    pub async fn ensure_default_bookmark_collection(&mut self) -> Result<Uuid, ClientError> {
+        let collections = self.list_bookmark_collections().await?;
+        if collections
+            .iter()
+            .any(|(id, _)| *id == DEFAULT_BOOKMARK_COLLECTION_ID)
+        {
+            return Ok(DEFAULT_BOOKMARK_COLLECTION_ID);
+        }
+        self.put_bookmark_collection(
+            DEFAULT_BOOKMARK_COLLECTION_ID,
+            DEFAULT_BOOKMARK_COLLECTION_NAME,
+            None,
+        )
+        .await?;
+        Ok(DEFAULT_BOOKMARK_COLLECTION_ID)
+    }
+
+    pub async fn list_bookmark_collections(&mut self) -> Result<Vec<(Uuid, String)>, ClientError> {
+        let mut out = Vec::new();
+        for obj in self.list_objects().await? {
+            if obj.content_type != BOOKMARK_COLLECTION_CONTENT_TYPE {
+                continue;
+            }
+            out.push((obj.id, container_name(&obj.into_text()?)));
+        }
+        out.sort_by(|a, b| {
+            if a.0 == DEFAULT_BOOKMARK_COLLECTION_ID {
+                return std::cmp::Ordering::Less;
+            }
+            if b.0 == DEFAULT_BOOKMARK_COLLECTION_ID {
+                return std::cmp::Ordering::Greater;
+            }
+            a.1.to_lowercase().cmp(&b.1.to_lowercase())
+        });
         Ok(out)
     }
 
@@ -864,7 +972,13 @@ struct VerifiedObjects {
     tombstone_floor: u64,
 }
 
-/// The `name` of any container object: address book or notebook.
+/// Every key a collection write from here owns.
+///
+/// Deliberately short: `parentId` is the web client's, and leaving it out is
+/// what carries a collection's place in the tree through a rename made here.
+const BOOKMARK_COLLECTION_KEYS: &[&str] = &["@type", "version", "name"];
+
+/// The `name` of any container object: address book, notebook or collection.
 pub(crate) fn container_name(plaintext: &str) -> String {
     serde_json::from_str::<serde_json::Value>(plaintext)
         .ok()

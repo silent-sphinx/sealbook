@@ -18,6 +18,8 @@ pub const CALENDAR_EVENT_CONTENT_TYPE: &str = "application/sealbook.calendar-eve
 pub const CALENDAR_CONTENT_TYPE: &str = "application/sealbook.calendar+json";
 pub const NOTE_CONTENT_TYPE: &str = "application/sealbook.note+json";
 pub const NOTEBOOK_CONTENT_TYPE: &str = "application/sealbook.notebook+json";
+pub const BOOKMARK_CONTENT_TYPE: &str = "application/sealbook.bookmark+json";
+pub const BOOKMARK_COLLECTION_CONTENT_TYPE: &str = "application/sealbook.bookmark-collection+json";
 pub const ADDRESS_BOOK_ID_PROP: &str = "sealbook:addressBookId";
 
 /// The `@type` and `version` of a full account export, the one file that carries
@@ -47,6 +49,7 @@ pub const MAX_PADDED_OBJECT_SIZE: usize = 8 * 1024 * 1024;
 pub const DEFAULT_ADDRESS_BOOK_NAME: &str = "Default Address Book";
 pub const DEFAULT_NOTEBOOK_NAME: &str = "Default Notebook";
 pub const DEFAULT_CALENDAR_NAME: &str = "Default Calendar";
+pub const DEFAULT_BOOKMARK_COLLECTION_NAME: &str = "Default Collection";
 
 /// Colour the default calendar is created with. Unlike a name, a calendar's
 /// colour is part of its payload, so the clients have to agree on one for the
@@ -54,15 +57,17 @@ pub const DEFAULT_CALENDAR_NAME: &str = "Default Calendar";
 pub const DEFAULT_CALENDAR_COLOR: &str = "#7aa2f7";
 
 /// Reserved object ids: 1 is the default address book, 2 the default notebook,
-/// 3 the default calendar, 4 the account settings object. A new feature takes
-/// the next free number rather than reusing one: the settings object sat on 3
-/// in the web client before the default calendar existed, and the two writers
-/// then overwrote each other. Ids are listed here even when only one client
-/// writes the object, so the next one cannot pick a number that is taken.
+/// 3 the default calendar, 4 the account settings object, 5 the default
+/// bookmark collection. A new feature takes the next free number rather than
+/// reusing one: the settings object sat on 3 in the web client before the
+/// default calendar existed, and the two writers then overwrote each other. Ids
+/// are listed here even when only one client writes the object, so the next one
+/// cannot pick a number that is taken.
 pub const DEFAULT_ADDRESS_BOOK_ID: Uuid = Uuid::from_u128(1);
 pub const DEFAULT_NOTEBOOK_ID: Uuid = Uuid::from_u128(2);
 pub const DEFAULT_CALENDAR_ID: Uuid = Uuid::from_u128(3);
 pub const ACCOUNT_SETTINGS_ID: Uuid = Uuid::from_u128(4);
+pub const DEFAULT_BOOKMARK_COLLECTION_ID: Uuid = Uuid::from_u128(5);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ErrorBody {
@@ -980,6 +985,14 @@ mod tests {
         assert_eq!(
             ACCOUNT_SETTINGS_ID.to_string(),
             "00000000-0000-0000-0000-000000000004"
+        );
+    }
+
+    #[test]
+    fn default_bookmark_collection_id_is_stable() {
+        assert_eq!(
+            DEFAULT_BOOKMARK_COLLECTION_ID.to_string(),
+            "00000000-0000-0000-0000-000000000005"
         );
     }
 

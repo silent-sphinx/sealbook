@@ -603,6 +603,192 @@ async fn notes_and_notebooks_are_encrypted_and_hidden_from_the_contact_list() {
     assert!(!hay.contains("Quetzalcoatlus"), "note body leaked");
 }
 
+fn bookmark_json(url: &str, title: &str, collection: Uuid) -> String {
+    serde_json::json!({
+        "@type": "Bookmark",
+        "version": "1.0",
+        "url": url,
+        "title": title,
+        "collectionId": collection.to_string(),
+    })
+    .to_string()
+}
+
+/// The decrypted `url` of one bookmark, so a test compares what the user saved
+/// rather than its JSON escaping.
+fn bookmark_url(bookmarks: &[(Uuid, String)], id: Uuid) -> String {
+    let json = bookmarks
+        .iter()
+        .find(|(candidate, _)| *candidate == id)
+        .map(|(_, json)| json.as_str())
+        .expect("bookmark stored");
+    serde_json::from_str::<serde_json::Value>(json)
+        .expect("bookmark json")
+        .get("url")
+        .and_then(|url| url.as_str())
+        .expect("bookmark url")
+        .to_string()
+}
+
+#[tokio::test]
+async fn bookmarks_and_collections_are_encrypted_and_hidden_from_the_other_lists() {
+    let dir = std::env::temp_dir().join(format!("sealbook-bookmarks-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "markalice", "correct horse battery")
+        .await
+        .expect("register");
+
+    let default_id = client
+        .ensure_default_bookmark_collection()
+        .await
+        .expect("default collection");
+    assert_eq!(default_id, sealbook_client::DEFAULT_BOOKMARK_COLLECTION_ID);
+
+    let recipes_id = Uuid::new_v4();
+    client
+        .put_bookmark_collection(recipes_id, "Zanzibar Recipes", None)
+        .await
+        .expect("recipes collection");
+
+    let rust_id = Uuid::new_v4();
+    let pasta_id = Uuid::new_v4();
+    client
+        .put_bookmark(
+            rust_id,
+            &bookmark_json(
+                "https://doc.rust-lang.org/book/",
+                "Quetzalcoatlus Book",
+                default_id,
+            ),
+        )
+        .await
+        .expect("rust bookmark");
+    client
+        .put_bookmark(
+            pasta_id,
+            &bookmark_json("https://example.com/carbonara", "Carbonara", recipes_id),
+        )
+        .await
+        .expect("pasta bookmark");
+
+    let collections = client
+        .list_bookmark_collections()
+        .await
+        .expect("collections");
+    assert_eq!(collections.len(), 2);
+    assert_eq!(collections[0].0, default_id);
+    assert_eq!(collections[0].1, "Default Collection");
+    assert!(collections
+        .iter()
+        .any(|(id, name)| *id == recipes_id && name == "Zanzibar Recipes"));
+
+    let bookmarks = client.list_bookmarks().await.expect("bookmarks");
+    assert_eq!(bookmarks.len(), 2);
+    assert_eq!(
+        bookmark_url(&bookmarks, rust_id),
+        "https://doc.rust-lang.org/book/"
+    );
+    assert_eq!(
+        bookmark_url(&bookmarks, pasta_id),
+        "https://example.com/carbonara"
+    );
+    assert!(bookmarks
+        .iter()
+        .all(|(_, json)| !json.contains("\"@type\":\"BookmarkCollection\"")));
+
+    // A bookmark is not a contact and not a note. Each client dispatches on the
+    // content type sealed inside the envelope, so this is the assertion that
+    // catches one going astray.
+    let contacts = client.list_contacts().await.expect("contacts");
+    assert!(contacts.is_empty(), "a bookmark was listed as a contact");
+    let notes = client.list_notes().await.expect("notes");
+    assert!(notes.is_empty(), "a bookmark was listed as a note");
+
+    let raw = std::fs::read(&db).expect("read sqlite");
+    let hay = String::from_utf8_lossy(&raw);
+    assert!(!hay.contains("Zanzibar"), "collection name leaked");
+    assert!(!hay.contains("Quetzalcoatlus"), "bookmark title leaked");
+    assert!(!hay.contains("carbonara"), "bookmark url leaked");
+    assert!(!hay.contains("rust-lang"), "bookmark url leaked");
+}
+
+/// The default collection is keyed by its reserved id, so a second client
+/// joining an existing account adopts the one that is there instead of creating
+/// a rival. This is the whole migration story for accounts that predate
+/// bookmarks.
+#[tokio::test]
+async fn the_default_bookmark_collection_is_created_once_and_keyed_by_id() {
+    let dir = std::env::temp_dir().join(format!("sealbook-defcoll-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "collalice", "correct horse battery")
+        .await
+        .expect("register");
+
+    let first = client
+        .ensure_default_bookmark_collection()
+        .await
+        .expect("default collection");
+    let second = client
+        .ensure_default_bookmark_collection()
+        .await
+        .expect("default collection again");
+    assert_eq!(first, second);
+    assert_eq!(first, sealbook_client::DEFAULT_BOOKMARK_COLLECTION_ID);
+    assert_eq!(
+        client
+            .list_bookmark_collections()
+            .await
+            .expect("collections")
+            .len(),
+        1,
+        "ensure created a second default collection"
+    );
+
+    // A renamed default is still the default: it is the id that is reserved, not
+    // the name, so ensure must not resurrect a second one beside it.
+    client
+        .put_bookmark_collection(first, "Reading list", None)
+        .await
+        .expect("rename default");
+    assert_eq!(
+        client
+            .ensure_default_bookmark_collection()
+            .await
+            .expect("ensure after rename"),
+        first
+    );
+    let collections = client
+        .list_bookmark_collections()
+        .await
+        .expect("collections");
+    assert_eq!(collections.len(), 1);
+    assert_eq!(collections[0].1, "Reading list");
+
+    // A bookmark that names no collection is the default's, which is what lets a
+    // payload written by a build that predates collections still resolve.
+    let loose = Uuid::new_v4();
+    client
+        .put_bookmark(
+            loose,
+            r#"{"@type":"Bookmark","version":"1.0","url":"https://example.com/"}"#,
+        )
+        .await
+        .expect("loose bookmark");
+    let bookmarks = client.list_bookmarks().await.expect("bookmarks");
+    assert_eq!(bookmarks.len(), 1);
+    assert!(!bookmarks[0].1.contains("collectionId"));
+}
+
 /// A full account export has to see the whole vault, not the parts any one
 /// typed helper filters to, and must leave out what was deleted.
 #[tokio::test]
@@ -630,6 +816,10 @@ async fn an_account_export_carries_every_live_object_and_no_deleted_one() {
         .ensure_default_calendar()
         .await
         .expect("default calendar");
+    let collection = client
+        .ensure_default_bookmark_collection()
+        .await
+        .expect("default collection");
 
     let contact_id = Uuid::new_v4();
     client
@@ -652,6 +842,14 @@ async fn an_account_export_carries_every_live_object_and_no_deleted_one() {
         )
         .await
         .expect("event");
+    let bookmark_id = Uuid::new_v4();
+    client
+        .put_bookmark(
+            bookmark_id,
+            &bookmark_json("https://example.com/rust", "Rust docs", collection),
+        )
+        .await
+        .expect("bookmark");
     let deleted_id = Uuid::new_v4();
     client
         .put_note(deleted_id, &note_json("Draft", "scratch", notebook))
@@ -663,14 +861,23 @@ async fn an_account_export_carries_every_live_object_and_no_deleted_one() {
     let ids: Vec<Uuid> = exported.iter().map(|object| object.id).collect();
     assert_eq!(
         ids.len(),
-        6,
+        8,
         "export missed an object: {:?}",
         exported
             .iter()
             .map(|object| (object.id, object.content_type.clone()))
             .collect::<Vec<_>>()
     );
-    for expected in [book, notebook, calendar, contact_id, note_id, event_id] {
+    for expected in [
+        book,
+        notebook,
+        calendar,
+        collection,
+        contact_id,
+        note_id,
+        event_id,
+        bookmark_id,
+    ] {
         assert!(
             ids.contains(&expected),
             "{expected} is missing from the export"
