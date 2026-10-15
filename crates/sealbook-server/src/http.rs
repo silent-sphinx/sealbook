@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use axum::http::{header, HeaderValue, Method};
+use axum::http::{header, HeaderName, HeaderValue, Method};
 use axum::middleware::Next;
 use axum::response::Response;
 use axum::Json;
@@ -94,6 +94,10 @@ pub(crate) fn cors_layer() -> CorsLayer {
         );
     }
 
+    // Attachment chunks carry their nonce in this header: the client sends it on
+    // an upload and reads it off a download, so it must be both allowed (for the
+    // request) and exposed (so the browser lets JS read it on the response).
+    let nonce_header = HeaderName::from_static("x-sealbook-nonce");
     CorsLayer::new()
         .allow_origin(origins)
         .allow_methods([
@@ -103,7 +107,12 @@ pub(crate) fn cors_layer() -> CorsLayer {
             Method::DELETE,
             Method::OPTIONS,
         ])
-        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+        .allow_headers([
+            header::AUTHORIZATION,
+            header::CONTENT_TYPE,
+            nonce_header.clone(),
+        ])
+        .expose_headers([nonce_header])
         .max_age(Duration::from_secs(600))
 }
 
@@ -133,4 +142,73 @@ pub(crate) async fn security_headers(request: axum::extract::Request, next: Next
             .unwrap(),
     );
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use axum::routing::get;
+    use axum::Router;
+    use tower::ServiceExt;
+
+    /// The attachment chunk header must survive CORS: allowed on the request so
+    /// an upload can send it, and exposed on the response so a download can read
+    /// it. This only ever breaks cross-origin, which the same-origin e2e tests
+    /// never exercise.
+    #[tokio::test]
+    async fn the_cors_policy_allows_and_exposes_the_attachment_nonce_header() {
+        let app = Router::new()
+            .route("/x", get(|| async { "ok" }))
+            .layer(cors_layer());
+
+        // Preflight for the chunk upload: it would carry x-sealbook-nonce.
+        let preflight = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::OPTIONS)
+                    .uri("/x")
+                    .header("origin", "http://localhost:5173")
+                    .header("access-control-request-method", "PUT")
+                    .header("access-control-request-headers", "x-sealbook-nonce")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let allow = preflight
+            .headers()
+            .get("access-control-allow-headers")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        assert!(
+            allow.contains("x-sealbook-nonce"),
+            "preflight did not allow the nonce header: {allow:?}"
+        );
+
+        // A real response must expose the header so JS can read it on download.
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/x")
+                    .header("origin", "http://localhost:5173")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let expose = response
+            .headers()
+            .get("access-control-expose-headers")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        assert!(
+            expose.contains("x-sealbook-nonce"),
+            "response did not expose the nonce header: {expose:?}"
+        );
+    }
 }
