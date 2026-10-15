@@ -7157,3 +7157,309 @@ async fn a_server_speaking_another_protocol_is_refused_up_front() {
     // have 404'd on an OPAQUE route instead, after sending a username.
     assert_eq!(reached.load(Ordering::SeqCst), 1);
 }
+
+// --- Attachments -----------------------------------------------------------
+
+/// A photo larger than one chunk round-trips byte-for-byte through the chunked
+/// upload, commit and download, and the server never sees plaintext.
+#[tokio::test]
+async fn an_attachment_round_trips_through_chunked_upload_and_download() {
+    let dir = std::env::temp_dir().join(format!("sealbook-att-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "attalice", "correct horse battery")
+        .await
+        .expect("register");
+
+    // Just over two chunks, with a recognizable marker so a plaintext leak would
+    // show up in the database file.
+    let marker = b"ATTACHMENT-PLAINTEXT-MUST-NOT-LEAK";
+    let mut photo = vec![0u8; sealbook_protocol::ATTACHMENT_CHUNK_SIZE * 2 + 4096];
+    for (i, b) in photo.iter_mut().enumerate() {
+        *b = (i % 251) as u8;
+    }
+    photo[..marker.len()].copy_from_slice(marker);
+
+    let reference = client.upload_attachment(&photo).await.expect("upload");
+    assert_eq!(reference.chunk_count, 3);
+
+    let meta = client
+        .get_attachment_meta(reference.attachment_id)
+        .await
+        .expect("meta");
+    assert_eq!(meta.state, "committed");
+    assert_eq!(meta.chunk_count, 3);
+
+    let fetched = client.download_attachment(&reference).await.expect("download");
+    assert_eq!(fetched, photo, "attachment did not round-trip byte-for-byte");
+
+    let raw = std::fs::read(&db).expect("read sqlite");
+    assert!(
+        !raw.windows(marker.len()).any(|w| w == marker),
+        "server database leaked attachment plaintext"
+    );
+}
+
+/// An attachment whose chunks are all present but uncommitted is not downloadable,
+/// and committing with a chunk missing is refused.
+#[tokio::test]
+async fn an_uncommitted_or_incomplete_attachment_is_not_served() {
+    let dir = std::env::temp_dir().join(format!("sealbook-att-inc-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "incalice", "correct horse battery")
+        .await
+        .expect("register");
+
+    let (server, collection_id, token) = {
+        let s = client.state.as_ref().unwrap();
+        (
+            s.server.clone(),
+            s.collection_id,
+            s.session_token.clone().unwrap(),
+        )
+    };
+    let http = reqwest::Client::new();
+    let attachment_id = Uuid::new_v4();
+
+    // Declare three chunks but upload none, then try to commit: refused as
+    // incomplete.
+    http.post(format!("{server}/v1/collections/{collection_id}/attachments"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "attachment_id": attachment_id,
+            "total_plaintext_size": 3 * sealbook_protocol::ATTACHMENT_CHUNK_SIZE,
+            "chunk_size": sealbook_protocol::ATTACHMENT_CHUNK_SIZE,
+            "chunk_count": 3,
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .expect("create");
+
+    let commit = http
+        .post(format!(
+            "{server}/v1/collections/{collection_id}/attachments/{attachment_id}/commit"
+        ))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(commit.status(), reqwest::StatusCode::CONFLICT);
+
+    // A chunk of a pending attachment is not served.
+    let chunk = http
+        .get(format!(
+            "{server}/v1/collections/{collection_id}/attachments/{attachment_id}/chunks/0"
+        ))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(chunk.status(), reqwest::StatusCode::NOT_FOUND);
+}
+
+/// Storing more attachment bytes than the account's quota allows is refused with
+/// 507, and deleting an attachment frees that quota and removes its chunk rows.
+#[tokio::test]
+async fn attachment_quota_is_enforced_and_freed_on_delete() {
+    let dir = std::env::temp_dir().join(format!("sealbook-att-quota-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let db_path = db.to_str().unwrap().to_string();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let app = sealbook_server::app_with_limits(
+        &db_path,
+        sealbook_server::Limits {
+            // Room for exactly one full chunk's ciphertext, so a second attachment
+            // of the same size cannot fit.
+            max_attachment_bytes: (sealbook_protocol::ATTACHMENT_CHUNK_SIZE
+                + sealbook_protocol::ATTACHMENT_CHUNK_TAG_LEN) as i64,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
+            .await
+            .unwrap();
+    });
+    let base = format!("http://{addr}");
+
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "quotaalice", "correct horse battery")
+        .await
+        .expect("register");
+
+    let one_chunk = vec![7u8; sealbook_protocol::ATTACHMENT_CHUNK_SIZE];
+    let first = client.upload_attachment(&one_chunk).await.expect("first fits");
+
+    // A second identical attachment cannot be reserved.
+    let second = client.upload_attachment(&one_chunk).await;
+    assert!(second.is_err(), "second attachment exceeded quota but was accepted");
+
+    // Deleting the first frees the quota, so an upload of the same size now fits.
+    client.delete_attachment(first.attachment_id).await.expect("delete");
+    let chunk_rows: i64 = {
+        let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+            .await
+            .unwrap();
+        let n = sqlx::query_scalar("SELECT COUNT(*) FROM attachment_chunks")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+        n
+    };
+    assert_eq!(chunk_rows, 0, "delete left orphaned chunk rows behind");
+
+    client
+        .upload_attachment(&one_chunk)
+        .await
+        .expect("upload fits again after delete freed the quota");
+}
+
+/// The architectural invariant: a key rotation re-encrypts the owning note but
+/// never touches an attachment's chunk ciphertext, and the attachment still
+/// downloads afterward under its own unchanged key.
+#[tokio::test]
+async fn rotating_a_device_does_not_touch_attachment_chunks() {
+    let dir = std::env::temp_dir().join(format!("sealbook-att-rot-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut owner = SealbookClient::plaintext_http();
+    owner
+        .register(&base, "attrotalice", "correct horse battery")
+        .await
+        .expect("register");
+
+    let photo = {
+        let mut v = vec![0u8; sealbook_protocol::ATTACHMENT_CHUNK_SIZE + 128];
+        for (i, b) in v.iter_mut().enumerate() {
+            *b = (i % 97) as u8;
+        }
+        v
+    };
+    let reference = owner.upload_attachment(&photo).await.expect("upload");
+
+    // The stored chunk ciphertext, before any rotation.
+    let before: Vec<(i64, Vec<u8>, Vec<u8>)> = {
+        let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+            .await
+            .unwrap();
+        let rows = sqlx::query(
+            "SELECT chunk_index, nonce, ciphertext FROM attachment_chunks ORDER BY chunk_index",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+        rows.iter()
+            .map(|r| {
+                (
+                    r.get::<i64, _>("chunk_index"),
+                    r.get::<Vec<u8>, _>("nonce"),
+                    r.get::<Vec<u8>, _>("ciphertext"),
+                )
+            })
+            .collect()
+    };
+    assert_eq!(before.len(), 2);
+
+    // Pair and revoke a second device, which forces a full key rotation.
+    let mut joiner = SealbookClient::plaintext_http();
+    let (pair_code, confirm) = joiner.pair_join(&base, "attrotalice").await.expect("join");
+    owner.pair_approve(&pair_code, &confirm).await.expect("approve");
+    assert!(joiner.pair_ready(&pair_code).await.expect("ready"));
+    joiner.login("correct horse battery").await.expect("login");
+    let joiner_device = joiner.state.as_ref().unwrap().device_id;
+    owner
+        .revoke_device(joiner_device, "correct horse battery")
+        .await
+        .expect("revoke");
+
+    // The chunk ciphertext is byte-identical after the rotation.
+    let after: Vec<(i64, Vec<u8>, Vec<u8>)> = {
+        let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+            .await
+            .unwrap();
+        let rows = sqlx::query(
+            "SELECT chunk_index, nonce, ciphertext FROM attachment_chunks ORDER BY chunk_index",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+        rows.iter()
+            .map(|r| {
+                (
+                    r.get::<i64, _>("chunk_index"),
+                    r.get::<Vec<u8>, _>("nonce"),
+                    r.get::<Vec<u8>, _>("ciphertext"),
+                )
+            })
+            .collect()
+    };
+    assert_eq!(before, after, "rotation rewrote attachment chunk ciphertext");
+
+    // And the attachment still downloads under its own unchanged key.
+    let fetched = owner.download_attachment(&reference).await.expect("download");
+    assert_eq!(fetched, photo);
+}
+
+/// A tampered chunk is caught by the client's content-hash check rather than
+/// returned as data.
+#[tokio::test]
+async fn a_tampered_chunk_fails_the_download_integrity_check() {
+    let dir = std::env::temp_dir().join(format!("sealbook-att-tamper-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "tamperalice", "correct horse battery")
+        .await
+        .expect("register");
+
+    let photo = vec![42u8; 2048];
+    let reference = client.upload_attachment(&photo).await.expect("upload");
+
+    // Flip a byte of the stored ciphertext.
+    {
+        let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE attachment_chunks
+             SET ciphertext = X'00' || SUBSTR(ciphertext, 2)
+             WHERE chunk_index = 0",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+    }
+
+    let result = client.download_attachment(&reference).await;
+    assert!(
+        matches!(result, Err(sealbook_client::ClientError::AttachmentIntegrity(_))),
+        "a tampered chunk was not rejected: {result:?}"
+    );
+}

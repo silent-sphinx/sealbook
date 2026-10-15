@@ -43,6 +43,11 @@ pub enum ClientError {
     NonUtf8Object(uuid::Uuid),
     #[error("object {0} has an envelope this build cannot read")]
     Envelope(uuid::Uuid),
+    /// A downloaded attachment's chunks did not reproduce the content hash the
+    /// owning note committed to: a withheld, reordered, truncated or substituted
+    /// chunk. Like `Manifest`, this is never retried away.
+    #[error("attachment {0} failed its integrity check; the download was tampered with or corrupt")]
+    AttachmentIntegrity(uuid::Uuid),
     #[error(
         "server speaks protocol {0}, this build speaks {expected}; update whichever is older",
         expected = sealbook_protocol::PROTOCOL_VERSION

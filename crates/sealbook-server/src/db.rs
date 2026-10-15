@@ -78,13 +78,14 @@ pub(crate) async fn open_migrated(path: &str) -> anyhow::Result<Pool<Sqlite>> {
 /// Stored in SQLite's `user_version` header field, which is transactional, so a
 /// migration and the version bump that records it commit together or not at all.
 /// Bump this and add a step to `migrate` when the schema changes.
-pub(crate) const SCHEMA_VERSION: i64 = 1;
+pub(crate) const SCHEMA_VERSION: i64 = 2;
 
 /// Brings the database up to `SCHEMA_VERSION`.
 ///
-/// Each step runs at most once per database. A database from a newer build is
-/// refused rather than opened hopefully, since this build would silently ignore
-/// columns it does not know about.
+/// Each step runs at most once per database, in order, so a database at any
+/// earlier version is carried forward one step at a time. A database from a
+/// newer build is refused rather than opened hopefully, since this build would
+/// silently ignore columns it does not know about.
 pub(crate) async fn migrate(db: &Pool<Sqlite>) -> anyhow::Result<()> {
     let version = schema_version(db).await?;
     if version > SCHEMA_VERSION {
@@ -94,10 +95,15 @@ pub(crate) async fn migrate(db: &Pool<Sqlite>) -> anyhow::Result<()> {
              against it rather than downgrading"
         );
     }
+    if version >= SCHEMA_VERSION {
+        tracing::info!(version, "database schema up to date");
+        return Ok(());
+    }
     if version < 1 {
         migrate_to_v1(db).await?;
-    } else {
-        tracing::info!(version, "database schema up to date");
+    }
+    if version < 2 {
+        migrate_to_v2(db).await?;
     }
     Ok(())
 }
@@ -373,6 +379,83 @@ async fn migrate_to_v1(db: &Pool<Sqlite>) -> anyhow::Result<()> {
     }
     tx.commit().await?;
     tracing::info!(version = 1, "database schema created");
+    Ok(())
+}
+
+/// Adds the attachment tables.
+///
+/// Attachments are a storage path of their own, deliberately apart from the
+/// sealed-object set: their chunk ciphertext is never committed to a manifest,
+/// never re-encrypted on key rotation, and never pulled by the eager change
+/// feed. So, unlike `objects`, these tables keep no revision log and no
+/// tombstones — deleting an attachment physically removes its rows in one
+/// transaction, because nothing audits an id that used to exist.
+async fn migrate_to_v2(db: &Pool<Sqlite>) -> anyhow::Result<()> {
+    let mut tx = db.begin().await?;
+    {
+        let db = &mut *tx;
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS attachments (
+                account_id TEXT NOT NULL,
+                collection_id TEXT NOT NULL,
+                attachment_id TEXT NOT NULL,
+                state TEXT NOT NULL,
+                chunk_size INTEGER NOT NULL,
+                chunk_count INTEGER NOT NULL,
+                total_plaintext_size INTEGER NOT NULL,
+                total_ciphertext_size INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                committed_at INTEGER,
+                PRIMARY KEY (account_id, collection_id, attachment_id),
+                FOREIGN KEY (account_id) REFERENCES accounts (id) ON DELETE CASCADE,
+                FOREIGN KEY (collection_id) REFERENCES collections (id) ON DELETE CASCADE
+            )",
+        )
+        .execute(&mut *db)
+        .await?;
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS attachment_chunks (
+                account_id TEXT NOT NULL,
+                collection_id TEXT NOT NULL,
+                attachment_id TEXT NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                nonce BLOB NOT NULL,
+                ciphertext BLOB NOT NULL,
+                PRIMARY KEY (account_id, collection_id, attachment_id, chunk_index),
+                FOREIGN KEY (account_id, collection_id, attachment_id)
+                    REFERENCES attachments (account_id, collection_id, attachment_id)
+                    ON DELETE CASCADE
+            )",
+        )
+        .execute(&mut *db)
+        .await?;
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS attachment_totals (
+                account_id TEXT PRIMARY KEY,
+                attachment_bytes INTEGER NOT NULL DEFAULT 0,
+                attachment_count INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (account_id) REFERENCES accounts (id) ON DELETE CASCADE
+            )",
+        )
+        .execute(&mut *db)
+        .await?;
+        for statement in [
+            // The account cascade and the per-account quota recompute both seek on
+            // the primary key, which leads on `account_id`. The collection cascade
+            // knows only a collection id, so without this it scanned the table —
+            // the same reason `objects_collection` exists.
+            "CREATE INDEX IF NOT EXISTS attachments_collection ON attachments (collection_id)",
+            // The pending-upload sweep scans by age.
+            "CREATE INDEX IF NOT EXISTS attachments_created_at ON attachments (created_at)",
+        ] {
+            sqlx::query(statement).execute(&mut *db).await?;
+        }
+        sqlx::query("PRAGMA user_version = 2")
+            .execute(&mut *db)
+            .await?;
+    }
+    tx.commit().await?;
+    tracing::info!(version = 2, "database schema upgraded");
     Ok(())
 }
 
@@ -930,6 +1013,9 @@ mod tests {
             "revision_seq",
             "manifests",
             "manifest_digest_state",
+            "attachments",
+            "attachment_chunks",
+            "attachment_totals",
         ] {
             assert!(
                 tables.iter().any(|name| name == expected),

@@ -1,6 +1,14 @@
+pub mod attachment;
 mod b64;
 pub mod envelope;
 pub mod version;
+
+pub use attachment::{
+    AttachmentListEntry, AttachmentMetaResponse, CommitAttachmentResponse,
+    CreateAttachmentRequest, CreateAttachmentResponse, ListAttachmentsResponse,
+    ATTACHMENT_CHUNK_SIZE, ATTACHMENT_CHUNK_TAG_LEN, ATTACHMENT_STATE_COMMITTED,
+    ATTACHMENT_STATE_PENDING, MAX_ATTACHMENT_SIZE,
+};
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

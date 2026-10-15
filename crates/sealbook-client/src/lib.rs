@@ -8,6 +8,7 @@
 //! [`account`] covers the operations that change the account itself.
 
 mod account;
+mod attachments;
 mod auth;
 mod client;
 mod error;
@@ -19,6 +20,7 @@ mod roster;
 mod state;
 mod tls;
 
+pub use attachments::UploadedAttachment;
 pub use client::SealbookClient;
 pub use error::{ClientError, ManifestError};
 pub use objects::ExportedObject;

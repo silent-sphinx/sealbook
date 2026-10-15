@@ -25,6 +25,7 @@ mod rate_limit;
 pub mod tls;
 
 mod account;
+mod attachments;
 mod auth;
 mod client_ip;
 mod db;
@@ -40,6 +41,7 @@ mod session;
 mod validate;
 
 use account::*;
+use attachments::*;
 use auth::*;
 use client_ip::TrustedProxies;
 use db::*;
@@ -125,6 +127,16 @@ pub struct Limits {
     /// `rotation_peak_bytes`, so it is part of the memory budget rather than a
     /// throughput setting.
     pub max_concurrent_rotations: usize,
+    /// Total attachment ciphertext bytes an account may store.
+    ///
+    /// Deliberately separate from `max_bytes`: attachments are never carried by
+    /// a rotation body and never pulled by the eager change feed, so they do not
+    /// enter the rotation budget that `max_bytes` is bound to. Folding them in
+    /// would either refuse legitimate object writes or let an unrotated,
+    /// unbounded photo store defeat the rotation invariant.
+    pub max_attachment_bytes: i64,
+    /// How many attachments an account may store.
+    pub max_attachment_count: i64,
 }
 
 impl Default for Limits {
@@ -153,6 +165,13 @@ impl Default for Limits {
             // rotation doubles the server's peak memory to buy throughput on the
             // rarest request it serves.
             max_concurrent_rotations: 1,
+            // Generous headroom for original-quality photos — a few hundred at
+            // 200 MiB each — while still an explicit, loud ceiling rather than
+            // unbounded growth. Unlike object storage this is pure disk: it is
+            // never buffered whole in memory, so it does not feed the rotation
+            // budget and can be raised independently.
+            max_attachment_bytes: 2 * 1024 * 1024 * 1024,
+            max_attachment_count: 20_000,
         }
     }
 }
@@ -178,6 +197,14 @@ impl Limits {
                 "SEALBOOK_MAX_CONCURRENT_ROTATIONS",
                 defaults.max_concurrent_rotations as i64,
             ) as usize,
+            max_attachment_bytes: read(
+                "SEALBOOK_MAX_ATTACHMENT_BYTES",
+                defaults.max_attachment_bytes,
+            ),
+            max_attachment_count: read(
+                "SEALBOOK_MAX_ATTACHMENT_COUNT",
+                defaults.max_attachment_count,
+            ),
         }
     }
 
@@ -544,6 +571,15 @@ fn spawn_session_sweeper(state: Shared) {
                     tracing::warn!(%error, "pruning oversized revision logs failed");
                 }
             }
+            match attachments::sweep_pending_attachments(&state.db).await {
+                Ok(deleted) if deleted > 0 => {
+                    info!(deleted, "swept abandoned pending attachments");
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    tracing::warn!(%error, "sweeping pending attachments failed");
+                }
+            }
             tokio::time::sleep(SESSION_SWEEP_INTERVAL).await;
         }
     });
@@ -812,6 +848,15 @@ const OBJECT_TIMEOUT: Duration = Duration::from_secs(120);
 /// not going to.
 const ROTATION_TIMEOUT: Duration = Duration::from_secs(600);
 
+/// Largest request body on the attachment routes.
+///
+/// The chunk upload carries one sealed chunk as raw bytes — plaintext up to
+/// `ATTACHMENT_CHUNK_SIZE` plus the AEAD tag, with no base64 expansion since the
+/// body is octet-stream, not JSON. The small slack covers the tag and framing.
+/// The other attachment routes are small JSON and comfortably under this.
+const MAX_ATTACHMENT_BODY: usize =
+    sealbook_protocol::ATTACHMENT_CHUNK_SIZE + 64 * 1024;
+
 fn router(state: Shared) -> Router<Shared> {
     // The three route groups differ in how much they may carry and how long they
     // may take, so each gets its own budget rather than one number that has to be
@@ -884,9 +929,37 @@ fn router(state: Shared) -> Router<Shared> {
             ROTATION_TIMEOUT,
         ));
 
+    // Attachments are their own path: large raw-byte chunk bodies, but no
+    // manifest, no rotation, and a lazy per-chunk fetch rather than the eager
+    // change feed. They get the object timeout (a chunk may be slow on a poor
+    // uplink) and a chunk-sized body limit.
+    let attachments = Router::new()
+        .route(
+            "/v1/collections/{id}/attachments",
+            post(create_attachment).get(list_attachments),
+        )
+        .route(
+            "/v1/collections/{id}/attachments/{attachment_id}",
+            get(get_attachment_meta).delete(delete_attachment),
+        )
+        .route(
+            "/v1/collections/{id}/attachments/{attachment_id}/commit",
+            post(commit_attachment),
+        )
+        .route(
+            "/v1/collections/{id}/attachments/{attachment_id}/chunks/{index}",
+            put(upload_chunk).get(download_chunk),
+        )
+        .layer(DefaultBodyLimit::max(MAX_ATTACHMENT_BODY))
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            OBJECT_TIMEOUT,
+        ));
+
     small
         .merge(objects)
         .merge(rotation)
+        .merge(attachments)
         .layer(from_fn(security_headers))
         .layer(cors_layer())
 }

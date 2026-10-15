@@ -552,6 +552,129 @@ pub fn new_collection_key() -> String {
     b64(CollectionKey::generate().as_bytes())
 }
 
+// --- Attachments -----------------------------------------------------------
+//
+// Binary-safe by design, unlike `seal_object`/`open_object`: a photo's bytes are
+// never valid UTF-8, so these take and return raw `Vec<u8>` (a `Uint8Array` on
+// the JS side) and carry the nonce as a base64 string alongside. The attachment
+// key is independent of any collection key — it lives inside the owning note's
+// sealed JSON — so a key rotation never has to touch stored chunks.
+
+fn adk_from_b64(s: &str) -> Result<sealbook_crypto::AttachmentKey, JsError> {
+    let bytes = unb64(s)?;
+    if bytes.len() != sealbook_crypto::ATTACHMENT_KEY_LEN {
+        return Err(JsError::new("attachment key length"));
+    }
+    let mut key = [0u8; sealbook_crypto::ATTACHMENT_KEY_LEN];
+    key.copy_from_slice(&bytes);
+    Ok(sealbook_crypto::AttachmentKey::from_bytes(key))
+}
+
+/// A fresh random attachment key, base64url, to store in the owning note.
+#[wasm_bindgen]
+pub fn new_attachment_key() -> String {
+    b64(sealbook_crypto::AttachmentKey::generate().as_bytes())
+}
+
+/// Seals one attachment chunk. Returns the 24-byte nonce followed by the
+/// ciphertext in one buffer; the caller splits the first `nonceLen()` bytes off
+/// as the nonce and sends the rest as the chunk body.
+#[wasm_bindgen]
+pub fn seal_attachment_chunk(
+    adk_b64: &str,
+    attachment_id: &str,
+    collection_id: &str,
+    chunk_index: u32,
+    chunk_count: u32,
+    plaintext: &[u8],
+) -> Result<Vec<u8>, JsError> {
+    let attachment_id = parse_uuid(attachment_id)?;
+    let collection_id = parse_uuid(collection_id)?;
+    let aad = sealbook_crypto::attachment_chunk_aad(
+        attachment_id.as_bytes(),
+        collection_id.as_bytes(),
+        chunk_index,
+        chunk_count,
+    );
+    let sealed =
+        sealbook_crypto::encrypt_chunk(&adk_from_b64(adk_b64)?, plaintext, &aad).map_err(js_err)?;
+    let mut out = Vec::with_capacity(sealed.nonce.len() + sealed.ciphertext.len());
+    out.extend_from_slice(&sealed.nonce);
+    out.extend_from_slice(&sealed.ciphertext);
+    Ok(out)
+}
+
+/// Opens one attachment chunk, returning its plaintext bytes.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn open_attachment_chunk(
+    adk_b64: &str,
+    attachment_id: &str,
+    collection_id: &str,
+    chunk_index: u32,
+    chunk_count: u32,
+    nonce_b64: &str,
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, JsError> {
+    let attachment_id = parse_uuid(attachment_id)?;
+    let collection_id = parse_uuid(collection_id)?;
+    let nonce_bytes = unb64(nonce_b64)?;
+    if nonce_bytes.len() != sealbook_crypto::NONCE_LEN {
+        return Err(JsError::new("nonce length"));
+    }
+    let mut nonce = [0u8; sealbook_crypto::NONCE_LEN];
+    nonce.copy_from_slice(&nonce_bytes);
+    let aad = sealbook_crypto::attachment_chunk_aad(
+        attachment_id.as_bytes(),
+        collection_id.as_bytes(),
+        chunk_index,
+        chunk_count,
+    );
+    sealbook_crypto::decrypt_chunk(
+        &adk_from_b64(adk_b64)?,
+        &sealbook_crypto::EncryptedChunk {
+            nonce,
+            ciphertext: ciphertext.to_vec(),
+        },
+        &aad,
+    )
+    .map_err(js_err)
+}
+
+/// Rolls per-chunk plaintext hashes into one attachment content hash, fed chunk
+/// by chunk. Exposed as a class so the web client produces the exact hash the
+/// Rust verifier expects, on both upload and download.
+#[wasm_bindgen]
+pub struct AttachmentHash {
+    inner: sealbook_crypto::AttachmentHasher,
+}
+
+#[wasm_bindgen]
+impl AttachmentHash {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: sealbook_crypto::AttachmentHasher::new(),
+        }
+    }
+
+    pub fn update(&mut self, chunk_plaintext: &[u8]) {
+        self.inner.update(chunk_plaintext);
+    }
+
+    /// Consumes the hasher and returns the base64url content hash. Each instance
+    /// finalizes once; the JS wrapper must not reuse it afterward.
+    pub fn finalize(self) -> String {
+        b64(&self.inner.finalize())
+    }
+}
+
+impl Default for AttachmentHash {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[wasm_bindgen]
 pub fn new_uuid() -> String {
     Uuid::new_v4().to_string()

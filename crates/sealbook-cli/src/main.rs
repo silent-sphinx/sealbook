@@ -1161,9 +1161,13 @@ fn bookmark_collection_id(json: &str, fallback: Uuid) -> Uuid {
 
 /// Every key this CLI writes for a note.
 ///
-/// Shorter than the web client's list: `pinned` and `parentId` are the web's to
-/// manage, and leaving them out of this set is what carries them through an edit
-/// made here.
+/// Shorter than the web client's list: `pinned`, `parentId` and `attachments`
+/// are the web's to manage, and leaving them out of this set is what carries
+/// them through an edit made here. `attachments` in particular must never be
+/// added: `merge_payload` overwrites only the keys named here and preserves the
+/// rest, so naming it would make the next CLI edit drop every photo reference in
+/// the note (the same silent loss `pinned` and `parentId` would suffer). This is
+/// pinned by `note_edit_preserves_unknown_web_fields`.
 const NOTE_KEYS: &[&str] = &[
     "@type",
     "version",
@@ -1707,6 +1711,51 @@ mod tests {
         assert_eq!(value["pinned"], true);
         assert_eq!(value["parentId"], Uuid::from_u128(9).to_string());
         assert_eq!(value["tableOfContents"], true);
+    }
+
+    #[test]
+    fn note_edit_preserves_unknown_web_fields() {
+        // Photo attachments are written only by sealbook-web, as an `attachments`
+        // array the CLI never touches. An edit here must carry it through intact:
+        // if `attachments` were ever added to NOTE_KEYS, this rebuild would drop
+        // every photo reference in the note.
+        let attachments = serde_json::json!([
+            {
+                "id": Uuid::from_u128(42).to_string(),
+                "filename": "sunset.jpg",
+                "mimeType": "image/jpeg",
+                "byteSize": 1_234_567,
+                "adk": "Zm9vYmFy",
+                "contentHash": "YmF6cXV4",
+                "chunkSize": 4_194_304,
+                "chunkCount": 1,
+            }
+        ]);
+        let stored = serde_json::json!({
+            "@type": "Note",
+            "version": "1.0",
+            "title": "old",
+            "body": "see photo",
+            "notebookId": Uuid::from_u128(2).to_string(),
+            "createdAt": "2020-05-04T03:02:01Z",
+            "updatedAt": "2020-05-04T03:02:01Z",
+            "attachments": attachments.clone(),
+        })
+        .to_string();
+
+        let json = note_json(
+            "new title",
+            "see photo, edited",
+            Uuid::from_u128(2),
+            Some("2020-05-04T03:02:01Z"),
+            Some(&stored),
+        );
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["title"], "new title");
+        assert_eq!(
+            value["attachments"], attachments,
+            "editing a note through the CLI dropped its photo attachments"
+        );
     }
 
     #[test]
