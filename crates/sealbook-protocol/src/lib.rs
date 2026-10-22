@@ -28,6 +28,8 @@ pub const NOTE_CONTENT_TYPE: &str = "application/sealbook.note+json";
 pub const NOTEBOOK_CONTENT_TYPE: &str = "application/sealbook.notebook+json";
 pub const BOOKMARK_CONTENT_TYPE: &str = "application/sealbook.bookmark+json";
 pub const BOOKMARK_COLLECTION_CONTENT_TYPE: &str = "application/sealbook.bookmark-collection+json";
+pub const TASK_CONTENT_TYPE: &str = "application/sealbook.task+json";
+pub const TASK_LIST_CONTENT_TYPE: &str = "application/sealbook.task-list+json";
 pub const ADDRESS_BOOK_ID_PROP: &str = "sealbook:addressBookId";
 
 /// The `@type` and `version` of a full account export, the one file that carries
@@ -58,6 +60,7 @@ pub const DEFAULT_ADDRESS_BOOK_NAME: &str = "Default Address Book";
 pub const DEFAULT_NOTEBOOK_NAME: &str = "Default Notebook";
 pub const DEFAULT_CALENDAR_NAME: &str = "Default Calendar";
 pub const DEFAULT_BOOKMARK_COLLECTION_NAME: &str = "Default Collection";
+pub const DEFAULT_TASK_LIST_NAME: &str = "Default Task List";
 
 /// Colour the default calendar is created with. Unlike a name, a calendar's
 /// colour is part of its payload, so the clients have to agree on one for the
@@ -66,16 +69,17 @@ pub const DEFAULT_CALENDAR_COLOR: &str = "#7aa2f7";
 
 /// Reserved object ids: 1 is the default address book, 2 the default notebook,
 /// 3 the default calendar, 4 the account settings object, 5 the default
-/// bookmark collection. A new feature takes the next free number rather than
-/// reusing one: the settings object sat on 3 in the web client before the
-/// default calendar existed, and the two writers then overwrote each other. Ids
-/// are listed here even when only one client writes the object, so the next one
-/// cannot pick a number that is taken.
+/// bookmark collection, 6 the default task list. A new feature takes the next
+/// free number rather than reusing one: the settings object sat on 3 in the web
+/// client before the default calendar existed, and the two writers then
+/// overwrote each other. Ids are listed here even when only one client writes
+/// the object, so the next one cannot pick a number that is taken.
 pub const DEFAULT_ADDRESS_BOOK_ID: Uuid = Uuid::from_u128(1);
 pub const DEFAULT_NOTEBOOK_ID: Uuid = Uuid::from_u128(2);
 pub const DEFAULT_CALENDAR_ID: Uuid = Uuid::from_u128(3);
 pub const ACCOUNT_SETTINGS_ID: Uuid = Uuid::from_u128(4);
 pub const DEFAULT_BOOKMARK_COLLECTION_ID: Uuid = Uuid::from_u128(5);
+pub const DEFAULT_TASK_LIST_ID: Uuid = Uuid::from_u128(6);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ErrorBody {
