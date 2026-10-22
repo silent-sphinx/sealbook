@@ -1995,6 +1995,38 @@ mod tests {
     }
 
     #[test]
+    fn a_task_object_survives_an_export_and_import_untouched() {
+        let task = r#"{"@type":"Task","version":"1.0","title":"Water plants","taskListId":"00000000-0000-0000-0000-000000000006","dueDate":"2026-10-23T08:30:00.000Z","priority":7,"parentId":"p1","recurrence":{"frequency":"weekly","weekdays":[1,4],"interval":2},"recurrenceAnchor":"2026-10-22","completions":["2026-10-15T09:00:00.000Z"],"dueTimezone":"Europe/London"}"#;
+        let list = r##"{"@type":"TaskList","version":"1.0","name":"Work","color":"#7aa2f7"}"##;
+        let objects = vec![
+            exported(1, sealbook_client::TASK_CONTENT_TYPE, task),
+            exported(2, sealbook_client::TASK_LIST_CONTENT_TYPE, list),
+        ];
+        let document = account_export(&export_state(), objects, "2026-10-22T00:00:00Z");
+
+        let exported_task = &document["objects"][0]["payload"];
+        assert_eq!(exported_task["priority"], 7);
+        assert_eq!(exported_task["recurrence"]["weekdays"][1], 4);
+        assert_eq!(exported_task["dueTimezone"], "Europe/London");
+
+        let import = parse_account_export(&document.to_string()).unwrap();
+        let read: Vec<(String, serde_json::Value)> = import
+            .objects
+            .into_iter()
+            .map(|object| {
+                (
+                    object.content_type,
+                    serde_json::from_str(&object.payload).unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(read[0].0, "application/sealbook.task+json");
+        assert_eq!(read[0].1, serde_json::from_str::<serde_json::Value>(task).unwrap());
+        assert_eq!(read[1].0, "application/sealbook.task-list+json");
+        assert_eq!(read[1].1, serde_json::from_str::<serde_json::Value>(list).unwrap());
+    }
+
+    #[test]
     fn an_export_reads_back_as_the_objects_it_was_written_from() {
         let objects = vec![
             exported(1, "application/jscontact+json", r#"{"@type":"Card"}"#),

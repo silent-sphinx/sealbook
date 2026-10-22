@@ -364,6 +364,10 @@ impl SealbookClient {
         Ok(out)
     }
 
+    // Tasks and task lists are written only by sealbook-web, and there is no
+    // writer for them here. A CLI task command must go through `merge_payload`
+    // with a short owned-key set, as `jscontact` does, and must not rebuild the
+    // payload as `note_json` does: that drops every field it does not name.
     pub async fn put_bookmark(
         &mut self,
         object_id: Uuid,

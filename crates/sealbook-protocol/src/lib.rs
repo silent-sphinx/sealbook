@@ -1029,4 +1029,42 @@ mod tests {
         assert!(MIN_PADDED_OBJECT_SIZE.is_power_of_two());
         assert!(MAX_PADDED_OBJECT_SIZE.is_power_of_two());
     }
+
+    #[test]
+    fn the_reserved_object_ids_are_distinct() {
+        let ids = [
+            DEFAULT_ADDRESS_BOOK_ID,
+            DEFAULT_NOTEBOOK_ID,
+            DEFAULT_CALENDAR_ID,
+            ACCOUNT_SETTINGS_ID,
+            DEFAULT_BOOKMARK_COLLECTION_ID,
+            DEFAULT_TASK_LIST_ID,
+        ];
+        let distinct: std::collections::BTreeSet<_> = ids.iter().collect();
+        assert_eq!(distinct.len(), ids.len());
+        assert_eq!(
+            DEFAULT_TASK_LIST_ID.to_string(),
+            "00000000-0000-0000-0000-000000000006"
+        );
+    }
+
+    #[test]
+    fn the_content_types_are_distinct() {
+        let types = [
+            JSCONTACT_CONTENT_TYPE,
+            ADDRESS_BOOK_CONTENT_TYPE,
+            CALENDAR_EVENT_CONTENT_TYPE,
+            CALENDAR_CONTENT_TYPE,
+            NOTE_CONTENT_TYPE,
+            NOTEBOOK_CONTENT_TYPE,
+            BOOKMARK_CONTENT_TYPE,
+            BOOKMARK_COLLECTION_CONTENT_TYPE,
+            TASK_CONTENT_TYPE,
+            TASK_LIST_CONTENT_TYPE,
+        ];
+        let distinct: std::collections::BTreeSet<_> = types.iter().collect();
+        assert_eq!(distinct.len(), types.len());
+        assert_eq!(TASK_CONTENT_TYPE, "application/sealbook.task+json");
+        assert_eq!(TASK_LIST_CONTENT_TYPE, "application/sealbook.task-list+json");
+    }
 }
