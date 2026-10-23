@@ -12,6 +12,7 @@ use serde::Serialize;
 use sealbook_crypto::opaque::OPAQUE_KSF;
 use sealbook_crypto::{PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE};
 use sealbook_protocol::PROTOCOL_VERSION;
+use tower_http::cors::AllowOrigin;
 
 use crate::*;
 
@@ -46,6 +47,25 @@ pub(crate) async fn crypto_profile() -> Json<CryptoProfile> {
         opaque_ksf: OPAQUE_KSF,
         opaque_requires_device_proof: true,
     })
+}
+
+/// True for a browser extension's own origin.
+///
+/// Firefox randomises the `moz-extension://` UUID per install, so an extension
+/// has no stable origin an operator could put in `SEALBOOK_CORS_ORIGINS`. The
+/// scheme is accepted instead. This is not a widening of access: the API
+/// authenticates with a bearer token and sets no cookies, `cors_layer` does not
+/// allow credentials, and an extension holding host permissions bypasses CORS
+/// regardless. It only stops the browser discarding a response the server was
+/// always willing to serve.
+fn is_extension_origin(origin: &HeaderValue) -> bool {
+    origin
+        .to_str()
+        .map(|value| {
+            let value = value.to_ascii_lowercase();
+            value.starts_with("moz-extension://") || value.starts_with("chrome-extension://")
+        })
+        .unwrap_or(false)
 }
 
 pub(crate) fn cors_layer() -> CorsLayer {
@@ -85,7 +105,7 @@ pub(crate) fn cors_layer() -> CorsLayer {
 
     if origins.is_empty() && crate::is_production() {
         tracing::warn!(
-            "no CORS origins configured; set SEALBOOK_CORS_ORIGINS to the web client's origin or browsers will block it"
+            "no CORS origins configured; browser extensions are still allowed, but set SEALBOOK_CORS_ORIGINS to reach this API from the web client"
         );
     } else {
         tracing::info!(
@@ -99,7 +119,9 @@ pub(crate) fn cors_layer() -> CorsLayer {
     // request) and exposed (so the browser lets JS read it on the response).
     let nonce_header = HeaderName::from_static("x-sealbook-nonce");
     CorsLayer::new()
-        .allow_origin(origins)
+        .allow_origin(AllowOrigin::predicate(move |origin, _parts| {
+            is_extension_origin(origin) || origins.iter().any(|allowed| allowed == origin)
+        }))
         .allow_methods([
             Method::GET,
             Method::POST,
@@ -209,6 +231,88 @@ mod tests {
         assert!(
             expose.contains("x-sealbook-nonce"),
             "response did not expose the nonce header: {expose:?}"
+        );
+    }
+    /// A browser extension's origin has no stable spelling an operator could
+    /// configure, so the scheme is accepted on its own. The negative case keeps
+    /// the predicate from quietly becoming allow-all.
+    #[tokio::test]
+    async fn the_cors_policy_allows_extension_origins_but_not_arbitrary_ones() {
+        let app = Router::new()
+            .route("/x", get(|| async { "ok" }))
+            .layer(cors_layer());
+        let extension = "moz-extension://0123abcd-dead-beef-0000-feedfacecafe";
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/x")
+                    .header("origin", extension)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response
+                .headers()
+                .get("access-control-allow-origin")
+                .and_then(|v| v.to_str().ok()),
+            Some(extension),
+            "the extension origin was not echoed"
+        );
+
+        // The write path: a PUT carrying the bearer token needs a preflight.
+        let preflight = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::OPTIONS)
+                    .uri("/x")
+                    .header("origin", extension)
+                    .header("access-control-request-method", "PUT")
+                    .header("access-control-request-headers", "authorization")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            preflight
+                .headers()
+                .get("access-control-allow-origin")
+                .and_then(|v| v.to_str().ok()),
+            Some(extension),
+            "the preflight did not allow the extension origin"
+        );
+        let allow = preflight
+            .headers()
+            .get("access-control-allow-headers")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        assert!(
+            allow.contains("authorization"),
+            "the preflight did not allow the bearer token: {allow:?}"
+        );
+
+        let rejected = app
+            .oneshot(
+                Request::builder()
+                    .uri("/x")
+                    .header("origin", "https://evil.example")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            rejected
+                .headers()
+                .get("access-control-allow-origin")
+                .is_none(),
+            "an unconfigured origin was echoed"
         );
     }
 }
