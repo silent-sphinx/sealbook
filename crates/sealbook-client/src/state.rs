@@ -35,6 +35,27 @@ pub struct LocalState {
     pub roster_transcript: Vec<u8>,
 }
 
+impl LocalState {
+    /// The same fields core names, for the decisions core makes.
+    pub fn to_core(&self) -> sealbook_core::CoreDeviceState {
+        sealbook_core::CoreDeviceState {
+            server: self.server.clone(),
+            username: self.username.clone(),
+            account_id: self.account_id,
+            collection_id: self.collection_id,
+            device_id: self.device_id,
+            session_token: self.session_token.clone(),
+            kdf_salt: self.kdf_salt.clone(),
+            hpke_sk: self.hpke_sk.clone(),
+            mldsa_seed: self.mldsa_seed.clone(),
+            ed25519_sk: self.ed25519_sk.clone(),
+            manifest_seq: self.manifest_seq,
+            roster_seq: self.roster_seq,
+            roster_transcript: self.roster_transcript.clone(),
+        }
+    }
+}
+
 impl Drop for LocalState {
     fn drop(&mut self) {
         self.hpke_sk.zeroize();

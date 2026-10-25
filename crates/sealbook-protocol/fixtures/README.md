@@ -33,6 +33,25 @@ both builds already require for the wasm module and the JNI library.
   same bytes. Pins the keys and values of the calendar plaintext, which no
   server check covers.
 
+- `rosters/chain-with-revoke.json` — three roster steps under one collection
+  key: alpha alone, alpha and beta, then alpha again with beta revoked. Carries
+  the collection key and the device ids, so a reader can verify the chain rather
+  than only parse it. Pins the one case no other fixture covers, a device that
+  was in the account and is no longer, and it is what `sealbook-core`'s roster
+  tests, `sealbook-web/src/lib/rosterParity.test.ts` and Android's
+  `RosterChainTest` are all held to.
+
+  Generated from fixed seeds by the ignored
+  `regenerate_the_roster_chain_fixture` test in
+  `crates/sealbook-core/tests/roster.rs`:
+
+  ```
+  REGENERATE_ROSTER_FIXTURE=1 cargo test -p sealbook-core -- --ignored regenerate
+  ```
+
+  `the_checked_in_fixture_is_what_the_generator_builds` compares transcripts
+  rather than bytes, because ML-DSA signing need not be deterministic.
+
 One payload per remaining content type is phase 8 work in `UNIFICATION_PLAN.md`,
 added as each type moves into `sealbook-core`.
 

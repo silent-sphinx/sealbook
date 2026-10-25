@@ -25,7 +25,7 @@ pub struct SealbookClient {
     /// matches: a revocation is always a rotation, so the epoch moving is what a
     /// device having been removed looks like from here, and a signer the cache
     /// does not hold is what a pairing elsewhere looks like. Either refetches.
-    pub(crate) roster_cache: Option<(u64, Vec<DevicePublicKeys>)>,
+    pub(crate) roster_cache: Option<(sealbook_core::CoreRoster, Vec<DevicePublicKeys>)>,
 }
 
 impl SealbookClient {
@@ -152,6 +152,59 @@ impl SealbookClient {
         parse(req.send().await?).await
     }
 
+    /// Sends what core asked for and hands back what came, unparsed.
+    ///
+    /// Non-2xx is raised here with the server's own message rather than passed
+    /// on, so core only ever sees a response it is meant to read. The bearer
+    /// token is added here too: session refresh is the shell's business.
+    pub(crate) async fn send(
+        &self,
+        request: &sealbook_core::HttpRequest,
+        token: Option<&str>,
+    ) -> Result<sealbook_core::HttpResponse, ClientError> {
+        let state = self.state.as_ref().ok_or(ClientError::NoState)?;
+        let url = format!("{}{}", state.server, request.path);
+        let mut req = match request.method {
+            sealbook_core::Method::Get => self.http.get(url),
+            sealbook_core::Method::Post => self.http.post(url),
+            sealbook_core::Method::Put => self.http.put(url),
+            sealbook_core::Method::Delete => self.http.delete(url),
+        };
+        for header in &request.headers {
+            req = req.header(header.name.as_str(), header.value.as_str());
+        }
+        if !request.body.is_empty() {
+            req = req.body(request.body.clone());
+        }
+        if let Some(token) = token {
+            req = req.bearer_auth(token);
+        }
+        let resp = req.send().await?;
+        let status = resp.status();
+        let headers: Vec<sealbook_core::Header> = resp
+            .headers()
+            .iter()
+            .filter_map(|(name, value)| {
+                value.to_str().ok().map(|value| sealbook_core::Header {
+                    name: name.as_str().to_owned(),
+                    value: value.to_owned(),
+                })
+            })
+            .collect();
+        let bytes = resp.bytes().await?;
+        if !status.is_success() {
+            let msg = serde_json::from_slice::<sealbook_protocol::ErrorBody>(&bytes)
+                .map(|e| e.error)
+                .unwrap_or_else(|_| String::from_utf8_lossy(&bytes).into_owned());
+            return Err(ClientError::Server(msg));
+        }
+        Ok(sealbook_core::HttpResponse {
+            status: status.as_u16(),
+            headers,
+            body: bytes.to_vec(),
+        })
+    }
+
     /// Header carrying an attachment chunk's base64url nonce, matching the server.
     pub(crate) const NONCE_HEADER: &'static str = "x-sealbook-nonce";
 
@@ -188,11 +241,7 @@ impl SealbookClient {
 
     /// DELETEs a resource whose success response carries no body (204), so there
     /// is nothing to parse. Used by the attachment delete, which is idempotent.
-    pub(crate) async fn delete_no_body(
-        &self,
-        url: &str,
-        token: &str,
-    ) -> Result<(), ClientError> {
+    pub(crate) async fn delete_no_body(&self, url: &str, token: &str) -> Result<(), ClientError> {
         let resp = self.http.delete(url).bearer_auth(token).send().await?;
         let status = resp.status();
         if !status.is_success() {

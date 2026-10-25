@@ -12,6 +12,8 @@ use zeroize::Zeroize;
 /// bindings and persisted by the host, so the copy that lives long enough to
 /// matter is the host's. The CLI keeps that wiping in its own `LocalState`
 /// wrapper rather than aliasing this type.
+///
+/// No `Debug`: it carries the device's signing and HPKE secrets.
 #[derive(Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
@@ -43,6 +45,20 @@ pub struct CoreDeviceState {
 }
 
 impl CoreDeviceState {
+    /// The fields a roster decision reads, in the shape core's roster module
+    /// takes them.
+    pub fn roster_context(&self) -> crate::RosterContext {
+        crate::RosterContext {
+            collection_id: self.collection_id,
+            device_id: self.device_id,
+            roster_seq: self.roster_seq,
+            roster_transcript: base64::Engine::encode(
+                &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+                &self.roster_transcript,
+            ),
+        }
+    }
+
     /// The pin to check a roster chain against, or `None` while unpinned.
     ///
     /// A nonzero sequence whose transcript is not a 32-byte digest is an error,

@@ -13,6 +13,7 @@
 
 mod error;
 mod http;
+mod roster;
 mod state;
 
 // uniffi's scaffolding and custom types have to sit in the crate root.
@@ -31,6 +32,11 @@ uniffi::custom_type!(Uuid, String, {
 
 pub use error::CoreError;
 pub use http::{Header, HttpRequest, HttpResponse, Method, Step};
+pub use roster::{
+    pin_roster, read_roster, roster_accept, roster_accept_sealed, roster_answers_for,
+    roster_request, CoreDevice, CoreRoster, CoreRosterPin, CoreRosterSigner, RosterContext,
+    VerifiedRoster,
+};
 pub use state::{CoreDeviceState, CoreSession};
 
 pub use sealbook_protocol::{PAYLOAD_SCHEMA_VERSION, PROTOCOL_VERSION};
@@ -99,7 +105,6 @@ mod tests {
         state.roster_transcript = vec![0; 7];
         assert!(matches!(state.roster_pin(), Err(CoreError::Roster { .. })));
 
-        let mut state = state;
         state.roster_seq = 0;
         state.roster_transcript = vec![0; 32];
         assert!(matches!(state.roster_pin(), Err(CoreError::Roster { .. })));

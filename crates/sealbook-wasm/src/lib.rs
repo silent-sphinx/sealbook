@@ -1,6 +1,9 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use sealbook_core::CoreBuild;
+use sealbook_core::{
+    CoreBuild, CoreRoster, CoreRosterPin, CoreSession, HttpRequest, HttpResponse, RosterContext,
+    VerifiedRoster,
+};
 use sealbook_crypto::opaque::{
     client_login_finish, client_login_start, client_register_finish, client_register_start,
     ClientLogin, ClientRegistration, SealbookCipherSuite,
@@ -1639,4 +1642,109 @@ pub fn roster_verify(
 #[wasm_bindgen]
 pub fn core_build() -> Result<Ts<CoreBuild>, JsError> {
     Ok(sealbook_core::core_build().into_ts()?)
+}
+
+/// Core's errors cross as their serialized form rather than as a sentence, so
+/// the host maps a variant onto its own error class instead of matching text.
+fn core_err(err: sealbook_core::CoreError) -> JsError {
+    JsError::new(&serde_json::to_string(&err).unwrap_or_else(|_| err.kind().to_owned()))
+}
+
+/// The request that fetches the roster history this device can check.
+///
+/// `path` is server-relative: the caller prefixes its own API root and adds the
+/// bearer token, which core never sees.
+#[wasm_bindgen]
+pub fn core_roster_request(context: Ts<RosterContext>) -> Result<Ts<HttpRequest>, JsError> {
+    Ok(sealbook_core::roster_request(&context.to_rust()?)
+        .map_err(core_err)?
+        .into_ts()?)
+}
+
+/// Verifies a served roster history from this device's pin.
+///
+/// The body crosses as the text the server sent rather than as bytes, because
+/// `Vec<u8>` crosses as `number[]` and a roster history is tens of kilobytes.
+/// `ck_b64` empty means no collection key is held, which only an already pinned
+/// device can verify from. Does not move the pin; `core_pin_roster` does.
+#[wasm_bindgen]
+pub fn core_roster_accept(
+    context: Ts<RosterContext>,
+    ck_b64: &str,
+    key_epoch: u64,
+    status: u16,
+    body: &str,
+) -> Result<Ts<VerifiedRoster>, JsError> {
+    let response = HttpResponse {
+        status,
+        headers: Vec::new(),
+        body: body.as_bytes().to_vec(),
+    };
+    Ok(sealbook_core::roster_accept(
+        &context.to_rust()?,
+        &core_session(ck_b64, key_epoch)?,
+        &response,
+    )
+    .map_err(core_err)?
+    .into_ts()?)
+}
+
+/// Verifies a roster this device sealed itself, once the server has accepted it.
+#[wasm_bindgen]
+pub fn core_roster_accept_sealed(
+    context: Ts<RosterContext>,
+    ck_b64: &str,
+    roster_json: &str,
+) -> Result<Ts<VerifiedRoster>, JsError> {
+    Ok(sealbook_core::roster_accept_sealed(
+        &context.to_rust()?,
+        &core_session(ck_b64, 0)?,
+        roster_json,
+    )
+    .map_err(core_err)?
+    .into_ts()?)
+}
+
+/// The roster fields to persist, refusing a pin that would move backwards.
+#[wasm_bindgen]
+pub fn core_pin_roster(
+    context: Ts<RosterContext>,
+    pin: Ts<CoreRosterPin>,
+) -> Result<Ts<RosterContext>, JsError> {
+    Ok(
+        sealbook_core::pin_roster(&context.to_rust()?, &pin.to_rust()?)
+            .map_err(core_err)?
+            .into_ts()?,
+    )
+}
+
+/// Whether a roster already in hand can answer for `signer`, or the chain has
+/// to be walked again.
+#[wasm_bindgen]
+pub fn core_roster_answers_for(
+    cached: Ts<CoreRoster>,
+    key_epoch: Option<u64>,
+    signer: Option<String>,
+) -> Result<bool, JsError> {
+    let signer = signer.as_deref().map(parse_uuid).transpose()?;
+    Ok(sealbook_core::roster_answers_for(
+        Some(&cached.to_rust()?),
+        key_epoch,
+        signer,
+    ))
+}
+
+/// `roster_accept_sealed` reads the epoch off the roster, so the 0 passed here
+/// is never the one the MAC is checked at.
+fn core_session(ck_b64: &str, key_epoch: u64) -> Result<CoreSession, JsError> {
+    let collection_key = if ck_b64.is_empty() {
+        None
+    } else {
+        Some(ck_from_b64(ck_b64)?.0)
+    };
+    Ok(CoreSession {
+        collection_key,
+        key_epoch,
+        verified_roster: None,
+    })
 }

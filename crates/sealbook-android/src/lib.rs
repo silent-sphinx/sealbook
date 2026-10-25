@@ -4,6 +4,7 @@ use sealbook_crypto::opaque::{
     client_login_finish, client_login_start, client_register_finish, client_register_start,
     ClientLogin, ClientRegistration, SealbookCipherSuite,
 };
+use sealbook_crypto::phrase_recovery_keys;
 use sealbook_crypto::{
     account_op_transcript, content_digest, decrypt_object, delete_account_payload, encrypt_object,
     enrollment_transcript, entropy_from_phrase, generate_device_hpke, generate_device_signing,
@@ -19,7 +20,6 @@ use sealbook_crypto::{
     RecoveryWrap, WrapDigestEntry, PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE,
     XWING_CIPHERSUITE,
 };
-use sealbook_crypto::{phrase_recovery_keys, RosterPin};
 use sealbook_protocol::envelope::{open_envelope, seal_envelope, Unsealed};
 use sealbook_protocol::{DevicePublicKeys, RosterBody, RosterSignerBody, SEALED_CONTENT_TYPE};
 use uuid::Uuid;
@@ -1220,57 +1220,6 @@ pub fn roster_seal_phrase(
         &ck_from_b64(&ck_b64)?,
     )?;
     serde_json::to_string(&roster).map_err(roster_err)
-}
-
-#[derive(uniffi::Record)]
-pub struct VerifiedRoster {
-    /// The verified roster in wire format. Its devices are the only ones to wrap
-    /// the collection key for or accept manifest signatures from.
-    pub roster_json: String,
-    /// The pin to store in place of the old one.
-    pub pin_seq: u64,
-    pub pin_transcript: String,
-}
-
-/// Verifies a served roster history from this device's pin.
-///
-/// `pin_seq` 0 means nothing is pinned yet, in which case `ck_b64` and
-/// `key_epoch` must be the current collection key and its epoch.
-#[uniffi::export]
-#[allow(clippy::too_many_arguments)]
-pub fn roster_verify(
-    collection_id: String,
-    pin_seq: u64,
-    pin_transcript_b64: String,
-    rosters_json: String,
-    ck_b64: Option<String>,
-    key_epoch: u64,
-    self_device_id: String,
-) -> Result<VerifiedRoster, CryptoError> {
-    let collection = parse_uuid(&collection_id)?;
-    let pin = if pin_seq == 0 {
-        None
-    } else {
-        Some(RosterPin {
-            roster_seq: pin_seq,
-            transcript: digest32(&pin_transcript_b64)?,
-        })
-    };
-    let chain: Vec<RosterBody> = serde_json::from_str(&rosters_json).map_err(roster_err)?;
-    let key = ck_b64.as_deref().map(ck_from_b64).transpose()?;
-    let latest = RosterBody::verify_chain(
-        collection,
-        pin,
-        chain,
-        key.as_ref().map(|key| (key, key_epoch)),
-        parse_uuid(&self_device_id)?,
-    )?;
-    let pin = latest.pin(collection);
-    Ok(VerifiedRoster {
-        roster_json: serde_json::to_string(&latest).map_err(roster_err)?,
-        pin_seq: pin.roster_seq,
-        pin_transcript: b64(&pin.transcript),
-    })
 }
 
 #[derive(uniffi::Record)]

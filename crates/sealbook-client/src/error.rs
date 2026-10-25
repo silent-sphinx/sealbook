@@ -46,7 +46,9 @@ pub enum ClientError {
     /// A downloaded attachment's chunks did not reproduce the content hash the
     /// owning note committed to: a withheld, reordered, truncated or substituted
     /// chunk. Like `Manifest`, this is never retried away.
-    #[error("attachment {0} failed its integrity check; the download was tampered with or corrupt")]
+    #[error(
+        "attachment {0} failed its integrity check; the download was tampered with or corrupt"
+    )]
     AttachmentIntegrity(uuid::Uuid),
     #[error(
         "server speaks protocol {0}, this build speaks {expected}; update whichever is older",
@@ -73,4 +75,44 @@ pub enum ClientError {
     RecoveryRotationPending,
     #[error("tls: {0}")]
     Tls(String),
+}
+
+impl From<sealbook_core::CoreError> for ClientError {
+    fn from(e: sealbook_core::CoreError) -> Self {
+        use sealbook_core::CoreError;
+        match e {
+            CoreError::Manifest { detail } => ClientError::Manifest(ManifestError(detail)),
+            CoreError::Roster { detail } => {
+                ClientError::Crypto(sealbook_crypto::CryptoError::Roster(detail))
+            }
+            // Core states the condition; the sentence that tells the user what to
+            // do about it is the host's, as it is in the other two clients.
+            CoreError::RosterTooOld => ClientError::Crypto(sealbook_crypto::CryptoError::Roster(
+                "this device is further behind than the server's roster history reaches, \
+                     so the chain from its pinned roster cannot be checked; pair this device \
+                     again to anchor it on the current roster"
+                    .into(),
+            )),
+            CoreError::Crypto { detail } | CoreError::Malformed { detail } => {
+                ClientError::Crypto(sealbook_crypto::CryptoError::Roster(detail))
+            }
+            CoreError::Server { detail } | CoreError::Misuse { detail } => {
+                ClientError::Server(detail)
+            }
+            CoreError::NoState => ClientError::NoState,
+            CoreError::NoCollectionKey => ClientError::NoCollectionKey,
+            CoreError::Nonce => ClientError::Nonce,
+            CoreError::BatchTooLarge { got } => ClientError::BatchTooLarge(got as usize),
+            CoreError::DuplicateInBatch => ClientError::DuplicateInBatch,
+            CoreError::StaleCollectionKey { expected, held } => {
+                ClientError::StaleCollectionKey { expected, held }
+            }
+            CoreError::Envelope { object } => ClientError::Envelope(object),
+            CoreError::AttachmentIntegrity { object } => ClientError::AttachmentIntegrity(object),
+            CoreError::ProtocolVersion { reported } => ClientError::ProtocolVersion(reported),
+            CoreError::PairPending => ClientError::PairPending,
+            CoreError::CollectionBusy => ClientError::CollectionBusy,
+            CoreError::RecoveryRotationPending => ClientError::RecoveryRotationPending,
+        }
+    }
 }

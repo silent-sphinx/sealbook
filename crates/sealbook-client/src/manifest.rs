@@ -445,14 +445,15 @@ impl SealbookClient {
         key_epoch: u64,
         signer: Uuid,
     ) -> Result<Vec<DevicePublicKeys>, ClientError> {
-        if let Some((cached_epoch, devices)) = &self.roster_cache {
-            if *cached_epoch == key_epoch && devices.iter().any(|device| device.device_id == signer)
-            {
+        if let Some((cached, devices)) = &self.roster_cache {
+            if sealbook_core::roster_answers_for(Some(cached), Some(key_epoch), Some(signer)) {
                 return Ok(devices.clone());
             }
         }
-        let roster = self.verified_roster().await?;
-        self.roster_cache = Some((roster.key_epoch, roster.devices.clone()));
+        let verified = self.verified_roster_core().await?;
+        let roster: sealbook_protocol::RosterBody = serde_json::from_str(&verified.roster_json)
+            .map_err(|err| ClientError::Server(err.to_string()))?;
+        self.roster_cache = Some((verified.roster, roster.devices.clone()));
         Ok(roster.devices)
     }
 

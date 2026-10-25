@@ -10,6 +10,7 @@ base64.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
 rustls-pki-types.workspace = true
+sealbook-core = { path = "../sealbook-core" }
 sealbook-crypto = { path = "../sealbook-crypto" }
 sealbook-protocol = { path = "../sealbook-protocol" }
 serde.workspace = true

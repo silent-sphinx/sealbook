@@ -2292,6 +2292,7 @@ dependencies = [
  "reqwest",
  "rustls",
  "rustls-pki-types",
+ "sealbook-core",
  "sealbook-crypto",
  "sealbook-protocol",
  "serde",
@@ -2306,6 +2307,7 @@ dependencies = [
 name = "sealbook-core"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "sealbook-crypto",
  "sealbook-protocol",
  "serde",

@@ -129,8 +129,13 @@ impl CoreError {
 
 impl From<sealbook_crypto::CryptoError> for CoreError {
     fn from(e: sealbook_crypto::CryptoError) -> Self {
-        CoreError::Crypto {
-            detail: e.to_string(),
+        // A roster failure keeps its own variant: hosts raise it as a different
+        // class from a key or signature failure.
+        match e {
+            sealbook_crypto::CryptoError::Roster(detail) => CoreError::Roster { detail },
+            other => CoreError::Crypto {
+                detail: other.to_string(),
+            },
         }
     }
 }
