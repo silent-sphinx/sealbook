@@ -857,7 +857,7 @@ async fn an_account_export_carries_every_live_object_and_no_deleted_one() {
         .expect("draft note");
     client.delete_note(deleted_id).await.expect("delete note");
 
-    let exported = client.export_objects().await.expect("export");
+    let exported = client.export_objects().await.expect("export").objects;
     let ids: Vec<Uuid> = exported.iter().map(|object| object.id).collect();
     assert_eq!(
         ids.len(),
@@ -957,7 +957,7 @@ async fn an_account_export_imports_into_another_account_whole() {
         }])
         .await
         .expect("future object");
-    let exported = source.export_objects().await.expect("export");
+    let exported = source.export_objects().await.expect("export").objects;
 
     let mut target = SealbookClient::plaintext_http();
     target
@@ -966,7 +966,7 @@ async fn an_account_export_imports_into_another_account_whole() {
         .expect("register target");
     target.import_objects(&exported).await.expect("import");
 
-    let imported = target.export_objects().await.expect("re-export");
+    let imported = target.export_objects().await.expect("re-export").objects;
     let as_tuples = |objects: &[ExportedObject]| {
         objects
             .iter()
@@ -988,7 +988,7 @@ async fn an_account_export_imports_into_another_account_whole() {
     // Importing the same file again is a restore, not a duplication: the ids are
     // fixed, so the objects take a new revision and the count holds.
     target.import_objects(&exported).await.expect("reimport");
-    let again = target.export_objects().await.expect("third export");
+    let again = target.export_objects().await.expect("third export").objects;
     assert_eq!(as_tuples(&again), as_tuples(&exported));
 }
 
@@ -1083,7 +1083,7 @@ async fn a_v1_release_backup_restores_onto_a_new_instance() {
         .await
         .expect("a v1.0.0 backup must restore");
 
-    let restored = client.export_objects().await.expect("re-export");
+    let restored = client.export_objects().await.expect("re-export").objects;
     let as_tuples = |objects: &[ExportedObject]| {
         let mut out = objects
             .iter()
@@ -1145,13 +1145,13 @@ async fn an_import_restores_an_object_that_was_deleted_since_the_export() {
         .await
         .expect("note");
 
-    let exported = client.export_objects().await.expect("export");
+    let exported = client.export_objects().await.expect("export").objects;
     client.delete_note(note_id).await.expect("delete");
     assert!(
         !client
             .export_objects()
             .await
-            .expect("export after delete")
+            .expect("export after delete").objects
             .iter()
             .any(|object| object.id == note_id),
         "the note is still live, so the restore below proves nothing"
@@ -1159,7 +1159,7 @@ async fn an_import_restores_an_object_that_was_deleted_since_the_export() {
 
     client.import_objects(&exported).await.expect("import");
 
-    let restored = client.export_objects().await.expect("export after import");
+    let restored = client.export_objects().await.expect("export after import").objects;
     let note = restored
         .iter()
         .find(|object| object.id == note_id)
@@ -1197,7 +1197,7 @@ async fn an_account_export_of_large_objects_imports() {
             .await
             .expect("big note");
     }
-    let exported = source.export_objects().await.expect("export");
+    let exported = source.export_objects().await.expect("export").objects;
 
     let mut target = SealbookClient::plaintext_http();
     target
@@ -1206,7 +1206,7 @@ async fn an_account_export_of_large_objects_imports() {
         .expect("register target");
     target.import_objects(&exported).await.expect("import");
 
-    let imported = target.export_objects().await.expect("re-export");
+    let imported = target.export_objects().await.expect("re-export").objects;
     assert_eq!(imported.len(), exported.len());
 }
 

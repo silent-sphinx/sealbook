@@ -72,6 +72,29 @@ both builds already require for the wasm module and the JNI library.
   As with the roster fixture, the check compares the digests and the root rather
   than the bytes.
 
+- `changes/paged-walk.json` — one collection served as two pages of the change
+  feed, with the request path each page answers, and the signed manifest both
+  pages carry. Holds every row kind a read has to tell apart: a superseded
+  revision still in the log, a row-level tombstone, a sealed tombstone, and a
+  row sealed under a key epoch the reader has not caught up to. Signed by the
+  same alpha device as the roster and manifest fixtures and under the same
+  collection, so all three describe one account. Pins the object set, the
+  tombstones and the unreadable list a read produces, which is phase 3's whole
+  claim, and it is what `sealbook-core`'s sync tests,
+  `sealbook-web/src/lib/syncParity.test.ts` and Android's `VaultWalkTest` are
+  all held to.
+
+  Generated from fixed seeds by the ignored `regenerate_the_sync_fixture` test
+  in `crates/sealbook-core/tests/sync.rs`:
+
+  ```
+  REGENERATE_SYNC_FIXTURE=1 cargo test -p sealbook-core -- --ignored regenerate
+  ```
+
+  The check compares the verdicts and the request paths rather than the bytes,
+  because the AEAD nonce is random and ML-DSA signing need not be
+  deterministic.
+
 One payload per remaining content type is phase 8 work in `UNIFICATION_PLAN.md`,
 added as each type moves into `sealbook-core`.
 

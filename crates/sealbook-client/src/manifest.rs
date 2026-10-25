@@ -113,20 +113,19 @@ impl SealbookClient {
     /// set those pages produced, and pins its sequence.
     pub(crate) async fn verify_manifest(
         &mut self,
-        manifest: &ManifestBody,
+        manifest_json: &str,
         entries: &[ManifestEntry],
     ) -> Result<(), ClientError> {
         let context = self.manifest_context()?;
+        let manifest: ManifestBody = serde_json::from_str(manifest_json)
+            .map_err(|err| ClientError::Server(format!("unreadable manifest: {err}")))?;
         let devices = self
             .devices_for(Some(ManifestSigner {
                 key_epoch: manifest.key_epoch,
                 device_id: manifest.device_id,
             }))
             .await?;
-        let json = serde_json::to_string(manifest).map_err(|err| {
-            ClientError::Server(format!("cannot re-read this device's manifest: {err}"))
-        })?;
-        let plan = manifest_verify(&context, &json, &core_entries(entries), &devices)?;
+        let plan = manifest_verify(&context, manifest_json, &core_entries(entries), &devices)?;
         self.accept_manifest_seq(plan.manifest_seq)?;
         Ok(())
     }
@@ -193,7 +192,7 @@ impl SealbookClient {
         Ok(devices)
     }
 
-    async fn fetch(
+    pub(crate) async fn fetch(
         &self,
         request: &sealbook_core::HttpRequest,
     ) -> Result<sealbook_core::HttpResponse, ClientError> {

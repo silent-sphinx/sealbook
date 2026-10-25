@@ -3,14 +3,12 @@
 
 use uuid::Uuid;
 
-use std::collections::HashMap;
-
 use sealbook_crypto::{
     content_digest, decrypt_object, encrypt_object, object_aad, padded_len, EncryptedObject,
 };
 use sealbook_protocol::envelope::{open_envelope, seal_envelope, Unsealed};
 use sealbook_protocol::{
-    BatchObject, ChangesResponse, ManifestEntry, PutObjectRequest, PutObjectsRequest,
+    BatchObject, ManifestEntry, PutObjectRequest, PutObjectsRequest,
     PutObjectsResponse, MAX_BATCH_BYTES, MAX_BATCH_OBJECTS,
 };
 use sealbook_protocol::{
@@ -22,7 +20,9 @@ use sealbook_protocol::{
     SEALED_CONTENT_TYPE,
 };
 
-use sealbook_core::{manifest_apply, BucketedManifest, ManifestPlan};
+use sealbook_core::{
+    manifest_apply, open_stored, BucketedManifest, ManifestPlan, RowOutcome, StoredRow,
+};
 use crate::{ClientError, SealbookClient};
 
 /// An object as stored, still wrapped in its envelope.
@@ -61,7 +61,17 @@ pub(crate) struct PendingWrite {
 struct PlainObject {
     id: Uuid,
     content_type: String,
-    plaintext: Vec<u8>,
+    plaintext: String,
+}
+
+/// Every object in the collection, with the rows this device could not read
+/// counted rather than left out silently.
+///
+/// An export that quietly drops them is a backup missing objects the account
+/// still holds, so the count travels with the objects and the caller says so.
+pub struct ExportedVault {
+    pub objects: Vec<ExportedObject>,
+    pub unreadable: u64,
 }
 
 /// One object as an export sees it: its id, the content type its envelope
@@ -122,13 +132,6 @@ fn batch_ids(mut ids: Vec<Uuid>) -> Result<Vec<Uuid>, ClientError> {
     Ok(ids)
 }
 
-impl PlainObject {
-    fn into_text(self) -> Result<String, ClientError> {
-        let id = self.id;
-        String::from_utf8(self.plaintext).map_err(|_| ClientError::NonUtf8Object(id))
-    }
-}
-
 impl SealbookClient {
     pub async fn put_contact(
         &mut self,
@@ -184,11 +187,11 @@ impl SealbookClient {
 
     pub async fn list_address_books(&mut self) -> Result<Vec<(Uuid, String)>, ClientError> {
         let mut out = Vec::new();
-        for obj in self.list_objects().await? {
+        for obj in self.listed_objects().await? {
             if obj.content_type != ADDRESS_BOOK_CONTENT_TYPE {
                 continue;
             }
-            out.push((obj.id, container_name(&obj.into_text()?)));
+            out.push((obj.id, container_name(&obj.plaintext)));
         }
         out.sort_by(|a, b| {
             if a.0 == DEFAULT_ADDRESS_BOOK_ID {
@@ -204,11 +207,11 @@ impl SealbookClient {
 
     pub async fn list_contacts(&mut self) -> Result<Vec<(Uuid, String)>, ClientError> {
         let mut out = Vec::new();
-        for obj in self.list_objects().await? {
+        for obj in self.listed_objects().await? {
             if obj.content_type != JSCONTACT_CONTENT_TYPE {
                 continue;
             }
-            out.push((obj.id, obj.into_text()?));
+            out.push((obj.id, obj.plaintext));
         }
         Ok(out)
     }
@@ -262,9 +265,9 @@ impl SealbookClient {
 
     pub async fn list_calendars(&mut self) -> Result<Vec<(Uuid, String)>, ClientError> {
         let mut out = Vec::new();
-        for obj in self.list_objects().await? {
+        for obj in self.listed_objects().await? {
             if obj.content_type == CALENDAR_CONTENT_TYPE {
-                out.push((obj.id, obj.into_text()?));
+                out.push((obj.id, obj.plaintext));
             }
         }
         Ok(out)
@@ -272,9 +275,9 @@ impl SealbookClient {
 
     pub async fn list_calendar_events(&mut self) -> Result<Vec<(Uuid, String)>, ClientError> {
         let mut out = Vec::new();
-        for obj in self.list_objects().await? {
+        for obj in self.listed_objects().await? {
             if obj.content_type == CALENDAR_EVENT_CONTENT_TYPE {
-                out.push((obj.id, obj.into_text()?));
+                out.push((obj.id, obj.plaintext));
             }
         }
         Ok(out)
@@ -336,11 +339,11 @@ impl SealbookClient {
 
     pub async fn list_notebooks(&mut self) -> Result<Vec<(Uuid, String)>, ClientError> {
         let mut out = Vec::new();
-        for obj in self.list_objects().await? {
+        for obj in self.listed_objects().await? {
             if obj.content_type != NOTEBOOK_CONTENT_TYPE {
                 continue;
             }
-            out.push((obj.id, container_name(&obj.into_text()?)));
+            out.push((obj.id, container_name(&obj.plaintext)));
         }
         out.sort_by(|a, b| {
             if a.0 == DEFAULT_NOTEBOOK_ID {
@@ -356,9 +359,9 @@ impl SealbookClient {
 
     pub async fn list_notes(&mut self) -> Result<Vec<(Uuid, String)>, ClientError> {
         let mut out = Vec::new();
-        for obj in self.list_objects().await? {
+        for obj in self.listed_objects().await? {
             if obj.content_type == NOTE_CONTENT_TYPE {
-                out.push((obj.id, obj.into_text()?));
+                out.push((obj.id, obj.plaintext));
             }
         }
         Ok(out)
@@ -392,9 +395,9 @@ impl SealbookClient {
 
     pub async fn list_bookmarks(&mut self) -> Result<Vec<(Uuid, String)>, ClientError> {
         let mut out = Vec::new();
-        for obj in self.list_objects().await? {
+        for obj in self.listed_objects().await? {
             if obj.content_type == BOOKMARK_CONTENT_TYPE {
-                out.push((obj.id, obj.into_text()?));
+                out.push((obj.id, obj.plaintext));
             }
         }
         Ok(out)
@@ -456,11 +459,11 @@ impl SealbookClient {
 
     pub async fn list_bookmark_collections(&mut self) -> Result<Vec<(Uuid, String)>, ClientError> {
         let mut out = Vec::new();
-        for obj in self.list_objects().await? {
+        for obj in self.listed_objects().await? {
             if obj.content_type != BOOKMARK_COLLECTION_CONTENT_TYPE {
                 continue;
             }
-            out.push((obj.id, container_name(&obj.into_text()?)));
+            out.push((obj.id, container_name(&obj.plaintext)));
         }
         out.sort_by(|a, b| {
             if a.0 == DEFAULT_BOOKMARK_COLLECTION_ID {
@@ -481,18 +484,21 @@ impl SealbookClient {
     /// this build does not have, belongs in an export of the account even though
     /// nothing here can read it. Sorted by content type then id, so an export
     /// written twice from the same vault is the same bytes.
-    pub async fn export_objects(&mut self) -> Result<Vec<ExportedObject>, ClientError> {
-        let mut out = Vec::new();
-        for obj in self.list_objects().await? {
-            let content_type = obj.content_type.clone();
-            out.push(ExportedObject {
+    pub async fn export_objects(&mut self) -> Result<ExportedVault, ClientError> {
+        let (objects, unreadable) = self.list_objects().await?;
+        let mut out: Vec<ExportedObject> = objects
+            .into_iter()
+            .map(|obj| ExportedObject {
                 id: obj.id,
-                content_type,
-                payload: obj.into_text()?,
-            });
-        }
+                content_type: obj.content_type,
+                payload: obj.plaintext,
+            })
+            .collect();
         out.sort_by(|a, b| a.content_type.cmp(&b.content_type).then(a.id.cmp(&b.id)));
-        Ok(out)
+        Ok(ExportedVault {
+            objects: out,
+            unreadable,
+        })
     }
 
     /// Writes objects of any mix of content types back into the collection.
@@ -678,7 +684,14 @@ impl SealbookClient {
         Ok(contents)
     }
 
-    async fn list_objects(&mut self) -> Result<Vec<PlainObject>, ClientError> {
+    /// Every live object in the collection, opened.
+    ///
+    /// Returns the objects and the number of rows this device could not read.
+    /// A row the manifest vouched for that will not open is a local failure, a
+    /// key epoch this device has not caught up to or a payload a newer build
+    /// wrote, so it is counted rather than raised: raising it would lose every
+    /// readable object behind one unreadable one.
+    async fn list_objects(&mut self) -> Result<(Vec<PlainObject>, u64), ClientError> {
         let collection_id = self
             .state
             .as_ref()
@@ -690,42 +703,41 @@ impl SealbookClient {
             .as_ref()
             .ok_or(ClientError::NoCollectionKey)?;
         let mut out = Vec::new();
+        let mut unreadable = 0;
         for obj in objects {
-            if obj.tombstone {
-                continue;
-            }
-            if obj.nonce.len() != 24 {
-                return Err(ClientError::Nonce);
-            }
-            let mut nonce = [0u8; 24];
-            nonce.copy_from_slice(&obj.nonce);
-            let encrypted = EncryptedObject {
-                nonce,
-                ciphertext: obj.ciphertext,
-                padded_size: obj.padded_size,
-            };
-            let aad = object_aad(obj.id.as_bytes(), collection_id.as_bytes());
-            let plain = decrypt_object(key, &encrypted, &aad)?;
-            let (content_type, plaintext) = match open_envelope(&plain) {
-                // A sealed tombstone, which `sealbook-web` writes: a row with a
-                // body but nothing to read.
-                Unsealed::Envelope {
-                    tombstone: true, ..
-                } => continue,
-                Unsealed::Envelope {
+            match open_stored(
+                key,
+                collection_id,
+                &StoredRow {
+                    id: obj.id,
+                    tombstone: obj.tombstone,
+                    nonce: &obj.nonce,
+                    ciphertext: &obj.ciphertext,
+                    padded_size: obj.padded_size,
+                },
+            ) {
+                RowOutcome::Object {
                     content_type,
                     payload,
-                    ..
-                } => (content_type, payload),
-                Unsealed::Unreadable => return Err(ClientError::Envelope(obj.id)),
-            };
-            out.push(PlainObject {
-                id: obj.id,
-                content_type,
-                plaintext,
-            });
+                } => out.push(PlainObject {
+                    id: obj.id,
+                    content_type,
+                    plaintext: payload,
+                }),
+                RowOutcome::Deleted => {}
+                RowOutcome::Unreadable { .. } => unreadable += 1,
+            }
         }
-        Ok(out)
+        Ok((out, unreadable))
+    }
+
+    /// [`Self::list_objects`] for a caller that filters to one content type.
+    ///
+    /// The unreadable count is dropped deliberately: a typed listing already
+    /// leaves out every object of another type, so it is not where a row this
+    /// device could not read is reported. An export is.
+    async fn listed_objects(&mut self) -> Result<Vec<PlainObject>, ClientError> {
+        Ok(self.list_objects().await?.0)
     }
 
     /// Writes one object, signing a manifest for the state the write produces.
@@ -886,160 +898,6 @@ impl SealbookClient {
         Ok(resp.latest_revision)
     }
 
-    /// Every object in the collection, checked against the signed manifest.
-    ///
-    /// Walks the paginated change feed to the end, then verifies the whole set at
-    /// once — a page on its own cannot be checked, since the manifest commits to
-    /// the collection rather than to any page of it. Restarts the walk if a write
-    /// lands during it, because the accumulated set and the final manifest would
-    /// then describe different states.
-    async fn fetch_verified_objects(&mut self) -> Result<VerifiedObjects, ClientError> {
-        for _ in 0..SYNC_ATTEMPTS {
-            let Some(walk) = self.walk_collection().await? else {
-                continue;
-            };
-            return self.verify_walk(walk).await;
-        }
-        Err(ClientError::CollectionBusy)
-    }
-
-    /// One pass over the change feed, or `None` if the collection moved during it.
-    ///
-    /// Every page carries the current manifest, so a page whose manifest sequence
-    /// differs from the first page's is proof that a write committed between the
-    /// two and that this pass cannot be verified as a whole.
-    async fn walk_collection(&self) -> Result<Option<Walk>, ClientError> {
-        let (server, collection_id, token) = {
-            let state = self.state.as_ref().ok_or(ClientError::NoState)?;
-            (
-                state.server.clone(),
-                state.collection_id,
-                state.session_token.clone().ok_or(ClientError::NoState)?,
-            )
-        };
-        let mut objects: Vec<sealbook_protocol::ObjectChange> = Vec::new();
-        let mut after = 0u64;
-        let mut manifest;
-        let mut tombstone_floor;
-        let mut expected_seq = None;
-        let mut first_page = true;
-        loop {
-            let page: ChangesResponse = self
-                .get_json(
-                    // `snapshot=1`: this client rebuilds its whole view every
-                    // time, so it walks live objects rather than the revision log.
-                    // That cannot be interrupted by a retention sweep part way
-                    // through the walk.
-                    &format!(
-                        "{server}/v1/collections/{collection_id}/changes\
-                         ?after={after}&limit={}&snapshot=true",
-                        sealbook_protocol::DEFAULT_CHANGES_LIMIT
-                    ),
-                    Some(&token),
-                )
-                .await?;
-            // Compared as `Option`, so a collection that gains its first manifest
-            // part way through a walk restarts as well.
-            let page_seq = page.manifest.as_ref().map(|current| current.manifest_seq);
-            if first_page {
-                expected_seq = page_seq;
-                first_page = false;
-            } else if page_seq != expected_seq {
-                return Ok(None);
-            }
-            manifest = page.manifest.clone();
-            tombstone_floor = page.tombstone_floor;
-            let page_high = page.objects.iter().map(|object| object.revision).max();
-            objects.extend(page.objects);
-            match (page.has_more, page_high) {
-                (true, Some(high)) if high > after => after = high,
-                _ => break,
-            }
-        }
-        Ok(Some(Walk {
-            objects,
-            manifest,
-            tombstone_floor,
-        }))
-    }
-
-    /// Checks a completed walk against the manifest it was served with.
-    async fn verify_walk(&mut self, walk: Walk) -> Result<VerifiedObjects, ClientError> {
-        let Walk {
-            objects,
-            manifest,
-            tombstone_floor,
-        } = walk;
-        let latest = latest_revisions(objects);
-
-        match manifest {
-            Some(manifest) => {
-                let entries: Vec<ManifestEntry> = latest
-                    .iter()
-                    .map(|object| ManifestEntry {
-                        id: object.id,
-                        revision: object.revision,
-                        tombstone: object.tombstone,
-                        content_digest: content_digest(&object.nonce, &object.ciphertext).to_vec(),
-                    })
-                    .collect();
-                self.verify_manifest(&manifest, &entries).await?;
-            }
-            None => self.manifest_absence_ok()?,
-        }
-        Ok(VerifiedObjects {
-            objects: latest,
-            tombstone_floor,
-        })
-    }
-}
-
-/// How many times a full sync restarts when the collection moves during it.
-///
-/// A write between two pages used to produce the tamper error, which is the
-/// loudest thing this client says and the one failure that must never be
-/// retried away. Telling the two apart is the point: a bounded restart answers
-/// the race, and `ClientError::CollectionBusy` answers a collection that is
-/// being written to continuously.
-const SYNC_ATTEMPTS: usize = 4;
-
-/// One pass over the change feed, before it has been verified.
-struct Walk {
-    objects: Vec<sealbook_protocol::ObjectChange>,
-    manifest: Option<sealbook_protocol::ManifestBody>,
-    tombstone_floor: u64,
-}
-
-/// The newest revision of each object, in the order they were first walked.
-///
-/// Indexed by id rather than scanned for: a linear search per object made a full
-/// sync quadratic, which at the object quota is over a billion comparisons. The
-/// manifest digest sorts within its buckets, so only the returned order matters
-/// here, and first-walked order keeps it stable for callers.
-fn latest_revisions(
-    mut objects: Vec<sealbook_protocol::ObjectChange>,
-) -> Vec<sealbook_protocol::ObjectChange> {
-    // A later revision of the same object supersedes an earlier one.
-    objects.sort_by_key(|object| object.revision);
-    let mut position: HashMap<Uuid, usize> = HashMap::with_capacity(objects.len());
-    let mut latest: Vec<sealbook_protocol::ObjectChange> = Vec::with_capacity(objects.len());
-    for object in objects {
-        match position.get(&object.id) {
-            Some(&index) => latest[index] = object,
-            None => {
-                position.insert(object.id, latest.len());
-                latest.push(object);
-            }
-        }
-    }
-    latest
-}
-
-/// One verified walk of the collection: the latest revision of every row, and
-/// the floor that says which of its tombstones a rotation may retire.
-struct VerifiedObjects {
-    objects: Vec<sealbook_protocol::ObjectChange>,
-    tombstone_floor: u64,
 }
 
 /// Every key a collection write from here owns.
@@ -1065,7 +923,7 @@ pub(crate) fn container_name(plaintext: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{import_chunks, latest_revisions, ExportedObject, PlainObject};
+    use super::{import_chunks, ExportedObject};
     use sealbook_protocol::{MAX_BATCH_BYTES, MAX_BATCH_OBJECTS};
     use uuid::Uuid;
 
@@ -1134,65 +992,7 @@ mod tests {
         assert!(import_chunks(&[]).is_empty());
     }
 
-    fn change(id: Uuid, revision: u64) -> sealbook_protocol::ObjectChange {
-        sealbook_protocol::ObjectChange {
-            id,
-            revision,
-            tombstone: false,
-            nonce: vec![0u8; 24],
-            ciphertext: Vec::new(),
-            padded_size: 256,
-            content_type: "application/sealbook.sealed".to_string(),
-        }
-    }
-
-    /// The dedupe used to be a linear scan per object, so a full sync at the
-    /// object quota was over a billion comparisons. It has to keep both of the
-    /// properties the scan had: the newest revision wins, and the order is the
-    /// one the objects were first walked in, so a listing does not reshuffle
-    /// between syncs.
-    #[test]
-    fn latest_revisions_keeps_the_newest_of_each_object_in_walk_order() {
-        let first = Uuid::new_v4();
-        let second = Uuid::new_v4();
-        let third = Uuid::new_v4();
-        // Deliberately out of revision order, as two pages of a walk arrive.
-        let walked = vec![
-            change(first, 1),
-            change(second, 2),
-            change(first, 7),
-            change(third, 3),
-            change(second, 5),
-        ];
-
-        let latest = latest_revisions(walked);
-        assert_eq!(
-            latest
-                .iter()
-                .map(|object| (object.id, object.revision))
-                .collect::<Vec<_>>(),
-            // First appearance in revision order decides the position, which is
-            // what the scan it replaced did too.
-            vec![(first, 7), (second, 5), (third, 3)],
-            "each id appears once, at its newest revision, in walk order"
-        );
-    }
-
-    #[test]
-    fn latest_revisions_handles_an_empty_walk() {
-        assert!(latest_revisions(Vec::new()).is_empty());
-    }
-
     // The envelope format itself is covered in `sealbook_protocol::envelope`,
-    // which is where all three clients read it from.
-
-    #[test]
-    fn into_text_refuses_bytes_that_are_not_utf8() {
-        let obj = PlainObject {
-            id: Uuid::nil(),
-            content_type: "application/jscontact+json".to_string(),
-            plaintext: vec![0xff, 0xfe],
-        };
-        assert!(obj.into_text().is_err());
-    }
+    // which is where all three clients read it from. The walk and the row
+    // classification are covered in `sealbook_core::sync`.
 }

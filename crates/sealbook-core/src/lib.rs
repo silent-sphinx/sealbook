@@ -16,6 +16,7 @@ mod http;
 mod manifest;
 mod roster;
 mod state;
+mod sync;
 
 // uniffi's scaffolding and custom types have to sit in the crate root.
 #[cfg(feature = "uniffi")]
@@ -46,6 +47,11 @@ pub use roster::{
     VerifiedRoster,
 };
 pub use state::{CoreDeviceState, CoreSession};
+pub use sync::{
+    changes_request, latest_revisions, open_row, open_stored, require_key_epoch, walk_page, walk_start,
+    ChangesPage, CoreSealedRow, RowOutcome, RowRef, StoredRow, UnreadableReason, WalkCursor,
+    WalkOutcome, WalkStep, CHANGES_PAGE_LIMIT, SYNC_RESTART_LIMIT,
+};
 
 pub use sealbook_protocol::{PAYLOAD_SCHEMA_VERSION, PROTOCOL_VERSION};
 

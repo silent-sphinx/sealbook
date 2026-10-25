@@ -432,11 +432,20 @@ async fn main() -> Result<()> {
             let mut client =
                 SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
             sign_in(&mut client, &password).await?;
-            let objects = client.export_objects().await.context("export")?;
-            let count = objects.len();
+            let exported = client.export_objects().await.context("export")?;
+            let count = exported.objects.len();
+            // An export missing objects is a backup missing objects, so it is
+            // said plainly rather than left for the count to imply.
+            if exported.unreadable > 0 {
+                eprintln!(
+                    "warning: {} object(s) in this vault could not be read by this device and are \
+                     not in the export",
+                    exported.unreadable
+                );
+            }
             let document = account_export(
                 client.state.as_ref().unwrap(),
-                objects,
+                exported.objects,
                 &OffsetDateTime::now_utc().format(&Rfc3339)?,
             );
             let json = serde_json::to_vec_pretty(&document)?;
@@ -479,6 +488,7 @@ async fn main() -> Result<()> {
                 .export_objects()
                 .await
                 .context("read the vault")?
+                .objects
                 .into_iter()
                 .map(|object| object.id)
                 .collect();
@@ -1081,6 +1091,7 @@ async fn find_bookmark_collection(client: &mut SealbookClient, id: Uuid) -> Resu
         .export_objects()
         .await
         .context("collections")?
+        .objects
         .into_iter()
         .find(|object| object.id == id)
         .map(|object| object.payload)

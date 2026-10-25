@@ -1,9 +1,10 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sealbook_core::{
-    AppliedManifest, BucketedManifest, BucketsOutcome, CoreBuild, CoreDevice, CoreManifestEntry,
-    CoreRoster, CoreRosterPin, CoreSession, HttpRequest, HttpResponse, ManifestContext,
-    ManifestOutcome, ManifestPlan, ManifestSigner, RosterContext, SignedManifest, VerifiedRoster,
+    AppliedManifest, BucketedManifest, BucketsOutcome, ChangesPage, CoreBuild, CoreDevice,
+    CoreManifestEntry, CoreRoster, CoreRosterPin, CoreSealedRow, CoreSession, HttpRequest,
+    HttpResponse, ManifestContext, ManifestOutcome, ManifestPlan, ManifestSigner, RosterContext,
+    RowOutcome, RowRef, SignedManifest, VerifiedRoster, WalkCursor, WalkStep,
 };
 use sealbook_crypto::opaque::{
     client_login_finish, client_login_start, client_register_finish, client_register_start,
@@ -1720,4 +1721,78 @@ fn core_session(ck_b64: &str, key_epoch: u64) -> Result<CoreSession, JsError> {
         key_epoch,
         verified_roster: None,
     })
+}
+
+// ── Core: the read path ──
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct RowRefList(pub Vec<RowRef>);
+
+/// A walk that starts after `after`, or from nothing when that is 0.
+#[wasm_bindgen]
+pub fn core_walk_start(after: u64) -> Result<Ts<WalkCursor>, JsError> {
+    Ok(sealbook_core::walk_start(after).into_ts()?)
+}
+
+/// The request for the next page of a walk.
+///
+/// `path` is server-relative: the caller prefixes its own API root and adds the
+/// bearer token, which core never sees.
+#[wasm_bindgen]
+pub fn core_changes_request(
+    collection_id: &str,
+    cursor: Ts<WalkCursor>,
+) -> Result<Ts<HttpRequest>, JsError> {
+    Ok(
+        sealbook_core::changes_request(parse_uuid(collection_id)?, &cursor.to_rust()?)
+            .into_ts()?,
+    )
+}
+
+/// What the walk does with the page it was just served: another page, a restart
+/// that drops the rows read so far, or the walk being complete.
+#[wasm_bindgen]
+pub fn core_walk_page(
+    cursor: Ts<WalkCursor>,
+    page: Ts<ChangesPage>,
+) -> Result<Ts<WalkStep>, JsError> {
+    Ok(
+        sealbook_core::walk_page(&cursor.to_rust()?, &page.to_rust()?)
+            .map_err(core_err)?
+            .into_ts()?,
+    )
+}
+
+/// The rows to keep out of a walk, as indices into the rows walked.
+///
+/// Indices rather than the rows, so a collection's ciphertexts do not cross
+/// this boundary again to be deduplicated.
+#[wasm_bindgen]
+pub fn core_latest_revisions(rows: Ts<RowRefList>) -> Result<Vec<u32>, JsError> {
+    Ok(sealbook_core::latest_revisions(&rows.to_rust()?.0))
+}
+
+/// Decrypts one served row and opens its envelope.
+///
+/// Only an unusable collection key throws: every other failure is one row's and
+/// comes back as `Unreadable`, so one object this device cannot read does not
+/// cost it the rest of the collection.
+#[wasm_bindgen]
+pub fn core_open_row(
+    ck_b64: &str,
+    collection_id: &str,
+    row: Ts<CoreSealedRow>,
+) -> Result<Ts<RowOutcome>, JsError> {
+    Ok(
+        sealbook_core::open_row(ck_b64, parse_uuid(collection_id)?, &row.to_rust()?)
+            .map_err(core_err)?
+            .into_ts()?,
+    )
+}
+
+/// The rule for a collection key that moved while a read was in flight.
+#[wasm_bindgen]
+pub fn core_require_key_epoch(expected: u64, held: u64) -> Result<(), JsError> {
+    sealbook_core::require_key_epoch(expected, held).map_err(core_err)
 }

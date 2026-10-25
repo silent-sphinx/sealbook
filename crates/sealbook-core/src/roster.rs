@@ -315,8 +315,7 @@ fn encode(bytes: &[u8]) -> String {
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
-#[cfg(feature = "uniffi")]
-fn collection_key(ck_b64: &str) -> Result<[u8; 32], CoreError> {
+pub(crate) fn collection_key(ck_b64: &str) -> Result<[u8; 32], CoreError> {
     let bytes = decode(ck_b64, "collection key")?;
     if bytes.len() != 32 {
         return Err(CoreError::malformed("a collection key is 32 bytes"));

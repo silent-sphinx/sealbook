@@ -18,12 +18,13 @@ mod objects;
 mod pairing;
 mod roster;
 mod state;
+mod sync;
 mod tls;
 
 pub use attachments::UploadedAttachment;
 pub use client::SealbookClient;
 pub use error::{ClientError, ManifestError};
-pub use objects::ExportedObject;
+pub use objects::{ExportedObject, ExportedVault};
 pub use pairing::{format_confirmation, normalize_confirmation};
 pub use state::LocalState;
 pub use tls::{certificate_from_pem, pq_tls_config, TrustAnchors};
