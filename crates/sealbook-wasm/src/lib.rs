@@ -3,8 +3,9 @@ use base64::Engine;
 use sealbook_core::{
     AppliedManifest, BucketedManifest, BucketsOutcome, ChangesPage, CoreBuild, CoreDevice,
     CoreManifestEntry, CoreRoster, CoreRosterPin, CoreSealedRow, CoreSession, HttpRequest,
-    HttpResponse, ManifestContext, ManifestOutcome, ManifestPlan, ManifestSigner, RosterContext,
-    RowOutcome, RowRef, SignedManifest, VerifiedRoster, WalkCursor, WalkStep,
+    HttpResponse, ManifestContext, ManifestOutcome, ManifestPlan, ManifestSigner, ResealRow,
+    RosterContext, RotationPlan, RotationState, RowOutcome, RowRef, SignedManifest, VerifiedRoster,
+    WalkCursor, WalkStep,
 };
 use sealbook_crypto::opaque::{
     client_login_finish, client_login_start, client_register_finish, client_register_start,
@@ -15,15 +16,15 @@ use sealbook_crypto::{
     enrollment_transcript, entropy_from_phrase, generate_device_hpke, generate_device_signing,
     generate_kdf_salt, generate_phrase, key_rotation_transcript, key_wraps_digest,
     login_start_transcript, login_transcript, manifest_bucket_digest, manifest_bucket_of,
-    manifest_digest, manifest_transcript, object_aad, open_login_challenge,
-    pair_confirmation, pair_grant_transcript, password_change_payload, phrase_lookup_id,
-    phrase_recovery_public, phrase_recovery_transcript, recovery_password_payload,
-    rotated_objects_digest, rotation_recovery_payload, sign, sign_phrase_recovery,
-    unwrap_collection_key, unwrap_for_device, unwrap_for_phrase, username_change_payload,
-    wrap_collection_key, wrap_for_device, wrap_for_phrase, CollectionKey, DeviceHpkePublic,
-    DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets,
-    EncryptedObject, ManifestDigestEntry, ObjectDigestEntry, RecoveryWrap, WrapDigestEntry,
-    MANIFEST_BUCKETS, PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
+    manifest_digest, manifest_transcript, object_aad, open_login_challenge, pair_confirmation,
+    pair_grant_transcript, password_change_payload, phrase_lookup_id, phrase_recovery_public,
+    phrase_recovery_transcript, recovery_password_payload, rotated_objects_digest,
+    rotation_recovery_payload, sign, sign_phrase_recovery, unwrap_collection_key,
+    unwrap_for_device, unwrap_for_phrase, username_change_payload, wrap_collection_key,
+    wrap_for_device, wrap_for_phrase, CollectionKey, DeviceHpkePublic, DeviceHpkeSecret,
+    DeviceHpkeWrap, DeviceSigningSecrets, EncryptedObject, ManifestDigestEntry, ObjectDigestEntry,
+    RecoveryWrap, WrapDigestEntry, MANIFEST_BUCKETS, PHRASE_CIPHERSUITE, PHRASE_SCHEME,
+    RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
 };
 use sealbook_crypto::{phrase_recovery_keys, RosterPin};
 use sealbook_protocol::envelope::{open_envelope, seal_envelope, Unsealed};
@@ -505,52 +506,6 @@ pub fn open_object(
 
 fn text(bytes: Vec<u8>) -> Result<String, JsError> {
     String::from_utf8(bytes).map_err(|_| JsError::new("object payload is not valid UTF-8"))
-}
-
-/// Re-encrypts one stored object from the old collection key to the new one,
-/// for a rotation.
-///
-/// The plaintext never becomes a JavaScript string: a rotation that decoded it
-/// as text would rewrite any payload that is not valid UTF-8, and a rotation
-/// touches the whole vault at once.
-#[wasm_bindgen]
-#[allow(clippy::too_many_arguments)]
-pub fn reseal_object(
-    old_ck_b64: &str,
-    new_ck_b64: &str,
-    object_id: &str,
-    collection_id: &str,
-    nonce_b64: &str,
-    ciphertext_b64: &str,
-    padded_size: usize,
-) -> Result<String, JsError> {
-    let plain = decrypt_contact_bytes(
-        old_ck_b64,
-        object_id,
-        collection_id,
-        nonce_b64,
-        ciphertext_b64,
-        padded_size,
-    )?;
-    let stored = match open_envelope(&plain) {
-        Unsealed::Envelope { .. } => plain,
-        Unsealed::Unreadable => {
-            return Err(JsError::new(
-                "object has an envelope this build cannot read",
-            ))
-        }
-    };
-    let aad = object_aad(
-        parse_uuid(object_id)?.as_bytes(),
-        parse_uuid(collection_id)?.as_bytes(),
-    );
-    let enc = encrypt_object(&ck_from_b64(new_ck_b64)?, &stored, &aad).map_err(js_err)?;
-    serde_json::to_string(&EncryptedOut {
-        nonce: b64(&enc.nonce),
-        ciphertext: b64(&enc.ciphertext),
-        padded_size: enc.padded_size,
-    })
-    .map_err(js_err)
 }
 
 /// A fresh random collection key, for rotating the vault on device revocation.
@@ -1148,7 +1103,6 @@ pub fn manifest_sign(
     .map_err(js_err)
 }
 
-
 /// The manifest bucket an object id falls in.
 ///
 /// A write touches one bucket per object, so this is what decides which buckets
@@ -1157,7 +1111,6 @@ pub fn manifest_sign(
 pub fn manifest_bucket_of_id(id: &str) -> Result<u8, JsError> {
     Ok(manifest_bucket_of(parse_uuid(id)?))
 }
-
 
 /// One bucket's digest, or all zeroes for an empty bucket, matching how the root
 /// is built.
@@ -1188,10 +1141,6 @@ pub fn manifest_buckets_blob(entries_json: &str) -> Result<String, JsError> {
     }
     Ok(b64(&blob))
 }
-
-
-
-
 
 /// Signs an account mutation: `"username"`, `"password"` or `"delete"`.
 ///
@@ -1500,9 +1449,7 @@ pub struct CoreManifestEntryList(pub Vec<CoreManifestEntry>);
 
 /// The request that fetches the manifest with every entry it commits to.
 #[wasm_bindgen]
-pub fn core_manifest_request(
-    context: Ts<ManifestContext>,
-) -> Result<Ts<HttpRequest>, JsError> {
+pub fn core_manifest_request(context: Ts<ManifestContext>) -> Result<Ts<HttpRequest>, JsError> {
     Ok(sealbook_core::manifest_request(&context.to_rust()?).into_ts()?)
 }
 
@@ -1542,13 +1489,11 @@ pub fn core_manifest_accept(
     body: &str,
     devices: Ts<CoreDeviceList>,
 ) -> Result<Ts<ManifestOutcome>, JsError> {
-    Ok(sealbook_core::manifest_accept(
-        &context.to_rust()?,
-        &core_ok(body),
-        &devices.to_rust()?.0,
+    Ok(
+        sealbook_core::manifest_accept(&context.to_rust()?, &core_ok(body), &devices.to_rust()?.0)
+            .map_err(core_err)?
+            .into_ts()?,
     )
-    .map_err(core_err)?
-    .into_ts()?)
 }
 
 /// Checks a bucketed manifest answer and returns what a write needs from it.
@@ -1744,10 +1689,7 @@ pub fn core_changes_request(
     collection_id: &str,
     cursor: Ts<WalkCursor>,
 ) -> Result<Ts<HttpRequest>, JsError> {
-    Ok(
-        sealbook_core::changes_request(parse_uuid(collection_id)?, &cursor.to_rust()?)
-            .into_ts()?,
-    )
+    Ok(sealbook_core::changes_request(parse_uuid(collection_id)?, &cursor.to_rust()?).into_ts()?)
 }
 
 /// What the walk does with the page it was just served: another page, a restart
@@ -1795,4 +1737,92 @@ pub fn core_open_row(
 #[wasm_bindgen]
 pub fn core_require_key_epoch(expected: u64, held: u64) -> Result<(), JsError> {
     sealbook_core::require_key_epoch(expected, held).map_err(core_err)
+}
+
+// ── Core: rotation ──
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct CoreSealedRowList(pub Vec<CoreSealedRow>);
+
+/// What a rotation does with the collection it just read: which rows are
+/// re-sealed and at which revision, which tombstones the manifest carries, and
+/// which rows the rotation retires.
+///
+/// Throws on a live row this device cannot open, which no other read does: a
+/// rotation re-encrypts each row from its plaintext, so counting one it cannot
+/// read would drop the object from the collection for good.
+#[wasm_bindgen]
+pub fn core_rotation_plan(
+    ck_b64: &str,
+    collection_id: &str,
+    state: Ts<RotationState>,
+    rows: Ts<CoreSealedRowList>,
+) -> Result<Ts<RotationPlan>, JsError> {
+    Ok(sealbook_core::rotation_plan(
+        ck_b64,
+        parse_uuid(collection_id)?,
+        &state.to_rust()?,
+        &rows.to_rust()?.0,
+    )
+    .map_err(core_err)?
+    .into_ts()?)
+}
+
+/// The devices a rotation re-wraps the new key for, from the verified roster.
+#[wasm_bindgen]
+pub fn core_rotation_recipients(
+    self_device_id: &str,
+    revoke_device_id: Option<String>,
+    devices: Ts<CoreDeviceList>,
+) -> Result<Ts<CoreDeviceList>, JsError> {
+    let revoked = revoke_device_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+        .map(parse_uuid)
+        .transpose()?;
+    let remaining = sealbook_core::rotation_recipients(
+        parse_uuid(self_device_id)?,
+        revoked,
+        &devices.to_rust()?.0,
+    )
+    .map_err(core_err)?;
+    Ok(CoreDeviceList(remaining).into_ts()?)
+}
+
+/// One planned row re-sealed under the new key, at the revision the plan gave
+/// it.
+///
+/// Sealed in here so the plaintext never becomes a JavaScript string: decoding
+/// it as text would rewrite any payload that is not valid UTF-8, and a rotation
+/// touches the whole collection at once.
+#[wasm_bindgen]
+pub fn core_reseal_row(
+    old_ck_b64: &str,
+    new_ck_b64: &str,
+    collection_id: &str,
+    row: Ts<ResealRow>,
+) -> Result<Ts<CoreSealedRow>, JsError> {
+    Ok(sealbook_core::reseal_row(
+        old_ck_b64,
+        new_ck_b64,
+        parse_uuid(collection_id)?,
+        &row.to_rust()?,
+    )
+    .map_err(core_err)?
+    .into_ts()?)
+}
+
+/// The manifest entry set for a rotation, from its plan and the rows the caller
+/// re-sealed.
+#[wasm_bindgen]
+pub fn core_rotation_entries(
+    plan: Ts<RotationPlan>,
+    resealed: Ts<CoreSealedRowList>,
+) -> Result<Ts<CoreManifestEntryList>, JsError> {
+    Ok(CoreManifestEntryList(
+        sealbook_core::rotation_entries(&plan.to_rust()?, &resealed.to_rust()?.0)
+            .map_err(core_err)?,
+    )
+    .into_ts()?)
 }

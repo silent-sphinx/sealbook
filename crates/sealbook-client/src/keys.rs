@@ -1,23 +1,65 @@
 //! The collection key's lifecycle: which devices hold it, when it is replaced,
 //! and how a device gets back to the current one.
 
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use uuid::Uuid;
 
 use sealbook_crypto::{
-    content_digest, encrypt_object, generate_kdf_salt, generate_phrase, key_rotation_transcript,
-    key_wraps_digest, object_aad, phrase_lookup_id, phrase_recovery_public, rotated_objects_digest,
-    rotation_recovery_payload, sign, unwrap_collection_key, unwrap_for_device, wrap_collection_key,
-    wrap_for_device, wrap_for_phrase, CollectionKey, DeviceHpkePublic, DeviceHpkeSecret,
-    DeviceHpkeWrap, DeviceSigningSecrets, ObjectDigestEntry, RecoveryWrap, WrapDigestEntry,
-    PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
+    generate_kdf_salt, generate_phrase, key_rotation_transcript, key_wraps_digest,
+    phrase_lookup_id, phrase_recovery_public, rotated_objects_digest, rotation_recovery_payload,
+    sign, unwrap_collection_key, unwrap_for_device, wrap_collection_key, wrap_for_device,
+    wrap_for_phrase, CollectionKey, DeviceHpkePublic, DeviceHpkeSecret, DeviceHpkeWrap,
+    DeviceSigningSecrets, ObjectDigestEntry, RecoveryWrap, WrapDigestEntry, PHRASE_CIPHERSUITE,
+    PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
 };
 use sealbook_protocol::{
-    CollectionKeysResponse, DevicePublicKeys, DualSignatureBody, KeyWrapBody, ManifestEntry,
-    PhraseRecoveryBody, RosterBody, RosterSignerBody, RotateRequest, RotatedObject,
-    SEALED_CONTENT_TYPE,
+    CollectionKeysResponse, DevicePublicKeys, DualSignatureBody, KeyWrapBody, PhraseRecoveryBody,
+    RosterBody, RosterSignerBody, RotateRequest, RotatedObject, SEALED_CONTENT_TYPE,
+};
+
+use sealbook_core::{
+    reseal_row, rotation_entries, rotation_plan, rotation_recipients, CoreDevice, CoreSealedRow,
+    RotationState,
 };
 
 use crate::{ClientError, SealbookClient};
+
+/// The collection as core's rotation plan reads it.
+///
+/// The rows are base64 here rather than bytes, because the plan is one rule for
+/// all four clients and the other three hold them that way.
+fn sealed_rows(objects: &[sealbook_protocol::ObjectChange]) -> Vec<CoreSealedRow> {
+    objects
+        .iter()
+        .map(|object| CoreSealedRow {
+            id: object.id,
+            revision: object.revision,
+            tombstone: object.tombstone,
+            nonce: URL_SAFE_NO_PAD.encode(&object.nonce),
+            ciphertext: URL_SAFE_NO_PAD.encode(&object.ciphertext),
+            padded_size: object.padded_size as u64,
+        })
+        .collect()
+}
+
+/// A re-sealed row as the rotation request carries it.
+fn rotated_object(row: &CoreSealedRow) -> Result<RotatedObject, ClientError> {
+    let decode = |field: &str, value: &str| {
+        URL_SAFE_NO_PAD.decode(value).map_err(|err| {
+            ClientError::Server(format!("core returned an unreadable {field}: {err}"))
+        })
+    };
+    Ok(RotatedObject {
+        id: row.id,
+        revision: row.revision,
+        nonce: decode("nonce", &row.nonce)?,
+        ciphertext: decode("ciphertext", &row.ciphertext)?,
+        padded_size: row.padded_size as usize,
+        content_type: SEALED_CONTENT_TYPE.into(),
+        tombstone: row.tombstone,
+    })
+}
 
 impl SealbookClient {
     /// The account's devices, from the verified roster rather than the server's
@@ -84,32 +126,38 @@ impl SealbookClient {
                 },
             )
         };
-        if revoke_device_id == Some(self_device_id) {
-            return Err(ClientError::Server(
-                "cannot revoke the device you are signed in on".into(),
-            ));
-        }
-
-        // Read everything under the current key before replacing it.
-        let plaintexts = self.list_stored_objects().await?;
         let (manifest_seq, epoch, latest_revision, _) = self.manifest_state().await?;
+        // Everything below is re-encrypted from the current key, so this session
+        // has to be holding it rather than one a rotation elsewhere retired.
+        self.align_key_epoch(epoch).await?;
         // Wraps go only to devices the verified roster lists. Taken from the
         // server's device list, a device the server added would be handed the key.
+        // Checked before the collection is read, so a rotation that cannot start
+        // does not read the whole vault first.
         let roster = self.verified_roster().await?;
-        let remaining: Vec<DevicePublicKeys> = roster
-            .devices
-            .into_iter()
-            .filter(|device| Some(device.device_id) != revoke_device_id)
-            .collect();
-        if remaining.is_empty() {
-            return Err(ClientError::Server("cannot revoke the last device".into()));
-        }
-        if !remaining
-            .iter()
-            .any(|device| device.device_id == self_device_id)
-        {
-            return Err(ClientError::Server("this device is not enrolled".into()));
-        }
+        let devices: Vec<CoreDevice> = roster.devices.iter().map(CoreDevice::from).collect();
+        let remaining: Vec<DevicePublicKeys> =
+            rotation_recipients(self_device_id, revoke_device_id, &devices)?
+                .iter()
+                .map(DevicePublicKeys::try_from)
+                .collect::<Result<_, _>>()?;
+
+        // Read everything under the current key before replacing it. The plan is
+        // what says which rows are re-sealed and at which revision, which
+        // tombstones the manifest carries and which rows the rotation retires.
+        let verified = self.fetch_verified_objects().await?;
+        let old_ck_b64 = self.collection_key_b64()?;
+        let plan = rotation_plan(
+            &old_ck_b64,
+            collection_id,
+            &RotationState {
+                manifest_seq,
+                key_epoch: epoch,
+                latest_revision,
+                tombstone_floor: verified.tombstone_floor,
+            },
+            &sealed_rows(&verified.objects),
+        )?;
 
         let new_ck = CollectionKey::generate();
         let salt = generate_kdf_salt();
@@ -143,52 +191,18 @@ impl SealbookClient {
             ciphersuite: PHRASE_CIPHERSUITE.into(),
         });
 
-        // Rotation assigns consecutive revisions from the collection's next one,
-        // and the manifest commits to each of them.
-        let first_revision = latest_revision + 1;
-        let mut objects = Vec::with_capacity(plaintexts.live.len());
-        for (index, stored) in plaintexts.live.iter().enumerate() {
-            let aad = object_aad(stored.id.as_bytes(), collection_id.as_bytes());
-            let enc = encrypt_object(&new_ck, &stored.stored, &aad)?;
-            objects.push(RotatedObject {
-                id: stored.id,
-                revision: first_revision + index as u64,
-                nonce: enc.nonce.to_vec(),
-                ciphertext: enc.ciphertext,
-                padded_size: enc.padded_size,
-                content_type: SEALED_CONTENT_TYPE.into(),
-                tombstone: false,
-            });
+        let new_ck_b64 = URL_SAFE_NO_PAD.encode(new_ck.as_bytes());
+        let mut objects = Vec::with_capacity(plan.reseal.len());
+        let mut resealed = Vec::with_capacity(plan.reseal.len());
+        for row in &plan.reseal {
+            let sealed = reseal_row(&old_ck_b64, &new_ck_b64, collection_id, row)?;
+            objects.push(rotated_object(&sealed)?);
+            resealed.push(sealed);
         }
 
-        let key_epoch = epoch + 1;
-        // Tombstones are not re-encrypted, but the ones this rotation keeps are
-        // still rows the manifest commits to, so they carry their stored revision
-        // and digest through unchanged. Omitting them left the manifest short and
-        // the rotation refused on any vault that had ever had a deletion.
-        //
-        // The ones below the floor are left out on purpose, and the request names
-        // them in `drop_tombstones`. This manifest is what authorises that: the
-        // server retires exactly those rows and then recomputes the digest from
-        // what it holds, so a list that does not match this entry set is refused.
-        let mut manifest_entries: Vec<ManifestEntry> = objects
-            .iter()
-            .map(|object| ManifestEntry {
-                id: object.id,
-                revision: object.revision,
-                tombstone: object.tombstone,
-                content_digest: content_digest(&object.nonce, &object.ciphertext).to_vec(),
-            })
-            .collect();
-        manifest_entries.extend(plaintexts.tombstones.iter().cloned());
-        let manifest = self.sign_manifest(
-            &sealbook_core::ManifestPlan {
-                manifest_seq: manifest_seq + 1,
-                key_epoch,
-                latest_revision: first_revision + objects.len() as u64 - 1,
-            },
-            &manifest_entries,
-        )?;
+        let key_epoch = plan.manifest.key_epoch;
+        let manifest_entries = rotation_entries(&plan, &resealed)?;
+        let manifest = self.sign_manifest(&plan.manifest, &manifest_entries)?;
         let mut manifest_digest_bytes = [0u8; 32];
         manifest_digest_bytes.copy_from_slice(&manifest.digest);
 
@@ -261,7 +275,7 @@ impl SealbookClient {
                         ed25519: signature.ed25519,
                     },
                     roster: new_roster.clone(),
-                    drop_tombstones: plaintexts.retired.clone(),
+                    drop_tombstones: plan.retired.clone(),
                 },
                 Some(&token),
             )
@@ -273,7 +287,7 @@ impl SealbookClient {
             state.kdf_salt = salt.to_vec();
         }
         // The rotation carried a manifest at this sequence, like any other write.
-        self.accept_manifest_seq(manifest_seq + 1)?;
+        self.accept_manifest_seq(plan.manifest.manifest_seq)?;
         self.pin_roster(&new_roster)?;
         Ok(phrase)
     }

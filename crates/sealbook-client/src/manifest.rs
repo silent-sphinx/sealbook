@@ -135,16 +135,18 @@ impl SealbookClient {
         Ok(manifest_absence_ok(&self.manifest_context()?)?)
     }
 
+    /// Signs a manifest over entries core assembled, which a rotation's are:
+    /// they come from its plan rather than from a read of the collection.
     pub(crate) fn sign_manifest(
         &self,
         plan: &ManifestPlan,
-        entries: &[ManifestEntry],
+        entries: &[sealbook_core::CoreManifestEntry],
     ) -> Result<ManifestBody, ClientError> {
         Ok(sealbook_core::manifest_sign(
             &self.signing_secrets()?,
             &self.manifest_context()?,
             plan,
-            &core_entries(entries),
+            entries,
         )?
         .wire()?)
     }

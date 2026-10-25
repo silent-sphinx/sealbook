@@ -1,12 +1,6 @@
 # Shared client fixtures
 
-Documents that every client must agree on, kept here rather than in
-`sealbook-test-data` so they are versioned with the code that has to satisfy
-them: a change to a wire type or a payload schema and the fixture it breaks
-move in one commit.
-
-`sealbook-test-data` keeps third-party input (Thunderbird CSV exports, an ICS
-file, an image). This directory keeps sealbook's own output.
+Documents that every client must agree on.
 
 ## Who reads them
 
@@ -94,6 +88,29 @@ both builds already require for the wasm module and the JNI library.
   The check compares the verdicts and the request paths rather than the bytes,
   because the AEAD nonce is random and ML-DSA signing need not be
   deterministic.
+
+- `rotation/plan.json` — one collection as a verified read leaves it, with the
+  plan a rotation makes for it: which rows are re-sealed and at which revision,
+  which tombstone the manifest carries, which row is retired, and the sequence
+  and epoch the rotation advances to. Alongside it the row a rotation refuses on
+  and the six rosters that decide who keeps a wrap of the new key. Under the
+  same collection and alpha device as the fixtures above. Pins the one rule no
+  server check covers: a rotation refuses on a row it cannot re-seal where every
+  other read counts it and carries on, which is the area of the 2026-10-20
+  tombstone bug. Read by `sealbook-core`'s rotation tests,
+  `sealbook-web/src/lib/rotationParity.test.ts` and Android's
+  `VaultRotationTest`.
+
+  Generated from fixed seeds by the ignored `regenerate_the_rotation_fixture`
+  test in `crates/sealbook-core/tests/rotation.rs`:
+
+  ```
+  REGENERATE_ROTATION_FIXTURE=1 cargo test -p sealbook-core -- --ignored regenerate
+  ```
+
+  The check compares the plan and the verdicts rather than the bytes, because
+  the AEAD nonce is random, which also means a carried tombstone's digest is of
+  the bytes that run stored.
 
 One payload per remaining content type is phase 8 work in `UNIFICATION_PLAN.md`,
 added as each type moves into `sealbook-core`.

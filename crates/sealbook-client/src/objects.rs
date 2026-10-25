@@ -3,13 +3,11 @@
 
 use uuid::Uuid;
 
-use sealbook_crypto::{
-    content_digest, decrypt_object, encrypt_object, object_aad, padded_len, EncryptedObject,
-};
-use sealbook_protocol::envelope::{open_envelope, seal_envelope, Unsealed};
+use sealbook_crypto::{content_digest, encrypt_object, object_aad, padded_len};
+use sealbook_protocol::envelope::seal_envelope;
 use sealbook_protocol::{
-    BatchObject, ManifestEntry, PutObjectRequest, PutObjectsRequest,
-    PutObjectsResponse, MAX_BATCH_BYTES, MAX_BATCH_OBJECTS,
+    BatchObject, ManifestEntry, PutObjectRequest, PutObjectsRequest, PutObjectsResponse,
+    MAX_BATCH_BYTES, MAX_BATCH_OBJECTS,
 };
 use sealbook_protocol::{
     ADDRESS_BOOK_CONTENT_TYPE, BOOKMARK_COLLECTION_CONTENT_TYPE, BOOKMARK_CONTENT_TYPE,
@@ -20,30 +18,10 @@ use sealbook_protocol::{
     SEALED_CONTENT_TYPE,
 };
 
+use crate::{ClientError, SealbookClient};
 use sealbook_core::{
     manifest_apply, open_stored, BucketedManifest, ManifestPlan, RowOutcome, StoredRow,
 };
-use crate::{ClientError, SealbookClient};
-
-/// An object as stored, still wrapped in its envelope.
-pub(crate) struct StoredObject {
-    pub(crate) id: Uuid,
-    pub(crate) stored: Vec<u8>,
-}
-
-/// A collection as a rotation needs to see it: what can be re-encrypted, the
-/// tombstones that cannot but still belong in the manifest, and the ones the
-/// rotation can retire.
-#[derive(Default)]
-pub(crate) struct VaultContents {
-    pub(crate) live: Vec<StoredObject>,
-    pub(crate) tombstones: Vec<ManifestEntry>,
-    /// Tombstones below the collection's floor, which this rotation drops
-    /// instead of carrying. Nothing else compacts them: each is a row and a
-    /// manifest entry, and only a device can sign the manifest that leaves one
-    /// out, so a rotation is the only place they can go.
-    pub(crate) retired: Vec<Uuid>,
-}
 
 /// One object's encrypted bytes, waiting to be written.
 ///
@@ -563,7 +541,7 @@ impl SealbookClient {
     /// Refreshing needs only this device's X-Wing secret, so it happens here
     /// rather than sending the caller back for the password. A device that still
     /// cannot reach the epoch has been revoked or raced a second rotation.
-    async fn align_key_epoch(&mut self, key_epoch: u64) -> Result<(), ClientError> {
+    pub(crate) async fn align_key_epoch(&mut self, key_epoch: u64) -> Result<(), ClientError> {
         if self.key_epoch == key_epoch {
             return Ok(());
         }
@@ -620,68 +598,6 @@ impl SealbookClient {
             writes.push(self.seal_write(*object_id, plaintext.as_bytes(), content_type)?);
         }
         self.write_batch_prepared(state, writes).await
-    }
-
-    /// Objects as stored, without opening the envelope, so they can be
-    /// re-encrypted under a new key with their contents untouched. The one
-    /// exception is an object with no envelope, which gets one here.
-    ///
-    /// Tombstones come back alongside the live objects rather than being dropped.
-    /// A rotation does not re-encrypt them, since there is no plaintext left to
-    /// re-encrypt, but they are still rows in the collection and the manifest
-    /// commits to every row. Leaving them out made the manifest disagree with the
-    /// server's view, and a rotation over a vault with any deletion in it was
-    /// refused.
-    pub(crate) async fn list_stored_objects(&mut self) -> Result<VaultContents, ClientError> {
-        let collection_id = self
-            .state
-            .as_ref()
-            .ok_or(ClientError::NoState)?
-            .collection_id;
-        let verified = self.fetch_verified_objects().await?;
-        let key = self
-            .collection_key
-            .as_ref()
-            .ok_or(ClientError::NoCollectionKey)?;
-        let mut contents = VaultContents::default();
-        for obj in verified.objects {
-            if obj.tombstone {
-                // Below the floor no incremental answer can still carry this
-                // delete, so the row has done its job and this rotation retires
-                // it rather than signing for it again.
-                if obj.revision < verified.tombstone_floor {
-                    contents.retired.push(obj.id);
-                    continue;
-                }
-                contents.tombstones.push(ManifestEntry {
-                    id: obj.id,
-                    revision: obj.revision,
-                    tombstone: true,
-                    content_digest: content_digest(&obj.nonce, &obj.ciphertext).to_vec(),
-                });
-                continue;
-            }
-            if obj.nonce.len() != 24 {
-                return Err(ClientError::Nonce);
-            }
-            let mut nonce = [0u8; 24];
-            nonce.copy_from_slice(&obj.nonce);
-            let encrypted = EncryptedObject {
-                nonce,
-                ciphertext: obj.ciphertext,
-                padded_size: obj.padded_size,
-            };
-            let aad = object_aad(obj.id.as_bytes(), collection_id.as_bytes());
-            let plain = decrypt_object(key, &encrypted, &aad)?;
-            // Re-encrypted as it stands: the envelope already carries the type,
-            // so a rotation never has to consult the label the server serves.
-            let stored = match open_envelope(&plain) {
-                Unsealed::Envelope { .. } => plain,
-                Unsealed::Unreadable => return Err(ClientError::Envelope(obj.id)),
-            };
-            contents.live.push(StoredObject { id: obj.id, stored });
-        }
-        Ok(contents)
     }
 
     /// Every live object in the collection, opened.
@@ -897,7 +813,6 @@ impl SealbookClient {
         self.accept_manifest_seq(written_seq)?;
         Ok(resp.latest_revision)
     }
-
 }
 
 /// Every key a collection write from here owns.

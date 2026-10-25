@@ -82,6 +82,17 @@ impl SealbookClient {
         self.collection_key.as_ref()
     }
 
+    /// The cached collection key as core's functions take it.
+    pub(crate) fn collection_key_b64(&self) -> Result<String, ClientError> {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+        Ok(URL_SAFE_NO_PAD.encode(
+            self.collection_key
+                .as_ref()
+                .ok_or(ClientError::NoCollectionKey)?
+                .as_bytes(),
+        ))
+    }
+
     /// Refuses a server speaking a protocol generation this build does not know.
     ///
     /// Called before the first exchange that carries real material, so that a

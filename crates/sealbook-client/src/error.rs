@@ -113,6 +113,9 @@ impl From<sealbook_core::CoreError> for ClientError {
             CoreError::PairPending => ClientError::PairPending,
             CoreError::CollectionBusy => ClientError::CollectionBusy,
             CoreError::RecoveryRotationPending => ClientError::RecoveryRotationPending,
+            // Each refusal states its own condition, and the CLI prints it as
+            // the reason the rotation did not start.
+            CoreError::Rotation { refusal } => ClientError::Server(refusal.to_string()),
         }
     }
 }

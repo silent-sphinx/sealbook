@@ -70,6 +70,10 @@ pub enum CoreError {
          issues a new recovery phrase"
     )]
     RecoveryRotationPending,
+    #[error("{refusal}")]
+    Rotation {
+        refusal: crate::rotation::RotationRefusal,
+    },
     /// A core function called out of order by its host, not a server fault.
     #[error("core state machine misuse: {detail}")]
     Misuse { detail: String },
@@ -122,6 +126,7 @@ impl CoreError {
             CoreError::PairPending => "PairPending",
             CoreError::CollectionBusy => "CollectionBusy",
             CoreError::RecoveryRotationPending => "RecoveryRotationPending",
+            CoreError::Rotation { .. } => "Rotation",
             CoreError::Misuse { .. } => "Misuse",
         }
     }

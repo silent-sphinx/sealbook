@@ -15,6 +15,7 @@ mod error;
 mod http;
 mod manifest;
 mod roster;
+mod rotation;
 mod state;
 mod sync;
 
@@ -35,22 +36,27 @@ uniffi::custom_type!(Uuid, String, {
 pub use error::CoreError;
 pub use http::{Header, HttpRequest, HttpResponse, Method, Step};
 pub use manifest::{
-    accept_manifest_seq, core_entries, wire_entries, manifest_accept, manifest_apply, manifest_buckets_accept,
-    manifest_absence_ok, manifest_buckets_from_whole, manifest_buckets_request, manifest_entry_for,
-    manifest_request, manifest_sign, manifest_sign_root, manifest_signer, manifest_verify, AppliedManifest, BucketedManifest,
-    BucketsOutcome, CoreManifestEntry, ManifestContext, ManifestOutcome, ManifestPlan,
-    ManifestSigner, SignedManifest,
+    accept_manifest_seq, core_entries, manifest_absence_ok, manifest_accept, manifest_apply,
+    manifest_buckets_accept, manifest_buckets_from_whole, manifest_buckets_request,
+    manifest_entry_for, manifest_request, manifest_sign, manifest_sign_root, manifest_signer,
+    manifest_verify, wire_entries, AppliedManifest, BucketedManifest, BucketsOutcome,
+    CoreManifestEntry, ManifestContext, ManifestOutcome, ManifestPlan, ManifestSigner,
+    SignedManifest,
 };
 pub use roster::{
     pin_roster, read_roster, roster_accept, roster_accept_sealed, roster_answers_for,
     roster_request, CoreDevice, CoreRoster, CoreRosterPin, CoreRosterSigner, RosterContext,
     VerifiedRoster,
 };
+pub use rotation::{
+    reseal_row, rotation_entries, rotation_plan, rotation_recipients, ResealRow, RotationPlan,
+    RotationRefusal, RotationState,
+};
 pub use state::{CoreDeviceState, CoreSession};
 pub use sync::{
-    changes_request, latest_revisions, open_row, open_stored, require_key_epoch, walk_page, walk_start,
-    ChangesPage, CoreSealedRow, RowOutcome, RowRef, StoredRow, UnreadableReason, WalkCursor,
-    WalkOutcome, WalkStep, CHANGES_PAGE_LIMIT, SYNC_RESTART_LIMIT,
+    changes_request, latest_revisions, open_row, open_stored, require_key_epoch, walk_page,
+    walk_start, ChangesPage, CoreSealedRow, RowOutcome, RowRef, StoredRow, UnreadableReason,
+    WalkCursor, WalkOutcome, WalkStep, CHANGES_PAGE_LIMIT, SYNC_RESTART_LIMIT,
 };
 
 pub use sealbook_protocol::{PAYLOAD_SCHEMA_VERSION, PROTOCOL_VERSION};

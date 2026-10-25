@@ -9,16 +9,15 @@ use sealbook_crypto::{
     account_op_transcript, content_digest, decrypt_object, delete_account_payload, encrypt_object,
     enrollment_transcript, entropy_from_phrase, generate_device_hpke, generate_device_signing,
     generate_kdf_salt, generate_phrase, key_rotation_transcript, key_wraps_digest,
-    login_start_transcript, login_transcript, manifest_digest, object_aad,
-    open_login_challenge, pair_confirmation, pair_grant_transcript, password_change_payload,
-    phrase_lookup_id, phrase_recovery_public, phrase_recovery_transcript,
-    recovery_password_payload, rotated_objects_digest, rotation_recovery_payload, sign,
-    sign_phrase_recovery, unwrap_collection_key, unwrap_for_device, unwrap_for_phrase,
-    username_change_payload, wrap_collection_key, wrap_for_device, wrap_for_phrase,
-    CollectionKey, DeviceHpkePublic, DeviceHpkeSecret, DeviceHpkeWrap,
-    DeviceSigningSecrets, EncryptedObject, ManifestDigestEntry, ObjectDigestEntry,
-    RecoveryWrap, WrapDigestEntry, PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE,
-    XWING_CIPHERSUITE,
+    login_start_transcript, login_transcript, manifest_digest, object_aad, open_login_challenge,
+    pair_confirmation, pair_grant_transcript, password_change_payload, phrase_lookup_id,
+    phrase_recovery_public, phrase_recovery_transcript, recovery_password_payload,
+    rotated_objects_digest, rotation_recovery_payload, sign, sign_phrase_recovery,
+    unwrap_collection_key, unwrap_for_device, unwrap_for_phrase, username_change_payload,
+    wrap_collection_key, wrap_for_device, wrap_for_phrase, CollectionKey, DeviceHpkePublic,
+    DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets, EncryptedObject, ManifestDigestEntry,
+    ObjectDigestEntry, RecoveryWrap, WrapDigestEntry, PHRASE_CIPHERSUITE, PHRASE_SCHEME,
+    RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
 };
 use sealbook_protocol::envelope::{open_envelope, seal_envelope, Unsealed};
 use sealbook_protocol::{DevicePublicKeys, RosterBody, RosterSignerBody, SEALED_CONTENT_TYPE};
@@ -546,49 +545,6 @@ fn text(bytes: Vec<u8>) -> Result<String, CryptoError> {
     })
 }
 
-/// Re-encrypts one stored object from the old collection key to the new one,
-/// for a rotation.
-///
-/// The plaintext never becomes a Kotlin string: a rotation that decoded it as
-/// text would rewrite any payload that is not valid UTF-8, and a rotation
-/// touches the whole vault at once.
-#[uniffi::export]
-pub fn reseal_object(
-    old_ck_b64: String,
-    new_ck_b64: String,
-    object_id: String,
-    collection_id: String,
-    nonce_b64: String,
-    ciphertext_b64: String,
-    padded_size: u64,
-) -> Result<EncryptedResult, CryptoError> {
-    let plain = decrypt_object_bytes(
-        &old_ck_b64,
-        &object_id,
-        &collection_id,
-        &nonce_b64,
-        &ciphertext_b64,
-        padded_size,
-    )?;
-    let stored = match open_envelope(&plain) {
-        Unsealed::Envelope { .. } => plain,
-        Unsealed::Unreadable => {
-            return Err(CryptoError::General {
-                msg: "object has an envelope this build cannot read".into(),
-            })
-        }
-    };
-    let oid = parse_uuid(&object_id)?;
-    let cid = parse_uuid(&collection_id)?;
-    let aad = object_aad(oid.as_bytes(), cid.as_bytes());
-    let enc = encrypt_object(&ck_from_b64(&new_ck_b64)?, &stored, &aad)?;
-    Ok(EncryptedResult {
-        nonce: b64(&enc.nonce),
-        ciphertext: b64(&enc.ciphertext),
-        padded_size: enc.padded_size as u64,
-    })
-}
-
 // ── Device Creation ──
 
 #[derive(uniffi::Record)]
@@ -1042,14 +998,11 @@ pub fn object_content_digest(
     )))
 }
 
-
-
 /// Digest of a whole collection, for a manifest.
 #[uniffi::export]
 pub fn manifest_digest_of(entries: Vec<ManifestEntryIn>) -> Result<String, CryptoError> {
     Ok(b64(&manifest_digest(&manifest_entries(&entries)?)))
 }
-
 
 // ── Device roster ──
 

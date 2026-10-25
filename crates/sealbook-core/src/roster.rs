@@ -309,6 +309,21 @@ impl From<&DevicePublicKeys> for CoreDevice {
     }
 }
 
+/// Back to the protocol type, for a host that signs a roster or wraps a key
+/// from what [`rotation_recipients`](crate::rotation_recipients) answered.
+impl TryFrom<&CoreDevice> for DevicePublicKeys {
+    type Error = CoreError;
+
+    fn try_from(device: &CoreDevice) -> Result<Self, Self::Error> {
+        Ok(DevicePublicKeys {
+            device_id: device.device_id,
+            mldsa_pk: decode(&device.mldsa_pk, "device ML-DSA key")?,
+            ed25519_pk: decode(&device.ed25519_pk, "device Ed25519 key")?,
+            xwing_hpke_pk: decode(&device.xwing_hpke_pk, "device X-Wing key")?,
+        })
+    }
+}
+
 // Every base64 field in the protocol is URL-safe and unpadded, including the
 // ones the hosts already have stored, so core has to agree with it.
 fn encode(bytes: &[u8]) -> String {
