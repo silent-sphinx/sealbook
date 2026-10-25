@@ -4,7 +4,7 @@
 use rustls::pki_types::CertificateDer;
 
 use sealbook_crypto::CollectionKey;
-use sealbook_protocol::{speaks_protocol, DevicePublicKeys, ProtocolReport};
+use sealbook_protocol::{speaks_protocol, ProtocolReport};
 
 use crate::tls::https_client;
 use crate::{ClientError, LocalState};
@@ -25,7 +25,7 @@ pub struct SealbookClient {
     /// matches: a revocation is always a rotation, so the epoch moving is what a
     /// device having been removed looks like from here, and a signer the cache
     /// does not hold is what a pairing elsewhere looks like. Either refetches.
-    pub(crate) roster_cache: Option<(sealbook_core::CoreRoster, Vec<DevicePublicKeys>)>,
+    pub(crate) roster_cache: Option<sealbook_core::CoreRoster>,
 }
 
 impl SealbookClient {

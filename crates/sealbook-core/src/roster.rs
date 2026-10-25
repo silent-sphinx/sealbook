@@ -9,7 +9,7 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sealbook_crypto::{CollectionKey, RosterPin};
-use sealbook_protocol::{RosterBody, RosterResponse, RosterSignerBody};
+use sealbook_protocol::{DevicePublicKeys, RosterBody, RosterResponse, RosterSignerBody};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -295,6 +295,17 @@ fn read(body: &RosterBody) -> CoreRoster {
             RosterSignerBody::Device { device_id } => CoreRosterSigner::Device { device_id },
             RosterSignerBody::Phrase => CoreRosterSigner::Phrase,
         },
+    }
+}
+
+impl From<&DevicePublicKeys> for CoreDevice {
+    fn from(device: &DevicePublicKeys) -> Self {
+        CoreDevice {
+            device_id: device.device_id,
+            mldsa_pk: encode(&device.mldsa_pk),
+            ed25519_pk: encode(&device.ed25519_pk),
+            xwing_hpke_pk: encode(&device.xwing_hpke_pk),
+        }
     }
 }
 

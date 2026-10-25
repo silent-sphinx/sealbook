@@ -13,6 +13,7 @@
 
 mod error;
 mod http;
+mod manifest;
 mod roster;
 mod state;
 
@@ -32,6 +33,13 @@ uniffi::custom_type!(Uuid, String, {
 
 pub use error::CoreError;
 pub use http::{Header, HttpRequest, HttpResponse, Method, Step};
+pub use manifest::{
+    accept_manifest_seq, core_entries, wire_entries, manifest_accept, manifest_apply, manifest_buckets_accept,
+    manifest_absence_ok, manifest_buckets_from_whole, manifest_buckets_request, manifest_entry_for,
+    manifest_request, manifest_sign, manifest_sign_root, manifest_signer, manifest_verify, AppliedManifest, BucketedManifest,
+    BucketsOutcome, CoreManifestEntry, ManifestContext, ManifestOutcome, ManifestPlan,
+    ManifestSigner, SignedManifest,
+};
 pub use roster::{
     pin_roster, read_roster, roster_accept, roster_accept_sealed, roster_answers_for,
     roster_request, CoreDevice, CoreRoster, CoreRosterPin, CoreRosterSigner, RosterContext,

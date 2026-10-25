@@ -52,6 +52,26 @@ both builds already require for the wasm module and the JNI library.
   `the_checked_in_fixture_is_what_the_generator_builds` compares transcripts
   rather than bytes, because ML-DSA signing need not be deterministic.
 
+- `manifests/one-write.json` — a five-object collection in four buckets, with
+  its signed manifest served both ways (whole, and as the two buckets one write
+  touches) and the root that write produces. Signed by the same alpha device as
+  the roster fixture, under the same collection, so the two describe one
+  account. Pins that the bucketed check and the whole-collection check reach the
+  same root, which is the property the bucket read rests on, and it is what
+  `sealbook-core`'s manifest tests,
+  `sealbook-web/src/lib/manifestParity.test.ts` and Android's
+  `ManifestChainTest` are all held to.
+
+  Generated from fixed seeds by the ignored `regenerate_the_manifest_fixture`
+  test in `crates/sealbook-core/tests/manifest.rs`:
+
+  ```
+  REGENERATE_MANIFEST_FIXTURE=1 cargo test -p sealbook-core -- --ignored regenerate
+  ```
+
+  As with the roster fixture, the check compares the digests and the root rather
+  than the bytes.
+
 One payload per remaining content type is phase 8 work in `UNIFICATION_PLAN.md`,
 added as each type moves into `sealbook-core`.
 

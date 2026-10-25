@@ -182,9 +182,11 @@ impl SealbookClient {
             .collect();
         manifest_entries.extend(plaintexts.tombstones.iter().cloned());
         let manifest = self.sign_manifest(
-            manifest_seq + 1,
-            key_epoch,
-            first_revision + objects.len() as u64 - 1,
+            &sealbook_core::ManifestPlan {
+                manifest_seq: manifest_seq + 1,
+                key_epoch,
+                latest_revision: first_revision + objects.len() as u64 - 1,
+            },
             &manifest_entries,
         )?;
         let mut manifest_digest_bytes = [0u8; 32];

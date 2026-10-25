@@ -22,8 +22,8 @@ use sealbook_protocol::{
     SEALED_CONTENT_TYPE,
 };
 
-use crate::manifest::BucketedManifest;
-use crate::{ClientError, ManifestError, SealbookClient};
+use sealbook_core::{manifest_apply, BucketedManifest, ManifestPlan};
+use crate::{ClientError, SealbookClient};
 
 /// An object as stored, still wrapped in its envelope.
 pub(crate) struct StoredObject {
@@ -548,7 +548,7 @@ impl SealbookClient {
     /// nothing can decrypt or rotate.
     async fn prepare_write(&mut self, ids: &[Uuid]) -> Result<BucketedManifest, ClientError> {
         let state = self.manifest_bucket_state(ids).await?;
-        self.align_key_epoch(state.key_epoch).await?;
+        self.align_key_epoch(state.plan.key_epoch).await?;
         Ok(state)
     }
 
@@ -777,16 +777,23 @@ impl SealbookClient {
             padded_size,
             tombstone,
         } = write;
-        let (seq, key_epoch, revision) = (state.seq, state.key_epoch, state.latest_revision + 1);
-        let (object_count, root) = state.apply(&[ManifestEntry {
-            id: object_id,
-            revision,
-            tombstone,
-            content_digest: content_digest(&nonce, &ciphertext).to_vec(),
-        }])?;
-        let manifest =
-            self.sign_manifest_root(seq + 1, key_epoch, revision, object_count, &root)?;
-        let written_seq = seq + 1;
+        let revision = state.plan.latest_revision + 1;
+        let written_seq = state.plan.manifest_seq + 1;
+        let plan = ManifestPlan {
+            manifest_seq: written_seq,
+            key_epoch: state.plan.key_epoch,
+            latest_revision: revision,
+        };
+        let applied = manifest_apply(
+            &state,
+            &sealbook_core::core_entries(&[ManifestEntry {
+                id: object_id,
+                revision,
+                tombstone,
+                content_digest: content_digest(&nonce, &ciphertext).to_vec(),
+            }]),
+        )?;
+        let manifest = self.sign_manifest_root(&plan, &applied)?;
 
         let resp: sealbook_protocol::PutObjectResponse = self
             .put_json(
@@ -834,8 +841,8 @@ impl SealbookClient {
                 local.session_token.clone().ok_or(ClientError::NoState)?,
             )
         };
-        let (seq, key_epoch) = (state.seq, state.key_epoch);
-        let first_revision = state.latest_revision + 1;
+        let written_seq = state.plan.manifest_seq + 1;
+        let first_revision = state.plan.latest_revision + 1;
 
         let entries: Vec<ManifestEntry> = writes
             .iter()
@@ -847,11 +854,13 @@ impl SealbookClient {
                 content_digest: content_digest(&write.nonce, &write.ciphertext).to_vec(),
             })
             .collect();
-        let latest_revision = first_revision + writes.len() as u64 - 1;
-        let (object_count, root) = state.apply(&entries)?;
-        let manifest =
-            self.sign_manifest_root(seq + 1, key_epoch, latest_revision, object_count, &root)?;
-        let written_seq = seq + 1;
+        let plan = ManifestPlan {
+            manifest_seq: written_seq,
+            key_epoch: state.plan.key_epoch,
+            latest_revision: first_revision + writes.len() as u64 - 1,
+        };
+        let applied = manifest_apply(&state, &sealbook_core::core_entries(&entries))?;
+        let manifest = self.sign_manifest_root(&plan, &applied)?;
 
         let objects: Vec<BatchObject> = writes
             .into_iter()
@@ -974,19 +983,9 @@ impl SealbookClient {
                         content_digest: content_digest(&object.nonce, &object.ciphertext).to_vec(),
                     })
                     .collect();
-                let devices = self.list_devices().await?;
-                self.verify_manifest(&manifest, &entries, &devices)?;
+                self.verify_manifest(&manifest, &entries).await?;
             }
-            None => {
-                let state = self.state.as_ref().ok_or(ClientError::NoState)?;
-                if state.manifest_seq > 0 {
-                    return Err(ManifestError(
-                        "server served objects with no manifest, but this device has seen one"
-                            .into(),
-                    )
-                    .into());
-                }
-            }
+            None => self.manifest_absence_ok()?,
         }
         Ok(VerifiedObjects {
             objects: latest,

@@ -9,14 +9,14 @@ use sealbook_crypto::{
     account_op_transcript, content_digest, decrypt_object, delete_account_payload, encrypt_object,
     enrollment_transcript, entropy_from_phrase, generate_device_hpke, generate_device_signing,
     generate_kdf_salt, generate_phrase, key_rotation_transcript, key_wraps_digest,
-    login_start_transcript, login_transcript, manifest_digest, manifest_transcript, object_aad,
+    login_start_transcript, login_transcript, manifest_digest, object_aad,
     open_login_challenge, pair_confirmation, pair_grant_transcript, password_change_payload,
     phrase_lookup_id, phrase_recovery_public, phrase_recovery_transcript,
     recovery_password_payload, rotated_objects_digest, rotation_recovery_payload, sign,
     sign_phrase_recovery, unwrap_collection_key, unwrap_for_device, unwrap_for_phrase,
-    username_change_payload, verify, wrap_collection_key, wrap_for_device, wrap_for_phrase,
-    CollectionKey, DeviceHpkePublic, DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningPublic,
-    DeviceSigningSecrets, DualSignature, EncryptedObject, ManifestDigestEntry, ObjectDigestEntry,
+    username_change_payload, wrap_collection_key, wrap_for_device, wrap_for_phrase,
+    CollectionKey, DeviceHpkePublic, DeviceHpkeSecret, DeviceHpkeWrap,
+    DeviceSigningSecrets, EncryptedObject, ManifestDigestEntry, ObjectDigestEntry,
     RecoveryWrap, WrapDigestEntry, PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE,
     XWING_CIPHERSUITE,
 };
@@ -1042,58 +1042,7 @@ pub fn object_content_digest(
     )))
 }
 
-#[derive(uniffi::Record)]
-pub struct SignedManifest {
-    pub manifest_seq: u64,
-    pub key_epoch: u64,
-    pub latest_revision: u64,
-    pub object_count: u64,
-    pub digest: String,
-    pub device_id: String,
-    pub signature: DualSigResult,
-}
 
-/// Signs a manifest for the state a write produces.
-#[uniffi::export]
-#[allow(clippy::too_many_arguments)]
-pub fn manifest_sign(
-    mldsa_seed_b64: String,
-    ed25519_sk_b64: String,
-    collection_id: String,
-    device_id: String,
-    manifest_seq: u64,
-    key_epoch: u64,
-    latest_revision: u64,
-    entries: Vec<ManifestEntryIn>,
-) -> Result<SignedManifest, CryptoError> {
-    let digest_entries = manifest_entries(&entries)?;
-    let digest = manifest_digest(&digest_entries);
-    let transcript = manifest_transcript(
-        parse_uuid(&collection_id)?,
-        manifest_seq,
-        key_epoch,
-        latest_revision,
-        digest_entries.len() as u64,
-        &digest,
-    );
-    let secrets = DeviceSigningSecrets {
-        mldsa_seed: unb64(&mldsa_seed_b64)?,
-        ed25519_sk: unb64(&ed25519_sk_b64)?,
-    };
-    let sig = sign(&secrets, &transcript)?;
-    Ok(SignedManifest {
-        manifest_seq,
-        key_epoch,
-        latest_revision,
-        object_count: digest_entries.len() as u64,
-        digest: b64(&digest),
-        device_id,
-        signature: DualSigResult {
-            mldsa: b64(&sig.mldsa),
-            ed25519: b64(&sig.ed25519),
-        },
-    })
-}
 
 /// Digest of a whole collection, for a manifest.
 #[uniffi::export]
@@ -1101,54 +1050,6 @@ pub fn manifest_digest_of(entries: Vec<ManifestEntryIn>) -> Result<String, Crypt
     Ok(b64(&manifest_digest(&manifest_entries(&entries)?)))
 }
 
-/// Checks a served manifest against the entries it is supposed to describe.
-///
-/// An error here means the server served something no device signed for.
-#[uniffi::export]
-#[allow(clippy::too_many_arguments)]
-pub fn manifest_verify(
-    signer_mldsa_pk_b64: String,
-    signer_ed25519_pk_b64: String,
-    collection_id: String,
-    manifest_seq: u64,
-    key_epoch: u64,
-    latest_revision: u64,
-    entries: Vec<ManifestEntryIn>,
-    expected_digest_b64: String,
-    signature: DualSigResult,
-) -> Result<(), CryptoError> {
-    let digest_entries = manifest_entries(&entries)?;
-    let digest = manifest_digest(&digest_entries);
-    if digest != digest32(&expected_digest_b64)? {
-        return Err(CryptoError::General {
-            msg: "the objects served do not match the signed manifest; an object may have been \
-                  withheld, rolled back or substituted"
-                .into(),
-        });
-    }
-    let transcript = manifest_transcript(
-        parse_uuid(&collection_id)?,
-        manifest_seq,
-        key_epoch,
-        latest_revision,
-        digest_entries.len() as u64,
-        &digest,
-    );
-    verify(
-        &DeviceSigningPublic {
-            mldsa_pk: unb64(&signer_mldsa_pk_b64)?,
-            ed25519_pk: unb64(&signer_ed25519_pk_b64)?,
-        },
-        &transcript,
-        &DualSignature {
-            mldsa: unb64(&signature.mldsa)?,
-            ed25519: unb64(&signature.ed25519)?,
-        },
-    )
-    .map_err(|_| CryptoError::General {
-        msg: "manifest signature does not verify".into(),
-    })
-}
 
 // ── Device roster ──
 
