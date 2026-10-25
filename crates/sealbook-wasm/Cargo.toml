@@ -12,9 +12,11 @@ crate-type = ["cdylib", "rlib"]
 base64.workspace = true
 console_error_panic_hook.workspace = true
 js-sys.workspace = true
+sealbook-core = { path = "../sealbook-core", features = ["wasm"] }
 sealbook-crypto = { path = "../sealbook-crypto" }
 sealbook-protocol = { path = "../sealbook-protocol" }
 serde.workspace = true
+tsify = { version = "0.5", default-features = false, features = ["js"] }
 serde_json.workspace = true
 uuid = { workspace = true, features = ["js"] }
 wasm-bindgen.workspace = true

@@ -26,6 +26,10 @@ use uuid::Uuid;
 
 uniffi::setup_scaffolding!();
 
+// sealbook-core carries its own uniffi namespace. Without this the linker drops
+// its scaffolding from the cdylib and bindgen emits no Kotlin for it.
+sealbook_core::uniffi_reexport_scaffolding!();
+
 // ── Helpers ──
 
 fn b64(bytes: &[u8]) -> String {

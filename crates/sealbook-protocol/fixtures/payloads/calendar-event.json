@@ -1,0 +1,1 @@
+{"@type":"CalendarEvent","version":"1.0","title":"Standup","start":"2026-10-01T09:00:00.000Z","end":"2026-10-01T09:15:00.000Z","notes":"Daily sync","location":"Room 3","participants":["alice@example.com","bob@example.com"],"timezone":"Europe/London","calendarId":"cal-1","recurrence":{"frequency":"weekly","weekdays":[1,2,3,4,5]}}

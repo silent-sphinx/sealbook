@@ -1,0 +1,74 @@
+{
+  "@type": "SealbookAccountExport",
+  "account": {
+    "accountId": "00000000-0000-0000-0000-00000000000a",
+    "collectionId": "00000000-0000-0000-0000-00000000000b",
+    "deviceId": "00000000-0000-0000-0000-00000000000c",
+    "server": "https://vault.example",
+    "username": "alice"
+  },
+  "exportedAt": "2026-10-10T00:00:00Z",
+  "objectCount": 6,
+  "objects": [
+    {
+      "contentType": "application/jscontact+json",
+      "id": "00000000-0000-0000-0000-000000000001",
+      "payload": {
+        "@type": "Card",
+        "emails": {
+          "work": {
+            "address": "ada@example.com"
+          }
+        },
+        "name": {
+          "full": "Ada Lovelace"
+        },
+        "version": "1.0"
+      }
+    },
+    {
+      "contentType": "application/sealbook.addressbook+json",
+      "id": "00000000-0000-0000-0000-000000000002",
+      "payload": {
+        "@type": "AddressBook",
+        "name": "Default Address Book",
+        "version": "1.0"
+      }
+    },
+    {
+      "contentType": "application/sealbook.note+json",
+      "id": "00000000-0000-0000-0000-000000000003",
+      "payload": {
+        "@type": "Note",
+        "body": "- ship\n",
+        "notebookId": "00000000-0000-0000-0000-000000000002",
+        "pinned": true,
+        "title": "Weekly plan",
+        "version": "1.0"
+      }
+    },
+    {
+      "contentType": "application/sealbook.calendarevent+json",
+      "id": "00000000-0000-0000-0000-000000000004",
+      "payload": {
+        "@type": "CalendarEvent",
+        "start": "2026-10-10T09:00:00Z",
+        "title": "Launch",
+        "version": "1.0"
+      }
+    },
+    {
+      "contentType": "application/sealbook.future+json",
+      "id": "00000000-0000-0000-0000-000000000005",
+      "payload": {
+        "keep": "me"
+      }
+    },
+    {
+      "contentType": "application/octet-stream",
+      "id": "00000000-0000-0000-0000-000000000006",
+      "text": "not json at all"
+    }
+  ],
+  "version": "1.0"
+}

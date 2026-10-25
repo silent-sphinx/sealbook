@@ -1045,7 +1045,7 @@ async fn importing_over_a_live_container_replaces_it() {
 async fn a_v1_release_backup_restores_onto_a_new_instance() {
     let fixture = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../sealbook-cli/tests/fixtures/v1.0.0-account-export.json"
+        "/../sealbook-protocol/fixtures/v1.0.0-account-export.json"
     );
     let document: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(fixture).expect("the v1.0.0 fixture"))

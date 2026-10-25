@@ -2150,7 +2150,7 @@ mod tests {
     fn a_v1_release_export_parses_into_every_object_it_carries() {
         let fixture = concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/v1.0.0-account-export.json"
+            "/../sealbook-protocol/fixtures/v1.0.0-account-export.json"
         );
         let document = std::fs::read_to_string(fixture).expect("the v1.0.0 fixture");
         let import = parse_account_export(&document).expect("a v1.0.0 export must import");

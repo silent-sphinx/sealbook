@@ -1,0 +1,44 @@
+# Shared client fixtures
+
+Documents that every client must agree on, kept here rather than in
+`sealbook-test-data` so they are versioned with the code that has to satisfy
+them: a change to a wire type or a payload schema and the fixture it breaks
+move in one commit.
+
+`sealbook-test-data` keeps third-party input (Thunderbird CSV exports, an ICS
+file, an image). This directory keeps sealbook's own output.
+
+## Who reads them
+
+| reader | how |
+| --- | --- |
+| Rust | `concat!(env!("CARGO_MANIFEST_DIR"), "/../sealbook-protocol/fixtures/...")` |
+| TypeScript | `readFixture("...")` from `sealbook-web/src/test/fixtures.ts` |
+| Kotlin | `SharedFixtures.read("...")` from `sealbook-app`'s test sources |
+
+The TypeScript and Kotlin readers resolve a sibling `sealbook` checkout, which
+both builds already require for the wasm module and the JNI library.
+
+## Contents
+
+- `v1.0.0-account-export.json` — the v1.0.0 release's own account export,
+  carrying a content type that release had no parser for and a payload that is
+  not JSON. Pins that both the CLI and the web importer still round-trip every
+  object a released client could have written.
+- `payloads/calendar-event.json`, `payloads/calendar.json`,
+  `payloads/calendar-archived.json` — the literal output of sealbook-web's
+  `putCalendarEvent` and `putCalendar`. Android's `CalendarWireParityTest` read
+  these as copied literals until they moved here; now the web's
+  `wireParity.test.ts` and this crate's `tests/fixtures.rs` are held to the
+  same bytes. Pins the keys and values of the calendar plaintext, which no
+  server check covers.
+
+One payload per remaining content type is phase 8 work in `UNIFICATION_PLAN.md`,
+added as each type moves into `sealbook-core`.
+
+## Adding one
+
+A fixture is only worth keeping if more than one implementation reads it, or if
+it is output from a release that can no longer be regenerated. Name it for what
+it pins, note it in the table above, and say in the comment which drift it
+catches.

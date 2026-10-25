@@ -12,6 +12,7 @@ name = "sealbook_android"
 
 [dependencies]
 sealbook-client = { path = "../sealbook-client" }
+sealbook-core = { path = "../sealbook-core", features = ["uniffi"] }
 sealbook-protocol = { path = "../sealbook-protocol" }
 sealbook-crypto = { path = "../sealbook-crypto" }
 reqwest = { workspace = true, features = ["blocking"] }

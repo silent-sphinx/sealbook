@@ -1,5 +1,6 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use sealbook_core::CoreBuild;
 use sealbook_crypto::opaque::{
     client_login_finish, client_login_start, client_register_finish, client_register_start,
     ClientLogin, ClientRegistration, SealbookCipherSuite,
@@ -8,21 +9,22 @@ use sealbook_crypto::{
     account_op_transcript, content_digest, decrypt_object, delete_account_payload, encrypt_object,
     enrollment_transcript, entropy_from_phrase, generate_device_hpke, generate_device_signing,
     generate_kdf_salt, generate_phrase, key_rotation_transcript, key_wraps_digest,
-    login_start_transcript, login_transcript, manifest_digest, manifest_transcript, object_aad,
-    open_login_challenge, pair_confirmation, pair_grant_transcript, password_change_payload,
-    phrase_lookup_id, phrase_recovery_public, phrase_recovery_transcript,
-    recovery_password_payload, rotated_objects_digest, rotation_recovery_payload, sign,
-    sign_phrase_recovery, unwrap_collection_key, unwrap_for_device, unwrap_for_phrase,
-    username_change_payload, verify, wrap_collection_key, wrap_for_device, wrap_for_phrase,
-    CollectionKey, DeviceHpkePublic, DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningPublic,
-    DeviceSigningSecrets, DualSignature, EncryptedObject, ManifestDigestEntry, ObjectDigestEntry,
-    RecoveryWrap, WrapDigestEntry, PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE,
-    XWING_CIPHERSUITE,
+    login_start_transcript, login_transcript, manifest_bucket_digest, manifest_bucket_of,
+    manifest_digest, manifest_root, manifest_transcript, object_aad, open_login_challenge,
+    pair_confirmation, pair_grant_transcript, password_change_payload, phrase_lookup_id,
+    phrase_recovery_public, phrase_recovery_transcript, recovery_password_payload,
+    rotated_objects_digest, rotation_recovery_payload, sign, sign_phrase_recovery,
+    unwrap_collection_key, unwrap_for_device, unwrap_for_phrase, username_change_payload, verify,
+    wrap_collection_key, wrap_for_device, wrap_for_phrase, CollectionKey, DeviceHpkePublic,
+    DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningPublic, DeviceSigningSecrets, DualSignature,
+    EncryptedObject, ManifestDigestEntry, ObjectDigestEntry, RecoveryWrap, WrapDigestEntry,
+    MANIFEST_BUCKETS, PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
 };
 use sealbook_crypto::{phrase_recovery_keys, RosterPin};
 use sealbook_protocol::envelope::{open_envelope, seal_envelope, Unsealed};
 use sealbook_protocol::{DevicePublicKeys, RosterBody, RosterSignerBody, SEALED_CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
+use tsify::{Ts, Tsify};
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
 
@@ -1190,6 +1192,256 @@ pub fn manifest_verify(
     .map_err(|_| JsError::new("manifest signature does not verify"))
 }
 
+/// The manifest bucket an object id falls in.
+///
+/// A write touches one bucket per object, so this is what decides which buckets
+/// a write has to fetch.
+#[wasm_bindgen]
+pub fn manifest_bucket_of_id(id: &str) -> Result<u8, JsError> {
+    Ok(manifest_bucket_of(parse_uuid(id)?))
+}
+
+/// The 256 bucket digests, unpacked from the blob the server serves.
+fn bucket_digests(buckets_b64: &str) -> Result<[[u8; 32]; MANIFEST_BUCKETS], JsError> {
+    let blob = unb64(buckets_b64)?;
+    if blob.len() != MANIFEST_BUCKETS * 32 {
+        return Err(JsError::new(&format!(
+            "expected {} bytes of bucket digests, got {}",
+            MANIFEST_BUCKETS * 32,
+            blob.len()
+        )));
+    }
+    let mut buckets = [[0u8; 32]; MANIFEST_BUCKETS];
+    for (bucket, chunk) in buckets.iter_mut().zip(blob.chunks(32)) {
+        bucket.copy_from_slice(chunk);
+    }
+    Ok(buckets)
+}
+
+/// One bucket's digest, or all zeroes for an empty bucket, matching how the root
+/// is built.
+fn bucket_digest(entries: &[ManifestDigestEntry]) -> [u8; 32] {
+    if entries.is_empty() {
+        return [0u8; 32];
+    }
+    manifest_bucket_digest(entries)
+}
+
+/// The 256 bucket digests of a whole entry set, concatenated.
+///
+/// What the server derives from its own rows, in the shape the bucketed manifest
+/// endpoint serves. Computed here so the per-bucket framing cannot drift from
+/// what the root is built over.
+#[wasm_bindgen]
+pub fn manifest_buckets_blob(entries_json: &str) -> Result<String, JsError> {
+    let entries = manifest_entries(entries_json)?;
+    let mut blob = Vec::with_capacity(MANIFEST_BUCKETS * 32);
+    for bucket in 0..MANIFEST_BUCKETS {
+        let bucket = bucket as u8;
+        let members: Vec<ManifestDigestEntry> = entries
+            .iter()
+            .filter(|entry| manifest_bucket_of(entry.id) == bucket)
+            .cloned()
+            .collect();
+        blob.extend_from_slice(&bucket_digest(&members));
+    }
+    Ok(b64(&blob))
+}
+
+/// Checks a bucketed manifest answer and returns the root it commits to.
+///
+/// Two checks together are what the single whole-collection digest check is. The
+/// served entries of each bucket must hash to that bucket's digest, which catches
+/// an object withheld from or substituted within a bucket. The digests with the
+/// count must produce the root the signature covers, which catches an edited
+/// digest and pins the buckets that were not served.
+///
+/// `served` is the bucket list the server echoed back, and every served entry
+/// must fall inside it.
+#[wasm_bindgen]
+pub fn manifest_buckets_root(
+    buckets_b64: &str,
+    object_count: u64,
+    served_json: &str,
+    entries_json: &str,
+) -> Result<String, JsError> {
+    let buckets = bucket_digests(buckets_b64)?;
+    let served: Vec<u8> = serde_json::from_str(served_json).map_err(js_err)?;
+    let entries = manifest_entries(entries_json)?;
+    for entry in &entries {
+        if !served.contains(&manifest_bucket_of(entry.id)) {
+            return Err(JsError::new(
+                "server put an entry in a bucket it was not asked for",
+            ));
+        }
+    }
+    for bucket in &served {
+        let members: Vec<ManifestDigestEntry> = entries
+            .iter()
+            .filter(|entry| manifest_bucket_of(entry.id) == *bucket)
+            .cloned()
+            .collect();
+        if bucket_digest(&members) != buckets[*bucket as usize] {
+            return Err(JsError::new(
+                "the entries served for this bucket do not match its digest; an object may \
+                 have been withheld, rolled back or substituted",
+            ));
+        }
+    }
+    Ok(b64(&manifest_root(&buckets, object_count)))
+}
+
+/// Folds written entries into a bucketed manifest and returns what the next
+/// manifest must commit to, as `{ object_count, root }`.
+///
+/// The server recomputes both from its own rows, so these are derived the same
+/// way: replace each entry in its bucket, rehash the buckets that changed,
+/// rehash the root over all 256. `held` is the buckets whose entries the caller
+/// was served; an entry outside them cannot be folded in, because its bucket's
+/// digest cannot be recomputed from entries this device never saw.
+#[wasm_bindgen]
+pub fn manifest_buckets_apply(
+    buckets_b64: &str,
+    object_count: u64,
+    held_json: &str,
+    entries_json: &str,
+    written_json: &str,
+) -> Result<String, JsError> {
+    let mut buckets = bucket_digests(buckets_b64)?;
+    let held: Vec<u8> = serde_json::from_str(held_json).map_err(js_err)?;
+    let mut entries = manifest_entries(entries_json)?;
+    let written = manifest_entries(written_json)?;
+
+    let mut fresh = 0u64;
+    let mut touched: Vec<u8> = Vec::with_capacity(written.len());
+    for entry in written {
+        let bucket = manifest_bucket_of(entry.id);
+        if !held.contains(&bucket) {
+            return Err(JsError::new(
+                "a write was folded into a bucket this device did not fetch",
+            ));
+        }
+        touched.push(bucket);
+        match entries.iter_mut().find(|existing| existing.id == entry.id) {
+            Some(existing) => *existing = entry,
+            None => {
+                entries.push(entry);
+                fresh += 1;
+            }
+        }
+    }
+    touched.sort_unstable();
+    touched.dedup();
+    for bucket in touched {
+        let members: Vec<ManifestDigestEntry> = entries
+            .iter()
+            .filter(|entry| manifest_bucket_of(entry.id) == bucket)
+            .cloned()
+            .collect();
+        buckets[bucket as usize] = bucket_digest(&members);
+    }
+    let object_count = object_count + fresh;
+    serde_json::to_string(&serde_json::json!({
+        "object_count": object_count,
+        "root": b64(&manifest_root(&buckets, object_count)),
+    }))
+    .map_err(js_err)
+}
+
+/// Signs a manifest for a root already derived from the bucket digests.
+///
+/// The whole-collection counterpart of `manifest_sign`, for a write that never
+/// held every entry. The root and the object count come from
+/// `manifest_buckets_apply`, so the signature covers the same value a signature
+/// over every entry would.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn manifest_sign_root(
+    mldsa_seed_b64: &str,
+    ed25519_sk_b64: &str,
+    collection_id: &str,
+    device_id: &str,
+    manifest_seq: u64,
+    key_epoch: u64,
+    latest_revision: u64,
+    object_count: u64,
+    root_b64: &str,
+) -> Result<String, JsError> {
+    let root = digest32(root_b64)?;
+    let transcript = manifest_transcript(
+        parse_uuid(collection_id)?,
+        manifest_seq,
+        key_epoch,
+        latest_revision,
+        object_count,
+        &root,
+    );
+    let secrets = DeviceSigningSecrets {
+        mldsa_seed: unb64(mldsa_seed_b64)?,
+        ed25519_sk: unb64(ed25519_sk_b64)?,
+    };
+    let sig = sign(&secrets, &transcript).map_err(js_err)?;
+    serde_json::to_string(&serde_json::json!({
+        "manifest_seq": manifest_seq,
+        "key_epoch": key_epoch,
+        "latest_revision": latest_revision,
+        "object_count": object_count,
+        "digest": b64(&root),
+        "device_id": device_id,
+        "signature": { "mldsa": b64(&sig.mldsa), "ed25519": b64(&sig.ed25519) },
+    }))
+    .map_err(js_err)
+}
+
+/// Checks a served manifest against a root derived from the bucket digests.
+///
+/// The counterpart of `manifest_verify` for a read that fetched buckets rather
+/// than every entry: the root is already known to describe the digests served,
+/// so what is left is that the signature covers it.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn manifest_verify_root(
+    signer_mldsa_pk_b64: &str,
+    signer_ed25519_pk_b64: &str,
+    collection_id: &str,
+    manifest_seq: u64,
+    key_epoch: u64,
+    latest_revision: u64,
+    object_count: u64,
+    root_b64: &str,
+    expected_digest_b64: &str,
+    mldsa_sig_b64: &str,
+    ed25519_sig_b64: &str,
+) -> Result<(), JsError> {
+    let root = digest32(root_b64)?;
+    if root != digest32(expected_digest_b64)? {
+        return Err(JsError::new(
+            "the bucket digests served do not match the signed manifest; an object may have \
+             been withheld, rolled back or substituted",
+        ));
+    }
+    let transcript = manifest_transcript(
+        parse_uuid(collection_id)?,
+        manifest_seq,
+        key_epoch,
+        latest_revision,
+        object_count,
+        &root,
+    );
+    verify(
+        &DeviceSigningPublic {
+            mldsa_pk: unb64(signer_mldsa_pk_b64)?,
+            ed25519_pk: unb64(signer_ed25519_pk_b64)?,
+        },
+        &transcript,
+        &DualSignature {
+            mldsa: unb64(mldsa_sig_b64)?,
+            ed25519: unb64(ed25519_sig_b64)?,
+        },
+    )
+    .map_err(|_| JsError::new("manifest signature does not verify"))
+}
+
 /// Signs an account mutation: `"username"`, `"password"` or `"delete"`.
 ///
 /// The payload digest is computed here from the actual fields being sent, so a
@@ -1376,4 +1628,15 @@ pub fn roster_verify(
         "pin_transcript": b64(&pin.transcript),
     }))
     .map_err(js_err)
+}
+
+// ── Core ──
+
+/// The `sealbook-core` build this module was compiled against.
+///
+/// `scripts/build-wasm.sh` pins the checkout; this is what lets the running app
+/// check that the module it loaded speaks the generation it expects.
+#[wasm_bindgen]
+pub fn core_build() -> Result<Ts<CoreBuild>, JsError> {
+    Ok(sealbook_core::core_build().into_ts()?)
 }

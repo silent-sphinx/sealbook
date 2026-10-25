@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/sealbook-crypto",
     "crates/sealbook-protocol",
+    "crates/sealbook-core",
     "crates/sealbook-client",
     "crates/sealbook-server",
     "crates/sealbook-cli",
