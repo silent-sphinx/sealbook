@@ -54,6 +54,26 @@ impl LocalState {
             roster_transcript: self.roster_transcript.clone(),
         }
     }
+
+    /// Back from core's shape, for the flows where core decides what this
+    /// device persists.
+    pub fn from_core(state: sealbook_core::CoreDeviceState) -> Self {
+        LocalState {
+            server: state.server,
+            username: state.username,
+            account_id: state.account_id,
+            collection_id: state.collection_id,
+            device_id: state.device_id,
+            session_token: state.session_token,
+            kdf_salt: state.kdf_salt,
+            hpke_sk: state.hpke_sk,
+            mldsa_seed: state.mldsa_seed,
+            ed25519_sk: state.ed25519_sk,
+            manifest_seq: state.manifest_seq,
+            roster_seq: state.roster_seq,
+            roster_transcript: state.roster_transcript,
+        }
+    }
 }
 
 impl Drop for LocalState {

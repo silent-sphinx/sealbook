@@ -7,10 +7,17 @@
 //! it to the web and Firefox, `sealbook-android` to Kotlin over uniffi.
 //!
 //! Two rules hold for every function added here. It is a pure function of its
-//! inputs, which means no clock, no randomness a caller did not pass, and no
-//! network. And it is wire-identical to the implementation it replaces: the
-//! protocol generation stays [`PROTOCOL_VERSION`].
+//! inputs, which means no clock and no network. And it is wire-identical to the
+//! implementation it replaces: the protocol generation stays
+//! [`PROTOCOL_VERSION`].
+//!
+//! Randomness is the one exception, confined to [`new_device`],
+//! [`new_registration`] and the key wraps the auth bodies build: each returns
+//! what it drew for the host to persist. It lives here rather than in each
+//! binding crate because three copies of "what a new device is" is how two
+//! hosts came to choose the collection id and one did not.
 
+mod auth;
 mod error;
 mod http;
 mod manifest;
@@ -34,6 +41,17 @@ uniffi::custom_type!(Uuid, String, {
     try_lift: |s| Ok(s.parse::<Uuid>()?),
 });
 
+pub use auth::{
+    account_challenge_request, change_password_request, change_username_request,
+    delete_account_request, login_accept, login_challenge_request, login_finish_request,
+    login_start_request, new_device, new_registration, normalize_phrase, normalize_username,
+    opaque_login_start, opaque_register_start, opaque_register_upload,
+    password_change_start_accept, password_change_start_request, recover_accept,
+    recover_finish_request, recover_start_accept, recover_start_request, register_accept,
+    register_finish_request, register_start_accept, register_start_request, AuthRefusal,
+    AuthRequest, CoreDeviceSecrets, LoggedIn, LoginStarting, OpaqueStart, PasswordChange,
+    PasswordChangeStarted, RecoverStarted, Recovering, RegisterIdentity, Registering,
+};
 pub use error::CoreError;
 pub use http::{Header, HttpRequest, HttpResponse, Method, Step};
 pub use manifest::{

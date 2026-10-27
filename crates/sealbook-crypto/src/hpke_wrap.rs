@@ -69,6 +69,18 @@ pub fn device_hpke_public_from_ikm(ikm: &[u8]) -> DeviceHpkePublic {
     DeviceHpkePublic(pk.to_bytes().to_vec())
 }
 
+/// Derives both halves of an HPKE key pair from input keying material.
+///
+/// For a fixture that has to hold a device able to open its own key wrap, which
+/// [`device_hpke_public_from_ikm`] alone cannot give.
+pub fn device_hpke_keypair_from_ikm(ikm: &[u8]) -> (DeviceHpkeSecret, DeviceHpkePublic) {
+    let (sk, pk) = Kem::derive_keypair(ikm);
+    (
+        DeviceHpkeSecret(sk.to_bytes().to_vec()),
+        DeviceHpkePublic(pk.to_bytes().to_vec()),
+    )
+}
+
 pub fn validate_device_hpke_public(public: &DeviceHpkePublic) -> Result<(), CryptoError> {
     if public.0.len() != XWING_PUBLIC_KEY_LEN {
         return Err(CryptoError::Encoding);

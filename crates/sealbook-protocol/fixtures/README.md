@@ -136,6 +136,33 @@ both builds already require for the wasm module and the JNI library.
   The check compares the codes, the refusals and the served responses rather
   than an approval's bytes, because the HPKE wrap in one is freshly random.
 
+- `auth/account.json` is one signed-in account, and every decision the four
+  auth flows make that is not fresh randomness: the usernames and phrases a user
+  actually types and what each one is sent or derived as, the path each round
+  posts to, the login responses and which key wrap each has core open, the
+  recovery start response as the server serves it, and every refusal any flow
+  can raise. Under the same collection and alpha device as the fixtures above.
+  Pins the decisions the three clients had each been making for themselves: that
+  a username is trimmed before it is sent, that a phrase is lowercased before it
+  is parsed, that the collection the server echoes has to be the one the genesis
+  roster was signed over, and that a login with no wrap for this device is a
+  revoked device rather than a crypto error. Read by `sealbook-core`'s auth
+  tests, `sealbook-web/src/lib/authParity.test.ts` and Android's
+  `AccountAuthTest`.
+
+  Generated from fixed seeds by the ignored `regenerate_the_auth_fixture` test
+  in `crates/sealbook-core/tests/auth.rs`:
+
+  ```
+  REGENERATE_AUTH_FIXTURE=1 cargo test -p sealbook-core -- --ignored regenerate
+  ```
+
+  The check compares the usernames, phrases, paths, wrap choices and refusals
+  rather than the request bodies, because almost every body here is an OPAQUE
+  message, an HPKE wrap or a signature over one, and so differs on every run.
+  The recovery start response is the generator's output once for the same
+  reason: the phrase wrap in it carries a fresh nonce.
+
 One payload per remaining content type is phase 8 work in `UNIFICATION_PLAN.md`,
 added as each type moves into `sealbook-core`.
 

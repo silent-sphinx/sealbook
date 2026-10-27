@@ -8,10 +8,9 @@ use uuid::Uuid;
 use sealbook_crypto::{
     generate_kdf_salt, generate_phrase, key_rotation_transcript, key_wraps_digest,
     phrase_lookup_id, phrase_recovery_public, rotated_objects_digest, rotation_recovery_payload,
-    sign, unwrap_collection_key, unwrap_for_device, wrap_collection_key, wrap_for_device,
-    wrap_for_phrase, CollectionKey, DeviceHpkePublic, DeviceHpkeSecret, DeviceHpkeWrap,
-    DeviceSigningSecrets, ObjectDigestEntry, RecoveryWrap, WrapDigestEntry, PHRASE_CIPHERSUITE,
-    PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
+    sign, unwrap_for_device, wrap_collection_key, wrap_for_device, wrap_for_phrase, CollectionKey,
+    DeviceHpkePublic, DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets, ObjectDigestEntry,
+    WrapDigestEntry, PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
 };
 use sealbook_protocol::{
     CollectionKeysResponse, DevicePublicKeys, DualSignatureBody, KeyWrapBody, PhraseRecoveryBody,
@@ -353,49 +352,6 @@ impl SealbookClient {
         self.key_epoch = resp.key_epoch;
         Ok(resp.key_epoch)
     }
-}
-
-pub(crate) fn unwrap_ck(
-    password: &[u8],
-    salt: &[u8],
-    hpke_sk: &[u8],
-    device_id: &str,
-    wraps: &[KeyWrapBody],
-) -> Result<CollectionKey, ClientError> {
-    let device_key = if let Some(device) = wraps
-        .iter()
-        .find(|w| w.recipient_kind == "device" && w.recipient_id == device_id)
-    {
-        let wrap = DeviceHpkeWrap {
-            enc: device.hpke_enc.clone(),
-            ciphertext: device.wrapped_ck.clone(),
-            ciphersuite: XWING_CIPHERSUITE,
-        };
-        Some(unwrap_for_device(
-            &DeviceHpkeSecret::from_bytes(hpke_sk.to_vec()),
-            &wrap,
-        )?)
-    } else {
-        None
-    };
-    if let Some(device_key) = device_key {
-        return Ok(device_key);
-    }
-    if let Some(recovery) = wraps.iter().find(|w| w.recipient_kind == "recovery") {
-        let mut nonce = [0u8; 24];
-        if recovery.hpke_enc.len() != 24 {
-            return Err(ClientError::Nonce);
-        }
-        nonce.copy_from_slice(&recovery.hpke_enc);
-        let wrap = RecoveryWrap {
-            nonce,
-            ciphertext: recovery.wrapped_ck.clone(),
-            ciphersuite: RECOVERY_CIPHERSUITE.to_string(),
-        };
-        let recovery_key = unwrap_collection_key(password, salt, &wrap)?;
-        return Ok(recovery_key);
-    }
-    Err(ClientError::NoCollectionKey)
 }
 
 pub(crate) fn phrase_recovery_body(

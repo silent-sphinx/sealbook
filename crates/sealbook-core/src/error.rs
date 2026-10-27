@@ -75,6 +75,8 @@ pub enum CoreError {
         refusal: crate::rotation::RotationRefusal,
     },
     #[error("{refusal}")]
+    Auth { refusal: crate::auth::AuthRefusal },
+    #[error("{refusal}")]
     Pair {
         refusal: crate::pairing::PairRefusal,
     },
@@ -131,6 +133,7 @@ impl CoreError {
             CoreError::CollectionBusy => "CollectionBusy",
             CoreError::RecoveryRotationPending => "RecoveryRotationPending",
             CoreError::Rotation { .. } => "Rotation",
+            CoreError::Auth { .. } => "Auth",
             CoreError::Pair { .. } => "Pair",
             CoreError::Misuse { .. } => "Misuse",
         }

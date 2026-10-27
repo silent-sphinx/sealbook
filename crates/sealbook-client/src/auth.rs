@@ -1,30 +1,19 @@
 //! Registering an account, signing in, and recovering onto a fresh device.
+//!
+//! Every decision is core's: what each round sends, which key wrap a login
+//! opens, whether the collection the server names is the one the genesis roster
+//! was signed over, and what this device persists afterwards. This module moves
+//! bytes and stores what comes back.
 
-use uuid::Uuid;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
+use sealbook_crypto::CollectionKey;
 
-use sealbook_crypto::opaque::{
-    client_login_finish, client_login_start, client_register_finish, client_register_start,
-};
-use sealbook_crypto::{
-    enrollment_transcript, entropy_from_phrase, generate_device_hpke, generate_device_signing,
-    generate_kdf_salt, generate_phrase, login_start_transcript, login_transcript, manifest_digest,
-    manifest_transcript, open_login_challenge, phrase_lookup_id, phrase_recovery_keys,
-    phrase_recovery_transcript, recovery_password_payload, sign, sign_phrase_recovery,
-    unwrap_for_phrase, verify_roster_chain, wrap_collection_key, wrap_for_device, wrap_for_phrase,
-    CollectionKey, DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets, RecoveryWrap,
-    PHRASE_CIPHERSUITE, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
-};
-use sealbook_protocol::{
-    DevicePublicKeys, DualSignatureBody, KeyWrapBody, LoginChallengeRequest, LoginFinishRequest,
-    LoginStartRequest, ManifestBody, RecoverStartRequest, RegisterFinishRequest,
-    RegisterStartRequest, RosterBody, RosterSignerBody,
-};
-
-use crate::keys::{phrase_recovery_body, unwrap_ck};
-use crate::roster::roster_error;
 use crate::{ClientError, LocalState, SealbookClient};
 
 impl SealbookClient {
+    /// Registers an account and signs in, returning the recovery phrase for the
+    /// caller to show the user. Nothing can re-derive it.
     pub async fn register(
         &mut self,
         server: &str,
@@ -32,143 +21,22 @@ impl SealbookClient {
         password: &str,
     ) -> Result<String, ClientError> {
         self.check_protocol(server).await?;
-        let (req, reg_state) = client_register_start(password.as_bytes())?;
-        let start: sealbook_protocol::RegisterStartResponse = self
-            .post_json(
-                &format!("{server}/v1/opaque/register/start"),
-                &RegisterStartRequest {
-                    username: username.to_string(),
-                    request: req,
-                },
-                None,
-            )
-            .await?;
+        let identity = sealbook_core::new_registration()?;
+        let opaque = sealbook_core::opaque_register_start(password)?;
+        let start = sealbook_core::register_start_request(username, &opaque.request)?;
+        let response =
+            sealbook_core::register_start_accept(&self.post(server, &start, None).await?)?;
+        let upload = sealbook_core::opaque_register_upload(&opaque.state, password, &response)?;
+        let registering =
+            sealbook_core::register_finish_request(username, password, &upload, &identity)?;
+        let served = self.post(server, &registering.request, None).await?;
+        let state =
+            sealbook_core::register_accept(server, username, &identity, &registering.pin, &served)?;
 
-        let upload = client_register_finish(reg_state, password.as_bytes(), &start.response)?;
-
-        let (hpke_sk, hpke_pk) = generate_device_hpke()?;
-        let (sign_sk, sign_pk) = generate_device_signing()?;
-        let ck = CollectionKey::generate();
-        let salt = generate_kdf_salt();
-        let recovery = wrap_collection_key(password.as_bytes(), &salt, &ck)?;
-        let (phrase, phrase_entropy) = generate_phrase()?;
-        let phrase_wrap = wrap_for_phrase(&phrase_entropy, &ck)?;
-        let device_wrap = wrap_for_device(&hpke_pk, &ck)?;
-        let device_id = Uuid::new_v4();
-        let collection_id = Uuid::new_v4();
-        let phrase_recovery = phrase_recovery_body(&phrase_entropy)?;
-        let device = DevicePublicKeys {
-            device_id,
-            mldsa_pk: sign_pk.mldsa_pk.clone(),
-            ed25519_pk: sign_pk.ed25519_pk.clone(),
-            xwing_hpke_pk: hpke_pk.0.clone(),
-        };
-        let genesis = RosterBody::seal(
-            collection_id,
-            1,
-            1,
-            vec![device.clone()],
-            phrase_recovery.mldsa_pk.clone(),
-            phrase_recovery.ed25519_pk.clone(),
-            RosterSignerBody::Device { device_id },
-            &sign_sk,
-            &ck,
-        )?;
-
-        // Signed before the account exists, so the collection has a manifest from
-        // the moment it does.
-        let initial_manifest = {
-            let digest = manifest_digest(&[]);
-            let signature = sign(
-                &sign_sk,
-                &manifest_transcript(collection_id, 1, 1, 0, 0, &digest),
-            )?;
-            ManifestBody {
-                manifest_seq: 1,
-                key_epoch: 1,
-                latest_revision: 0,
-                object_count: 0,
-                digest: digest.to_vec(),
-                device_id,
-                signature: DualSignatureBody {
-                    mldsa: signature.mldsa,
-                    ed25519: signature.ed25519,
-                },
-            }
-        };
-
-        let finish: sealbook_protocol::RegisterFinishResponse = self
-            .post_json(
-                &format!("{server}/v1/opaque/register/finish"),
-                &RegisterFinishRequest {
-                    username: username.to_string(),
-                    upload,
-                    kdf_salt: salt.to_vec(),
-                    device,
-                    collection_id,
-                    enrollment_signature: {
-                        let t = enrollment_transcript(
-                            device_id,
-                            &sign_pk.mldsa_pk,
-                            &sign_pk.ed25519_pk,
-                            &hpke_pk.0,
-                        );
-                        let sig = sign(&sign_sk, &t)?;
-                        DualSignatureBody {
-                            mldsa: sig.mldsa,
-                            ed25519: sig.ed25519,
-                        }
-                    },
-                    key_wraps: vec![
-                        KeyWrapBody {
-                            recipient_kind: "device".into(),
-                            recipient_id: device_id.to_string(),
-                            hpke_enc: device_wrap.enc,
-                            wrapped_ck: device_wrap.ciphertext,
-                            ciphersuite: XWING_CIPHERSUITE.into(),
-                        },
-                        KeyWrapBody {
-                            recipient_kind: "recovery".into(),
-                            recipient_id: username.to_string(),
-                            hpke_enc: recovery.nonce.to_vec(),
-                            wrapped_ck: recovery.ciphertext,
-                            ciphersuite: RECOVERY_CIPHERSUITE.into(),
-                        },
-                        KeyWrapBody {
-                            recipient_kind: "phrase".into(),
-                            recipient_id: username.to_string(),
-                            hpke_enc: phrase_wrap.nonce.to_vec(),
-                            wrapped_ck: phrase_wrap.ciphertext,
-                            ciphersuite: PHRASE_CIPHERSUITE.into(),
-                        },
-                    ],
-                    phrase_recovery,
-                    manifest: initial_manifest,
-                    roster: genesis.clone(),
-                },
-                None,
-            )
-            .await?;
-
-        self.collection_key = Some(ck);
-        self.state = Some(LocalState {
-            server: server.trim_end_matches('/').to_string(),
-            username: username.to_string(),
-            account_id: finish.account_id,
-            collection_id: finish.collection_id,
-            device_id,
-            session_token: None,
-            kdf_salt: salt.to_vec(),
-            hpke_sk: hpke_sk.as_bytes().to_vec(),
-            mldsa_seed: sign_sk.mldsa_seed.clone(),
-            ed25519_sk: sign_sk.ed25519_sk.clone(),
-            manifest_seq: 1,
-            roster_seq: 0,
-            roster_transcript: Vec::new(),
-        });
-        self.pin_roster(&genesis)?;
+        self.collection_key = Some(key_from(&identity.collection_key)?);
+        self.state = Some(LocalState::from_core(state));
         self.login(password).await?;
-        Ok(phrase)
+        Ok(identity.phrase)
     }
 
     /// Signs this device in.
@@ -205,119 +73,45 @@ impl SealbookClient {
         password: &str,
         allow_recovery_pending: bool,
     ) -> Result<(), ClientError> {
-        let (server, username, device_id) = {
+        let (server, core_state) = {
             let state = self.state.as_ref().ok_or(ClientError::NoState)?;
-            (
-                state.server.clone(),
-                state.username.clone(),
-                state.device_id,
-            )
+            (state.server.clone(), state.to_core())
         };
         self.check_protocol(&server).await?;
-        let (hpke_sk, secrets) = {
-            let state = self.state.as_ref().ok_or(ClientError::NoState)?;
-            (
-                state.hpke_sk.clone(),
-                DeviceSigningSecrets {
-                    mldsa_seed: state.mldsa_seed.clone(),
-                    ed25519_sk: state.ed25519_sk.clone(),
-                },
-            )
-        };
 
-        // Step 1: fetch a challenge sealed to this device's X-Wing key.
-        let challenge_response: sealbook_protocol::LoginChallengeResponse = self
-            .post_json(
-                &format!("{server}/v1/opaque/login/challenge"),
-                &LoginChallengeRequest {
-                    username: username.clone(),
-                    device_id,
-                },
-                None,
-            )
-            .await?;
-        let challenge = open_login_challenge(
-            &DeviceHpkeSecret::from_bytes(hpke_sk),
-            &DeviceHpkeWrap {
-                enc: challenge_response.challenge_enc,
-                ciphertext: challenge_response.challenge_ct,
-                ciphersuite: XWING_CIPHERSUITE,
-            },
+        // Step 1: a challenge sealed to this device's X-Wing key.
+        let challenge =
+            sealbook_core::login_challenge_request(&core_state.username, core_state.device_id)?;
+        let challenged = self.post(&server, &challenge, None).await?;
+
+        // Step 2: prove device possession, which is what the server withholds
+        // the OPAQUE credential response until.
+        let opaque = sealbook_core::opaque_login_start(password)?;
+        let starting =
+            sealbook_core::login_start_request(&core_state, &opaque.request, &challenged)?;
+        let started = self.post(&server, &starting.request, None).await?;
+
+        // Step 3: complete OPAQUE and bind the finalization to this device.
+        let finish = sealbook_core::login_finish_request(
+            &core_state,
+            &opaque.state,
+            password,
+            &starting.challenge,
+            &started,
         )?;
+        let finished = self.post(&server, &finish, None).await?;
+        let logged = sealbook_core::login_accept(&core_state, password, &finished)?;
 
-        // Step 2: prove device possession before the server will release an
-        // OPAQUE credential response.
-        let (req, login_state) = client_login_start(password.as_bytes())?;
-        let start_transcript = login_start_transcript(
-            challenge_response.challenge_id,
-            &username,
-            device_id,
-            &challenge,
-            &req,
-        );
-        let start_sig = sign(&secrets, &start_transcript)?;
-        let start: sealbook_protocol::LoginStartResponse = self
-            .post_json(
-                &format!("{server}/v1/opaque/login/start"),
-                &LoginStartRequest {
-                    challenge_id: challenge_response.challenge_id,
-                    username: username.clone(),
-                    device_id,
-                    challenge: challenge.to_vec(),
-                    request: req,
-                    device_signature: DualSignatureBody {
-                        mldsa: start_sig.mldsa,
-                        ed25519: start_sig.ed25519,
-                    },
-                },
-                None,
-            )
-            .await?;
-
-        // Step 3: complete OPAQUE and bind the finalization to the device.
-        let finished = client_login_finish(login_state, password.as_bytes(), &start.response)?;
-        let transcript = login_transcript(
-            start.login_id,
-            &username,
-            device_id,
-            &finished.message,
-            &challenge,
-        );
-        let sig = sign(&secrets, &transcript)?;
-        let finish: sealbook_protocol::LoginFinishResponse = self
-            .post_json(
-                &format!("{server}/v1/opaque/login/finish"),
-                &LoginFinishRequest {
-                    login_id: start.login_id,
-                    username,
-                    device_id,
-                    finalization: finished.message,
-                    device_signature: DualSignatureBody {
-                        mldsa: sig.mldsa,
-                        ed25519: sig.ed25519,
-                    },
-                },
-                None,
-            )
-            .await?;
-
-        let state = self.state.as_mut().ok_or(ClientError::NoState)?;
-        state.session_token = Some(finish.session_token);
-        state.account_id = finish.account_id;
-        state.collection_id = finish.collection_id;
-        state.kdf_salt = finish.kdf_salt.clone();
-
-        self.collection_key = Some(unwrap_ck(
-            password.as_bytes(),
-            &finish.kdf_salt,
-            &state.hpke_sk,
-            &state.device_id.to_string(),
-            &finish.key_wraps,
-        )?);
-        self.key_epoch = finish.key_epoch;
-        self.recovery_pending = finish.recovery_pending;
+        self.collection_key = Some(key_from(&logged.collection_key)?);
+        self.key_epoch = logged.key_epoch;
+        self.recovery_pending = logged.recovery_pending;
+        self.state = Some(LocalState::from_core(logged.state));
+        // Before anything reads or writes the vault: the roster is what every
+        // later device-set decision is made from, and a device no longer in it
+        // has been revoked and should say so here rather than fail confusingly
+        // later.
         self.sync_roster().await?;
-        if finish.recovery_pending && !allow_recovery_pending {
+        if self.recovery_pending && !allow_recovery_pending {
             return Err(ClientError::RecoveryRotationPending);
         }
         Ok(())
@@ -345,170 +139,69 @@ impl SealbookClient {
     ) -> Result<String, ClientError> {
         self.check_protocol(server).await?;
         let password = new_password;
-        let entropy = entropy_from_phrase(phrase)?;
         // Begin registering the replacement password, so the server can answer
         // with the OPRF evaluation this needs in the same round trip.
-        let (opaque_request, registration) = client_register_start(password.as_bytes())?;
-        let start: sealbook_protocol::RecoverStartResponse = self
-            .post_json(
-                &format!("{server}/v1/recover/start"),
-                &RecoverStartRequest {
-                    username: username.to_string(),
-                    lookup_id: phrase_lookup_id(&entropy)?.to_vec(),
-                    opaque_request,
-                },
-                None,
-            )
-            .await?;
-        if start.challenge.len() != 32 {
-            return Err(ClientError::Server("invalid recovery challenge".into()));
-        }
-        if start.wrap.hpke_enc.len() != 24 {
-            return Err(ClientError::Nonce);
-        }
-        let mut nonce = [0u8; 24];
-        nonce.copy_from_slice(&start.wrap.hpke_enc);
-        let ck = unwrap_for_phrase(
-            &entropy,
-            &RecoveryWrap {
-                nonce,
-                ciphertext: start.wrap.wrapped_ck,
-                ciphersuite: PHRASE_CIPHERSUITE.to_string(),
-            },
+        let opaque = sealbook_core::opaque_register_start(password)?;
+        let start = sealbook_core::recover_start_request(username, phrase, &opaque.request)?;
+        let started =
+            sealbook_core::recover_start_accept(phrase, &self.post(server, &start, None).await?)?;
+        let upload = sealbook_core::opaque_register_upload(
+            &opaque.state,
+            password,
+            &started.opaque_response,
         )?;
-        // The server leaves the phrase key out of this roster; it is filled in
-        // from the phrase.
-        let (mut current, collection_id) = match (start.roster, start.collection_id) {
-            (Some(roster), Some(collection_id)) => (roster, collection_id),
-            _ => {
-                return Err(roster_error(
-                    "the server sent no device roster to recover onto",
-                ))
-            }
-        };
-        let (phrase_secrets, phrase_public) = phrase_recovery_keys(&entropy)?;
-        current.phrase_mldsa_pk = phrase_public.mldsa_pk;
-        current.phrase_ed25519_pk = phrase_public.ed25519_pk;
-        verify_roster_chain(
-            collection_id,
-            None,
-            std::slice::from_ref(&current.to_roster()),
-            Some((&ck, current.key_epoch)),
+        let device = sealbook_core::new_device()?;
+        let recovering = sealbook_core::recover_finish_request(
+            username, phrase, password, &started, &device, &upload,
         )?;
-
-        let (hpke_sk, hpke_pk) = generate_device_hpke()?;
-        let (sign_sk, sign_pk) = generate_device_signing()?;
-        let device_id = Uuid::new_v4();
-        let transcript = enrollment_transcript(
-            device_id,
-            &sign_pk.mldsa_pk,
-            &sign_pk.ed25519_pk,
-            &hpke_pk.0,
-        );
-        let sig = sign(&sign_sk, &transcript)?;
-        let device_wrap = wrap_for_device(&hpke_pk, &ck)?;
-        let device = DevicePublicKeys {
-            device_id,
-            mldsa_pk: sign_pk.mldsa_pk.clone(),
-            ed25519_pk: sign_pk.ed25519_pk.clone(),
-            xwing_hpke_pk: hpke_pk.0.clone(),
-        };
-        // The replacement password, and the collection-key wrap re-made under it
-        // from the key the phrase just opened.
-        let upload =
-            client_register_finish(registration, password.as_bytes(), &start.opaque_response)?;
-        let salt = generate_kdf_salt();
-        let recovery_wrap = wrap_collection_key(password.as_bytes(), &salt, &ck)?;
-        let password_payload = recovery_password_payload(
-            &upload,
-            &salt,
-            &recovery_wrap.nonce,
-            &recovery_wrap.ciphertext,
-            &recovery_wrap.ciphersuite,
-        );
-
-        let mut devices = current.devices.clone();
-        devices.push(device.clone());
-        let next_roster = RosterBody::seal(
-            collection_id,
-            current.roster_seq + 1,
-            current.key_epoch,
-            devices,
-            current.phrase_mldsa_pk.clone(),
-            current.phrase_ed25519_pk.clone(),
-            RosterSignerBody::Phrase,
-            &phrase_secrets,
-            &ck,
-        )?;
-        let transcript = phrase_recovery_transcript(
+        let served = self.post(server, &recovering.request, None).await?;
+        let state = sealbook_core::recover_accept(
+            server,
             username,
-            start.recovery_id,
-            &start.challenge,
-            device_id,
-            &sign_pk.mldsa_pk,
-            &sign_pk.ed25519_pk,
-            &hpke_pk.0,
-            &password_payload,
-        );
-        let finish: sealbook_protocol::RecoverFinishResponse = self
-            .post_json(
-                &format!("{server}/v1/recover/finish"),
-                &sealbook_protocol::RecoverFinishRequest {
-                    username: username.to_string(),
-                    recovery_id: start.recovery_id,
-                    challenge: start.challenge,
-                    phrase_proof: {
-                        let proof = sign_phrase_recovery(&entropy, &transcript)?;
-                        DualSignatureBody {
-                            mldsa: proof.mldsa,
-                            ed25519: proof.ed25519,
-                        }
-                    },
-                    device,
-                    enrollment_signature: DualSignatureBody {
-                        mldsa: sig.mldsa,
-                        ed25519: sig.ed25519,
-                    },
-                    wrap: KeyWrapBody {
-                        recipient_kind: "device".into(),
-                        recipient_id: device_id.to_string(),
-                        hpke_enc: device_wrap.enc,
-                        wrapped_ck: device_wrap.ciphertext,
-                        ciphersuite: XWING_CIPHERSUITE.into(),
-                    },
-                    roster: next_roster.clone(),
-                    upload,
-                    kdf_salt: salt.to_vec(),
-                    recovery_nonce: recovery_wrap.nonce.to_vec(),
-                    recovery_wrapped_ck: recovery_wrap.ciphertext,
-                    recovery_ciphersuite: recovery_wrap.ciphersuite,
-                },
-                None,
-            )
-            .await?;
-        self.collection_key = Some(ck);
-        self.state = Some(LocalState {
-            server: server.trim_end_matches('/').to_string(),
-            username: username.to_string(),
-            account_id: finish.account_id,
-            collection_id: finish.collection_id,
-            device_id,
-            session_token: None,
-            kdf_salt: salt.to_vec(),
-            hpke_sk: hpke_sk.as_bytes().to_vec(),
-            mldsa_seed: sign_sk.mldsa_seed.clone(),
-            ed25519_sk: sign_sk.ed25519_sk.clone(),
-            manifest_seq: 0,
-            roster_seq: 0,
-            roster_transcript: Vec::new(),
-        });
-        self.pin_roster(&next_roster)?;
+            &started,
+            &device,
+            &recovering,
+            &served,
+        )?;
+
+        self.collection_key = Some(key_from(&started.collection_key)?);
+        self.state = Some(LocalState::from_core(state));
         self.login_inner(password, true).await?;
         // The phrase that was just used stays valid otherwise, and so does anyone
         // else's copy of it, because enrolling a device does not change the key it
         // unwraps. Rotate, which issues a fresh phrase and leaves the old one
         // unable to open anything.
-        let phrase = self.rotate(None, password).await?;
-        Ok(phrase)
+        self.rotate(None, password).await
     }
+
+    /// Posts a request core built and hands back the response for core to read.
+    pub(crate) async fn post(
+        &self,
+        server: &str,
+        request: &sealbook_core::AuthRequest,
+        token: Option<&str>,
+    ) -> Result<String, ClientError> {
+        self.send_text(
+            reqwest::Method::POST,
+            &format!("{}{}", server.trim_end_matches('/'), request.path),
+            request.body.clone(),
+            token,
+        )
+        .await
+    }
+}
+
+/// Core hands the collection key back base64, as the other two hosts hold it.
+fn key_from(ck_b64: &str) -> Result<CollectionKey, ClientError> {
+    let bytes = URL_SAFE_NO_PAD
+        .decode(ck_b64)
+        .map_err(|err| ClientError::Server(format!("core returned an unreadable key: {err}")))?;
+    if bytes.len() != 32 {
+        return Err(ClientError::Server(
+            "core returned a key that is not 32 bytes".into(),
+        ));
+    }
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&bytes);
+    Ok(CollectionKey::from_bytes(key))
 }

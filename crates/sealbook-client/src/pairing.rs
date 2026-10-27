@@ -6,7 +6,7 @@
 //! approval signs. This module moves bytes and persists what comes back.
 
 use sealbook_core::{PairStatus, RosterContext};
-use sealbook_crypto::{generate_device_hpke, generate_device_signing, DeviceSigningSecrets};
+use sealbook_crypto::DeviceSigningSecrets;
 use sealbook_protocol::{PairStatusResponse, RosterBody};
 use uuid::Uuid;
 
@@ -22,17 +22,13 @@ impl SealbookClient {
         username: &str,
     ) -> Result<(String, String), ClientError> {
         self.check_protocol(server).await?;
-        let (hpke_sk, hpke_pk) = generate_device_hpke()?;
-        let (sign_sk, sign_pk) = generate_device_signing()?;
-        let device = sealbook_core::CoreDevice {
-            device_id: Uuid::new_v4(),
-            mldsa_pk: b64(&sign_pk.mldsa_pk),
-            ed25519_pk: b64(&sign_pk.ed25519_pk),
-            xwing_hpke_pk: b64(&hpke_pk.0),
-        };
+        // One generator for every new device, whether it arrives by registering,
+        // recovering or pairing, so the three cannot drift apart again.
+        let generated = sealbook_core::new_device()?;
+        let device = generated.device.clone();
         let secrets = DeviceSigningSecrets {
-            mldsa_seed: sign_sk.mldsa_seed.clone(),
-            ed25519_sk: sign_sk.ed25519_sk.clone(),
+            mldsa_seed: decode(&generated.mldsa_seed)?,
+            ed25519_sk: decode(&generated.ed25519_sk)?,
         };
         let body = sealbook_core::pair_join_body(username, &device, &secrets)?;
         let served: serde_json::Value = self
@@ -48,9 +44,9 @@ impl SealbookClient {
             device_id: device.device_id,
             session_token: None,
             kdf_salt: Vec::new(),
-            hpke_sk: hpke_sk.as_bytes().to_vec(),
-            mldsa_seed: sign_sk.mldsa_seed.clone(),
-            ed25519_sk: sign_sk.ed25519_sk.clone(),
+            hpke_sk: decode(&generated.hpke_sk)?,
+            mldsa_seed: secrets.mldsa_seed.clone(),
+            ed25519_sk: secrets.ed25519_sk.clone(),
             manifest_seq: 0,
             // The anchor the user is about to vouch for by comparing codes, so
             // the first roster this device fetches has to be a signed step from

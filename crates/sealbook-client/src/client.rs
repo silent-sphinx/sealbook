@@ -134,23 +134,6 @@ impl SealbookClient {
         parse(req.send().await?).await
     }
 
-    pub(crate) async fn delete_json<T: serde::Serialize, R: serde::de::DeserializeOwned>(
-        &self,
-        url: &str,
-        body: &T,
-        token: &str,
-    ) -> Result<R, ClientError> {
-        parse(
-            self.http
-                .delete(url)
-                .json(body)
-                .bearer_auth(token)
-                .send()
-                .await?,
-        )
-        .await
-    }
-
     pub(crate) async fn get_json<R: serde::de::DeserializeOwned>(
         &self,
         url: &str,
@@ -180,6 +163,38 @@ impl SealbookClient {
             req = req.bearer_auth(token);
         }
         parse(req.send().await?).await
+    }
+
+    /// Sends a body core serialized and hands back the response text for core
+    /// to read, for the flows where both shapes are core's.
+    ///
+    /// Non-2xx is raised here with the server's own message, so core only ever
+    /// sees a response it is meant to read.
+    pub(crate) async fn send_text(
+        &self,
+        method: reqwest::Method,
+        url: &str,
+        body: String,
+        token: Option<&str>,
+    ) -> Result<String, ClientError> {
+        let mut req = self
+            .http
+            .request(method, url)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body);
+        if let Some(token) = token {
+            req = req.bearer_auth(token);
+        }
+        let resp = req.send().await?;
+        let status = resp.status();
+        let bytes = resp.bytes().await?;
+        if !status.is_success() {
+            let msg = serde_json::from_slice::<sealbook_protocol::ErrorBody>(&bytes)
+                .map(|e| e.error)
+                .unwrap_or_else(|_| String::from_utf8_lossy(&bytes).into_owned());
+            return Err(ClientError::Server(msg));
+        }
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
     }
 
     /// GETs a URL and hands back the status code with the body.

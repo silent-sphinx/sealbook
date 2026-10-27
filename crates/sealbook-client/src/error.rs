@@ -119,6 +119,7 @@ impl From<sealbook_core::CoreError> for ClientError {
             // As above: the refusal states the condition and the CLI prints it
             // as the reason the pairing did not go through.
             CoreError::Pair { refusal } => ClientError::Server(refusal.to_string()),
+            CoreError::Auth { refusal } => ClientError::Server(refusal.to_string()),
         }
     }
 }

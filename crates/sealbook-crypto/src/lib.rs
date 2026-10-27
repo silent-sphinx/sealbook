@@ -19,11 +19,11 @@ pub use aead::{
 pub use decoy::{decoy_seed, DECOY_KEY_LEN, DECOY_SEED_LEN};
 pub use error::CryptoError;
 pub use hpke_wrap::{
-    ct_eq, device_hpke_public_from_ikm, generate_device_hpke, generate_login_challenge,
-    hybrid_session_key, open_login_challenge, seal_login_challenge, unwrap_for_device,
-    validate_device_hpke_public, wrap_for_device, DeviceHpkePublic, DeviceHpkeSecret,
-    DeviceHpkeWrap, HPKE_AEAD_TAG_LEN, XWING_CIPHERSUITE, XWING_ENCAPSULATED_KEY_LEN,
-    XWING_PUBLIC_KEY_LEN,
+    ct_eq, device_hpke_keypair_from_ikm, device_hpke_public_from_ikm, generate_device_hpke,
+    generate_login_challenge, hybrid_session_key, open_login_challenge, seal_login_challenge,
+    unwrap_for_device, validate_device_hpke_public, wrap_for_device, DeviceHpkePublic,
+    DeviceHpkeSecret, DeviceHpkeWrap, HPKE_AEAD_TAG_LEN, XWING_CIPHERSUITE,
+    XWING_ENCAPSULATED_KEY_LEN, XWING_PUBLIC_KEY_LEN,
 };
 pub use phrase::{
     dummy_phrase_recovery_public, entropy_from_phrase, generate_pair_code, generate_phrase,

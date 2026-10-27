@@ -1,31 +1,26 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sealbook_core::{
-    AppliedManifest, BucketedManifest, BucketsOutcome, ChangesPage, CoreBuild, CoreDevice,
-    CoreManifestEntry, CorePairPreview, CoreRoster, CoreRosterPin, CoreSealedRow, CoreSession,
-    HttpRequest, HttpResponse, ManifestContext, ManifestOutcome, ManifestPlan, ManifestSigner,
-    PairApproval, PairJoined, PairStatus, ResealRow, RosterContext, RotationPlan, RotationState,
+    AppliedManifest, AuthRequest, BucketedManifest, BucketsOutcome, ChangesPage, CoreBuild,
+    CoreDevice, CoreDeviceSecrets, CoreDeviceState, CoreManifestEntry, CorePairPreview, CoreRoster,
+    CoreRosterPin, CoreSealedRow, CoreSession, HttpRequest, HttpResponse, LoggedIn, LoginStarting,
+    ManifestContext, ManifestOutcome, ManifestPlan, ManifestSigner, OpaqueStart, PairApproval,
+    PairJoined, PairStatus, PasswordChange, PasswordChangeStarted, RecoverStarted, Recovering,
+    RegisterIdentity, Registering, ResealRow, RosterContext, RotationPlan, RotationState,
     RowOutcome, RowRef, SignedManifest, VerifiedRoster, WalkCursor, WalkStep,
 };
-use sealbook_crypto::opaque::{
-    client_login_finish, client_login_start, client_register_finish, client_register_start,
-    ClientLogin, ClientRegistration, SealbookCipherSuite,
-};
+use sealbook_crypto::RosterPin;
 use sealbook_crypto::{
-    account_op_transcript, content_digest, decrypt_object, delete_account_payload, encrypt_object,
-    enrollment_transcript, entropy_from_phrase, generate_device_hpke, generate_device_signing,
-    generate_kdf_salt, generate_phrase, key_rotation_transcript, key_wraps_digest,
-    login_start_transcript, login_transcript, manifest_bucket_digest, manifest_bucket_of,
-    manifest_digest, manifest_transcript, object_aad, open_login_challenge, pair_confirmation,
-    password_change_payload, phrase_lookup_id, phrase_recovery_public, phrase_recovery_transcript,
-    recovery_password_payload, rotated_objects_digest, rotation_recovery_payload, sign,
-    sign_phrase_recovery, unwrap_collection_key, unwrap_for_device, unwrap_for_phrase,
-    username_change_payload, wrap_collection_key, wrap_for_device, wrap_for_phrase, CollectionKey,
+    content_digest, decrypt_object, encrypt_object, enrollment_transcript, generate_device_hpke,
+    generate_device_signing, generate_kdf_salt, generate_phrase, key_rotation_transcript,
+    key_wraps_digest, manifest_bucket_digest, manifest_bucket_of, manifest_digest,
+    manifest_transcript, object_aad, pair_confirmation, phrase_lookup_id, phrase_recovery_public,
+    rotated_objects_digest, rotation_recovery_payload, sign, unwrap_collection_key,
+    unwrap_for_device, wrap_collection_key, wrap_for_device, wrap_for_phrase, CollectionKey,
     DeviceHpkePublic, DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets, EncryptedObject,
     ManifestDigestEntry, ObjectDigestEntry, RecoveryWrap, WrapDigestEntry, MANIFEST_BUCKETS,
     PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
 };
-use sealbook_crypto::{phrase_recovery_keys, RosterPin};
 use sealbook_protocol::envelope::{open_envelope, seal_envelope, Unsealed};
 use sealbook_protocol::{DevicePublicKeys, RosterBody, RosterSignerBody, SEALED_CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
@@ -67,35 +62,6 @@ fn ck_from_b64(s: &str) -> Result<CollectionKey, JsError> {
 }
 
 #[derive(Serialize)]
-struct B64Pair {
-    request: String,
-    state: String,
-}
-
-#[wasm_bindgen]
-pub fn opaque_register_start(password: &str) -> Result<String, JsError> {
-    let (request, state) = client_register_start(password.as_bytes()).map_err(js_err)?;
-    serde_json::to_string(&B64Pair {
-        request: b64(&request),
-        state: b64(&state.serialize()),
-    })
-    .map_err(js_err)
-}
-
-#[wasm_bindgen]
-pub fn opaque_register_finish(
-    state_b64: &str,
-    password: &str,
-    response_b64: &str,
-) -> Result<String, JsError> {
-    let state = ClientRegistration::<SealbookCipherSuite>::deserialize(&unb64(state_b64)?)
-        .map_err(|err| JsError::new(&err.to_string()))?;
-    let upload = client_register_finish(state, password.as_bytes(), &unb64(response_b64)?)
-        .map_err(js_err)?;
-    Ok(b64(&upload))
-}
-
-#[derive(Serialize)]
 struct Enrollment {
     device_id: String,
     hpke_sk: String,
@@ -124,6 +90,19 @@ struct Enrollment {
     recovery_ciphersuite: &'static str,
 }
 
+#[derive(Deserialize)]
+struct WrapIn {
+    recipient_kind: String,
+    recipient_id: String,
+    hpke_enc: String,
+    wrapped_ck: String,
+    ciphersuite: String,
+}
+
+/// Everything a registration used to mint, kept for the web's own test shim:
+/// `client.test.ts` stands in for the server and needs an account's starting
+/// material without a round trip. Production registers through
+/// `core_new_registration`.
 #[wasm_bindgen]
 pub fn create_enrollment(password: &str) -> Result<String, JsError> {
     let (hpke_sk, hpke_pk) = generate_device_hpke().map_err(js_err)?;
@@ -171,130 +150,6 @@ pub fn create_enrollment(password: &str) -> Result<String, JsError> {
         recovery_ciphersuite: RECOVERY_CIPHERSUITE,
     })
     .map_err(js_err)
-}
-
-#[wasm_bindgen]
-pub fn opaque_login_start(password: &str) -> Result<String, JsError> {
-    let (request, state) = client_login_start(password.as_bytes()).map_err(js_err)?;
-    serde_json::to_string(&B64Pair {
-        request: b64(&request),
-        state: b64(&state.serialize()),
-    })
-    .map_err(js_err)
-}
-
-#[derive(Serialize)]
-struct LoginProof {
-    challenge: String,
-    mldsa: String,
-    ed25519: String,
-}
-
-#[derive(Serialize)]
-struct LoginFinishProof {
-    finalization: String,
-    mldsa: String,
-    ed25519: String,
-}
-
-/// Step 2 of login: open the sealed challenge and sign it together with the
-/// OPAQUE request. The server releases no credential response until this proof
-/// verifies, which is what keeps the password out of reach of an attacker who
-/// can break Ristretto255.
-#[wasm_bindgen]
-#[allow(clippy::too_many_arguments)]
-pub fn login_start_proof(
-    hpke_sk_b64: &str,
-    challenge_enc_b64: &str,
-    challenge_ct_b64: &str,
-    challenge_id: &str,
-    username: &str,
-    device_id: &str,
-    request_b64: &str,
-    mldsa_seed_b64: &str,
-    ed25519_sk_b64: &str,
-) -> Result<String, JsError> {
-    let challenge = open_login_challenge(
-        &DeviceHpkeSecret::from_bytes(unb64(hpke_sk_b64)?),
-        &DeviceHpkeWrap {
-            enc: unb64(challenge_enc_b64)?,
-            ciphertext: unb64(challenge_ct_b64)?,
-            ciphersuite: XWING_CIPHERSUITE,
-        },
-    )
-    .map_err(js_err)?;
-    let secrets = DeviceSigningSecrets {
-        mldsa_seed: unb64(mldsa_seed_b64)?,
-        ed25519_sk: unb64(ed25519_sk_b64)?,
-    };
-    let transcript = login_start_transcript(
-        parse_uuid(challenge_id)?,
-        username,
-        parse_uuid(device_id)?,
-        &challenge,
-        &unb64(request_b64)?,
-    );
-    let sig = sign(&secrets, &transcript).map_err(js_err)?;
-    serde_json::to_string(&LoginProof {
-        challenge: b64(&challenge),
-        mldsa: b64(&sig.mldsa),
-        ed25519: b64(&sig.ed25519),
-    })
-    .map_err(js_err)
-}
-
-/// Step 3 of login. `challenge_b64` is the value returned by
-/// [`login_start_proof`], so the challenge is opened only once.
-#[wasm_bindgen]
-#[allow(clippy::too_many_arguments)]
-pub fn opaque_login_finish(
-    state_b64: &str,
-    password: &str,
-    response_b64: &str,
-    challenge_b64: &str,
-    login_id: &str,
-    username: &str,
-    device_id: &str,
-    mldsa_seed_b64: &str,
-    ed25519_sk_b64: &str,
-) -> Result<String, JsError> {
-    let state = ClientLogin::<SealbookCipherSuite>::deserialize(&unb64(state_b64)?)
-        .map_err(|err| JsError::new(&err.to_string()))?;
-    let finished =
-        client_login_finish(state, password.as_bytes(), &unb64(response_b64)?).map_err(js_err)?;
-    let challenge_bytes = unb64(challenge_b64)?;
-    if challenge_bytes.len() != 32 {
-        return Err(JsError::new("challenge length"));
-    }
-    let mut challenge = [0u8; 32];
-    challenge.copy_from_slice(&challenge_bytes);
-    let secrets = DeviceSigningSecrets {
-        mldsa_seed: unb64(mldsa_seed_b64)?,
-        ed25519_sk: unb64(ed25519_sk_b64)?,
-    };
-    let transcript = login_transcript(
-        parse_uuid(login_id)?,
-        username,
-        parse_uuid(device_id)?,
-        &finished.message,
-        &challenge,
-    );
-    let sig = sign(&secrets, &transcript).map_err(js_err)?;
-    serde_json::to_string(&LoginFinishProof {
-        finalization: b64(&finished.message),
-        mldsa: b64(&sig.mldsa),
-        ed25519: b64(&sig.ed25519),
-    })
-    .map_err(js_err)
-}
-
-#[derive(Deserialize)]
-struct WrapIn {
-    recipient_kind: String,
-    recipient_id: String,
-    hpke_enc: String,
-    wrapped_ck: String,
-    ciphersuite: String,
 }
 
 #[wasm_bindgen]
@@ -695,96 +550,6 @@ pub fn wrap_ck_for_device(ck_b64: &str, hpke_pk_b64: &str) -> Result<String, JsE
     .map_err(js_err)
 }
 
-#[wasm_bindgen]
-pub fn unwrap_phrase(
-    phrase: &str,
-    nonce_b64: &str,
-    wrapped_ck_b64: &str,
-) -> Result<String, JsError> {
-    let entropy = entropy_from_phrase(phrase).map_err(js_err)?;
-    let nonce_bytes = unb64(nonce_b64)?;
-    if nonce_bytes.len() != 24 {
-        return Err(JsError::new("nonce length"));
-    }
-    let mut nonce = [0u8; 24];
-    nonce.copy_from_slice(&nonce_bytes);
-    let key = unwrap_for_phrase(
-        &entropy,
-        &RecoveryWrap {
-            nonce,
-            ciphertext: unb64(wrapped_ck_b64)?,
-            ciphersuite: PHRASE_CIPHERSUITE.to_string(),
-        },
-    )
-    .map_err(js_err)?;
-    Ok(b64(key.as_bytes()))
-}
-
-/// The opaque handle used to look up a phrase key wrap. Safe to send before a
-/// recovery proof, unlike the verification keys.
-#[wasm_bindgen]
-pub fn phrase_lookup_id_b64(phrase: &str) -> Result<String, JsError> {
-    let entropy = entropy_from_phrase(phrase).map_err(js_err)?;
-    Ok(b64(&phrase_lookup_id(&entropy).map_err(js_err)?))
-}
-
-/// The hybrid recovery material to register for a phrase.
-#[wasm_bindgen]
-pub fn phrase_recovery_json(phrase: &str) -> Result<String, JsError> {
-    let entropy = entropy_from_phrase(phrase).map_err(js_err)?;
-    let public = phrase_recovery_public(&entropy).map_err(js_err)?;
-    serde_json::to_string(&serde_json::json!({
-        "mldsa_pk": b64(&public.mldsa_pk),
-        "ed25519_pk": b64(&public.ed25519_pk),
-        "lookup_id": b64(&phrase_lookup_id(&entropy).map_err(js_err)?),
-        "scheme": PHRASE_SCHEME,
-    }))
-    .map_err(js_err)
-}
-
-#[wasm_bindgen]
-#[allow(clippy::too_many_arguments)]
-pub fn phrase_recovery_proof_json(
-    phrase: &str,
-    username: &str,
-    recovery_id: &str,
-    challenge_b64: &str,
-    device_id: &str,
-    mldsa_pk_b64: &str,
-    ed25519_pk_b64: &str,
-    hpke_pk_b64: &str,
-    upload_b64: &str,
-    kdf_salt_b64: &str,
-    recovery_nonce_b64: &str,
-    recovery_wrapped_ck_b64: &str,
-    recovery_ciphersuite: &str,
-) -> Result<String, JsError> {
-    let entropy = entropy_from_phrase(phrase).map_err(js_err)?;
-    let challenge = unb64(challenge_b64)?;
-    let transcript = phrase_recovery_transcript(
-        username,
-        parse_uuid(recovery_id)?,
-        &challenge,
-        parse_uuid(device_id)?,
-        &unb64(mldsa_pk_b64)?,
-        &unb64(ed25519_pk_b64)?,
-        &unb64(hpke_pk_b64)?,
-        &recovery_password_payload(
-            &unb64(upload_b64)?,
-            &unb64(kdf_salt_b64)?,
-            &unb64(recovery_nonce_b64)?,
-            &unb64(recovery_wrapped_ck_b64)?,
-            recovery_ciphersuite,
-        ),
-    );
-    let proof = sign_phrase_recovery(&entropy, &transcript).map_err(js_err)?;
-    serde_json::to_string(&serde_json::json!({
-        "mldsa": b64(&proof.mldsa),
-        "ed25519": b64(&proof.ed25519),
-    }))
-    .map_err(js_err)
-}
-
 /// The pairing code both screens show.
 ///
 /// Kept for the tests that stand in for the server, which computes the same
@@ -1110,73 +875,6 @@ pub fn manifest_buckets_blob(entries_json: &str) -> Result<String, JsError> {
     Ok(b64(&blob))
 }
 
-/// Signs an account mutation: `"username"`, `"password"` or `"delete"`.
-///
-/// The payload digest is computed here from the actual fields being sent, so a
-/// signature always covers the change it accompanies.
-#[wasm_bindgen]
-#[allow(clippy::too_many_arguments)]
-pub fn account_op_sign(
-    mldsa_seed_b64: &str,
-    ed25519_sk_b64: &str,
-    op: &str,
-    challenge_id: &str,
-    challenge_b64: &str,
-    account_id: &str,
-    device_id: &str,
-    payload_json: &str,
-) -> Result<String, JsError> {
-    #[derive(Deserialize)]
-    struct UsernamePayload {
-        new_username: String,
-        upload: String,
-    }
-    #[derive(Deserialize)]
-    struct PasswordPayload {
-        upload: String,
-        kdf_salt: String,
-        recovery_nonce: String,
-        recovery_wrapped_ck: String,
-        recovery_ciphersuite: String,
-    }
-    let payload = match op {
-        "username" => {
-            let p: UsernamePayload = serde_json::from_str(payload_json).map_err(js_err)?;
-            username_change_payload(&p.new_username, &unb64(&p.upload)?)
-        }
-        "password" => {
-            let p: PasswordPayload = serde_json::from_str(payload_json).map_err(js_err)?;
-            password_change_payload(
-                &unb64(&p.upload)?,
-                &unb64(&p.kdf_salt)?,
-                &unb64(&p.recovery_nonce)?,
-                &unb64(&p.recovery_wrapped_ck)?,
-                &p.recovery_ciphersuite,
-            )
-        }
-        "delete" => delete_account_payload(),
-        other => return Err(JsError::new(&format!("unknown account operation {other}"))),
-    };
-    let transcript = account_op_transcript(
-        op,
-        parse_uuid(challenge_id)?,
-        &unb64(challenge_b64)?,
-        account_id,
-        parse_uuid(device_id)?,
-        &payload,
-    );
-    let secrets = DeviceSigningSecrets {
-        mldsa_seed: unb64(mldsa_seed_b64)?,
-        ed25519_sk: unb64(ed25519_sk_b64)?,
-    };
-    let sig = sign(&secrets, &transcript).map_err(js_err)?;
-    serde_json::to_string(&serde_json::json!({
-        "mldsa": b64(&sig.mldsa),
-        "ed25519": b64(&sig.ed25519),
-    }))
-    .map_err(js_err)
-}
-
 fn pin_from(seq: u64, transcript_b64: &str) -> Result<Option<RosterPin>, JsError> {
     if seq == 0 {
         return Ok(None);
@@ -1223,33 +921,6 @@ pub fn roster_seal_device(
             mldsa_seed: unb64(mldsa_seed_b64)?,
             ed25519_sk: unb64(ed25519_sk_b64)?,
         },
-        &ck_from_b64(ck_b64)?,
-    )
-    .map_err(js_err)?;
-    serde_json::to_string(&roster).map_err(js_err)
-}
-
-/// Signs a device roster with the recovery phrase's key, for a recovery.
-#[wasm_bindgen]
-pub fn roster_seal_phrase(
-    collection_id: &str,
-    roster_seq: u64,
-    key_epoch: u64,
-    devices_json: &str,
-    phrase: &str,
-    ck_b64: &str,
-) -> Result<String, JsError> {
-    let entropy = entropy_from_phrase(phrase).map_err(js_err)?;
-    let (secrets, public) = phrase_recovery_keys(&entropy).map_err(js_err)?;
-    let roster = RosterBody::seal(
-        parse_uuid(collection_id)?,
-        roster_seq,
-        key_epoch,
-        devices_from(devices_json)?,
-        public.mldsa_pk,
-        public.ed25519_pk,
-        RosterSignerBody::Phrase,
-        &secrets,
         &ck_from_b64(ck_b64)?,
     )
     .map_err(js_err)?;
@@ -1910,4 +1581,320 @@ pub fn core_confirmation_groups(code: &str) -> Vec<String> {
 #[wasm_bindgen]
 pub fn core_format_confirmation(code: &str) -> String {
     sealbook_core::format_confirmation(code)
+}
+
+// ── Core: auth and account operations ──
+
+/// The username to send, which is the one the user typed without surrounding
+/// whitespace. The server rejects a username with a space in it.
+#[wasm_bindgen]
+pub fn core_normalize_username(raw: &str) -> String {
+    sealbook_core::normalize_username(raw)
+}
+
+/// The phrase to derive from: lowercase and single-spaced, because BIP-39 words
+/// are lowercase and a pasted phrase often is not.
+#[wasm_bindgen]
+pub fn core_normalize_phrase(raw: &str) -> String {
+    sealbook_core::normalize_phrase(raw)
+}
+
+/// Begins registering a password. Also the first round of a password change, a
+/// username change and a recovery.
+#[wasm_bindgen]
+pub fn core_opaque_register_start(password: &str) -> Result<Ts<OpaqueStart>, JsError> {
+    Ok(sealbook_core::opaque_register_start(password)
+        .map_err(core_err)?
+        .into_ts()?)
+}
+
+/// Finishes a registration, giving the verifier upload the server stores.
+#[wasm_bindgen]
+pub fn core_opaque_register_upload(
+    state_b64: &str,
+    password: &str,
+    response_b64: &str,
+) -> Result<String, JsError> {
+    sealbook_core::opaque_register_upload(state_b64, password, response_b64).map_err(core_err)
+}
+
+/// Begins a login.
+#[wasm_bindgen]
+pub fn core_opaque_login_start(password: &str) -> Result<Ts<OpaqueStart>, JsError> {
+    Ok(sealbook_core::opaque_login_start(password)
+        .map_err(core_err)?
+        .into_ts()?)
+}
+
+/// A new device's keys, for the host to persist.
+#[wasm_bindgen]
+pub fn core_new_device() -> Result<Ts<CoreDeviceSecrets>, JsError> {
+    Ok(sealbook_core::new_device().map_err(core_err)?.into_ts()?)
+}
+
+/// Everything a registration mints: a device, a collection, a collection key, a
+/// KDF salt and a recovery phrase.
+#[wasm_bindgen]
+pub fn core_new_registration() -> Result<Ts<RegisterIdentity>, JsError> {
+    Ok(sealbook_core::new_registration()
+        .map_err(core_err)?
+        .into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_register_start_request(
+    username: &str,
+    opaque_request_b64: &str,
+) -> Result<Ts<AuthRequest>, JsError> {
+    Ok(
+        sealbook_core::register_start_request(username, opaque_request_b64)
+            .map_err(core_err)?
+            .into_ts()?,
+    )
+}
+
+#[wasm_bindgen]
+pub fn core_register_start_accept(body: &str) -> Result<String, JsError> {
+    sealbook_core::register_start_accept(body).map_err(core_err)
+}
+
+/// The register finish request: the genesis roster, the first manifest and the
+/// three wraps of the collection key, with the anchor to pin.
+#[wasm_bindgen]
+pub fn core_register_finish_request(
+    username: &str,
+    password: &str,
+    upload_b64: &str,
+    identity: Ts<RegisterIdentity>,
+) -> Result<Ts<Registering>, JsError> {
+    Ok(
+        sealbook_core::register_finish_request(
+            username,
+            password,
+            upload_b64,
+            &identity.to_rust()?,
+        )
+        .map_err(core_err)?
+        .into_ts()?,
+    )
+}
+
+/// Reads the register finish response into the state this device persists.
+#[wasm_bindgen]
+pub fn core_register_accept(
+    server: &str,
+    username: &str,
+    identity: Ts<RegisterIdentity>,
+    pin: Ts<CoreRosterPin>,
+    body: &str,
+) -> Result<Ts<CoreDeviceState>, JsError> {
+    Ok(sealbook_core::register_accept(
+        server,
+        username,
+        &identity.to_rust()?,
+        &pin.to_rust()?,
+        body,
+    )
+    .map_err(core_err)?
+    .into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_login_challenge_request(
+    username: &str,
+    device_id: &str,
+) -> Result<Ts<AuthRequest>, JsError> {
+    Ok(
+        sealbook_core::login_challenge_request(username, parse_uuid(device_id)?)
+            .map_err(core_err)?
+            .into_ts()?,
+    )
+}
+
+/// Login step 2: open the sealed challenge and sign it with the OPAQUE request.
+#[wasm_bindgen]
+pub fn core_login_start_request(
+    state: Ts<CoreDeviceState>,
+    opaque_request_b64: &str,
+    body: &str,
+) -> Result<Ts<LoginStarting>, JsError> {
+    Ok(
+        sealbook_core::login_start_request(&state.to_rust()?, opaque_request_b64, body)
+            .map_err(core_err)?
+            .into_ts()?,
+    )
+}
+
+/// Login step 3: complete OPAQUE and bind the finalization to this device.
+#[wasm_bindgen]
+pub fn core_login_finish_request(
+    state: Ts<CoreDeviceState>,
+    opaque_state_b64: &str,
+    password: &str,
+    challenge_b64: &str,
+    body: &str,
+) -> Result<Ts<AuthRequest>, JsError> {
+    Ok(sealbook_core::login_finish_request(
+        &state.to_rust()?,
+        opaque_state_b64,
+        password,
+        challenge_b64,
+        body,
+    )
+    .map_err(core_err)?
+    .into_ts()?)
+}
+
+/// Opens the collection key and returns the state to persist. The caller must
+/// sync the roster before anything reads or writes the vault.
+#[wasm_bindgen]
+pub fn core_login_accept(
+    state: Ts<CoreDeviceState>,
+    password: &str,
+    body: &str,
+) -> Result<Ts<LoggedIn>, JsError> {
+    Ok(
+        sealbook_core::login_accept(&state.to_rust()?, password, body)
+            .map_err(core_err)?
+            .into_ts()?,
+    )
+}
+
+#[wasm_bindgen]
+pub fn core_recover_start_request(
+    username: &str,
+    phrase: &str,
+    opaque_request_b64: &str,
+) -> Result<Ts<AuthRequest>, JsError> {
+    Ok(
+        sealbook_core::recover_start_request(username, phrase, opaque_request_b64)
+            .map_err(core_err)?
+            .into_ts()?,
+    )
+}
+
+/// Opens the phrase wrap and checks the roster the account is on under the key
+/// it opened.
+#[wasm_bindgen]
+pub fn core_recover_start_accept(phrase: &str, body: &str) -> Result<Ts<RecoverStarted>, JsError> {
+    Ok(sealbook_core::recover_start_accept(phrase, body)
+        .map_err(core_err)?
+        .into_ts()?)
+}
+
+/// Enrols the recovering device and signs the roster step with the phrase.
+#[wasm_bindgen]
+pub fn core_recover_finish_request(
+    username: &str,
+    phrase: &str,
+    password: &str,
+    started: Ts<RecoverStarted>,
+    device: Ts<CoreDeviceSecrets>,
+    upload_b64: &str,
+) -> Result<Ts<Recovering>, JsError> {
+    Ok(sealbook_core::recover_finish_request(
+        username,
+        phrase,
+        password,
+        &started.to_rust()?,
+        &device.to_rust()?,
+        upload_b64,
+    )
+    .map_err(core_err)?
+    .into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_recover_accept(
+    server: &str,
+    username: &str,
+    started: Ts<RecoverStarted>,
+    device: Ts<CoreDeviceSecrets>,
+    recovering: Ts<Recovering>,
+    body: &str,
+) -> Result<Ts<CoreDeviceState>, JsError> {
+    Ok(sealbook_core::recover_accept(
+        server,
+        username,
+        &started.to_rust()?,
+        &device.to_rust()?,
+        &recovering.to_rust()?,
+        body,
+    )
+    .map_err(core_err)?
+    .into_ts()?)
+}
+
+/// The challenge a username change or a deletion is signed over.
+#[wasm_bindgen]
+pub fn core_account_challenge_request() -> Result<Ts<AuthRequest>, JsError> {
+    Ok(sealbook_core::account_challenge_request().into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_change_username_request(
+    state: Ts<CoreDeviceState>,
+    new_username: &str,
+    upload_b64: &str,
+    challenge_body: &str,
+) -> Result<Ts<AuthRequest>, JsError> {
+    Ok(sealbook_core::change_username_request(
+        &state.to_rust()?,
+        new_username,
+        upload_b64,
+        challenge_body,
+    )
+    .map_err(core_err)?
+    .into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_password_change_start_request(
+    opaque_request_b64: &str,
+) -> Result<Ts<AuthRequest>, JsError> {
+    Ok(
+        sealbook_core::password_change_start_request(opaque_request_b64)
+            .map_err(core_err)?
+            .into_ts()?,
+    )
+}
+
+#[wasm_bindgen]
+pub fn core_password_change_start_accept(body: &str) -> Result<Ts<PasswordChangeStarted>, JsError> {
+    Ok(sealbook_core::password_change_start_accept(body)
+        .map_err(core_err)?
+        .into_ts()?)
+}
+
+/// The new verifier and the collection key re-wrapped under the new password,
+/// with a signature covering both.
+#[wasm_bindgen]
+pub fn core_change_password_request(
+    state: Ts<CoreDeviceState>,
+    ck_b64: &str,
+    new_password: &str,
+    upload_b64: &str,
+    started: Ts<PasswordChangeStarted>,
+) -> Result<Ts<PasswordChange>, JsError> {
+    Ok(sealbook_core::change_password_request(
+        &state.to_rust()?,
+        &core_session(ck_b64, 0)?,
+        new_password,
+        upload_b64,
+        &started.to_rust()?,
+    )
+    .map_err(core_err)?
+    .into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_delete_account_request(
+    state: Ts<CoreDeviceState>,
+    challenge_body: &str,
+) -> Result<Ts<AuthRequest>, JsError> {
+    Ok(
+        sealbook_core::delete_account_request(&state.to_rust()?, challenge_body)
+            .map_err(core_err)?
+            .into_ts()?,
+    )
 }
