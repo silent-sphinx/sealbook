@@ -2,10 +2,10 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sealbook_core::{
     AppliedManifest, BucketedManifest, BucketsOutcome, ChangesPage, CoreBuild, CoreDevice,
-    CoreManifestEntry, CoreRoster, CoreRosterPin, CoreSealedRow, CoreSession, HttpRequest,
-    HttpResponse, ManifestContext, ManifestOutcome, ManifestPlan, ManifestSigner, ResealRow,
-    RosterContext, RotationPlan, RotationState, RowOutcome, RowRef, SignedManifest, VerifiedRoster,
-    WalkCursor, WalkStep,
+    CoreManifestEntry, CorePairPreview, CoreRoster, CoreRosterPin, CoreSealedRow, CoreSession,
+    HttpRequest, HttpResponse, ManifestContext, ManifestOutcome, ManifestPlan, ManifestSigner,
+    PairApproval, PairJoined, PairStatus, ResealRow, RosterContext, RotationPlan, RotationState,
+    RowOutcome, RowRef, SignedManifest, VerifiedRoster, WalkCursor, WalkStep,
 };
 use sealbook_crypto::opaque::{
     client_login_finish, client_login_start, client_register_finish, client_register_start,
@@ -17,14 +17,13 @@ use sealbook_crypto::{
     generate_kdf_salt, generate_phrase, key_rotation_transcript, key_wraps_digest,
     login_start_transcript, login_transcript, manifest_bucket_digest, manifest_bucket_of,
     manifest_digest, manifest_transcript, object_aad, open_login_challenge, pair_confirmation,
-    pair_grant_transcript, password_change_payload, phrase_lookup_id, phrase_recovery_public,
-    phrase_recovery_transcript, recovery_password_payload, rotated_objects_digest,
-    rotation_recovery_payload, sign, sign_phrase_recovery, unwrap_collection_key,
-    unwrap_for_device, unwrap_for_phrase, username_change_payload, wrap_collection_key,
-    wrap_for_device, wrap_for_phrase, CollectionKey, DeviceHpkePublic, DeviceHpkeSecret,
-    DeviceHpkeWrap, DeviceSigningSecrets, EncryptedObject, ManifestDigestEntry, ObjectDigestEntry,
-    RecoveryWrap, WrapDigestEntry, MANIFEST_BUCKETS, PHRASE_CIPHERSUITE, PHRASE_SCHEME,
-    RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
+    password_change_payload, phrase_lookup_id, phrase_recovery_public, phrase_recovery_transcript,
+    recovery_password_payload, rotated_objects_digest, rotation_recovery_payload, sign,
+    sign_phrase_recovery, unwrap_collection_key, unwrap_for_device, unwrap_for_phrase,
+    username_change_payload, wrap_collection_key, wrap_for_device, wrap_for_phrase, CollectionKey,
+    DeviceHpkePublic, DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets, EncryptedObject,
+    ManifestDigestEntry, ObjectDigestEntry, RecoveryWrap, WrapDigestEntry, MANIFEST_BUCKETS,
+    PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
 };
 use sealbook_crypto::{phrase_recovery_keys, RosterPin};
 use sealbook_protocol::envelope::{open_envelope, seal_envelope, Unsealed};
@@ -786,41 +785,10 @@ pub fn phrase_recovery_proof_json(
     .map_err(js_err)
 }
 
-#[wasm_bindgen]
-#[allow(clippy::too_many_arguments)]
-pub fn pair_grant_sign(
-    mldsa_seed_b64: &str,
-    ed25519_sk_b64: &str,
-    pair_id: &str,
-    approver_device_id: &str,
-    new_device_id: &str,
-    mldsa_pk_b64: &str,
-    ed25519_pk_b64: &str,
-    hpke_pk_b64: &str,
-    confirm: &str,
-) -> Result<String, JsError> {
-    let secrets = DeviceSigningSecrets {
-        mldsa_seed: unb64(mldsa_seed_b64)?,
-        ed25519_sk: unb64(ed25519_sk_b64)?,
-    };
-    let t = pair_grant_transcript(
-        parse_uuid(pair_id)?,
-        parse_uuid(approver_device_id)?,
-        parse_uuid(new_device_id)?,
-        &unb64(mldsa_pk_b64)?,
-        &unb64(ed25519_pk_b64)?,
-        &unb64(hpke_pk_b64)?,
-        confirm,
-    );
-    let sig = sign(&secrets, &t).map_err(js_err)?;
-    serde_json::to_string(&serde_json::json!({
-        "mldsa": b64(&sig.mldsa),
-        "ed25519": b64(&sig.ed25519),
-    }))
-    .map_err(js_err)
-}
-
 /// The pairing code both screens show.
+///
+/// Kept for the tests that stand in for the server, which computes the same
+/// code; the client takes its own from core's pairing decisions.
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
 pub fn pair_confirmation_code(
@@ -1825,4 +1793,121 @@ pub fn core_rotation_entries(
             .map_err(core_err)?,
     )
     .into_ts()?)
+}
+
+// ── Core: pairing ──
+
+/// The join request body, with the enrollment signature over the new keys.
+#[wasm_bindgen]
+pub fn core_pair_join_body(
+    username: &str,
+    device: Ts<CoreDevice>,
+    mldsa_seed_b64: &str,
+    ed25519_sk_b64: &str,
+) -> Result<String, JsError> {
+    sealbook_core::pair_join_body(
+        username,
+        &device.to_rust()?,
+        &core_secrets(mldsa_seed_b64, ed25519_sk_b64)?,
+    )
+    .map_err(core_err)
+}
+
+/// Checks the join response and computes the code the joining device shows.
+///
+/// The code is this device's own, not the server's copy: a server that
+/// substituted the keys could show the real code and keep the ones it swapped in.
+#[wasm_bindgen]
+pub fn core_pair_join_accept(
+    device: Ts<CoreDevice>,
+    body: &str,
+) -> Result<Ts<PairJoined>, JsError> {
+    Ok(sealbook_core::pair_join_accept(&device.to_rust()?, body)
+        .map_err(core_err)?
+        .into_ts()?)
+}
+
+/// Where a poll says the pairing has got to.
+///
+/// Takes the status code as well as the body, because an expired code is a 404
+/// and not a status in the body.
+#[wasm_bindgen]
+pub fn core_pair_status(status: u16, body: &str) -> Result<Ts<PairStatus>, JsError> {
+    Ok(sealbook_core::pair_status(status, body)
+        .map_err(core_err)?
+        .into_ts()?)
+}
+
+/// The server-relative path that looks a pairing up, from a code as typed.
+#[wasm_bindgen]
+pub fn core_pair_path(pair_key: &str) -> String {
+    sealbook_core::pair_path(pair_key)
+}
+
+/// The server-relative path an approval posts to.
+#[wasm_bindgen]
+pub fn core_pair_approve_path(pair_key: &str) -> String {
+    sealbook_core::pair_approve_path(pair_key)
+}
+
+/// Reads a pairing request and checks everything that does not need the typed
+/// code, against a roster this device verified from its own pin.
+#[wasm_bindgen]
+pub fn core_pair_preview(
+    ck_b64: &str,
+    key_epoch: u64,
+    verified: Ts<VerifiedRoster>,
+    body: &str,
+) -> Result<Ts<CorePairPreview>, JsError> {
+    Ok(sealbook_core::pair_preview(
+        &core_session(ck_b64, key_epoch)?,
+        &verified.to_rust()?,
+        body,
+    )
+    .map_err(core_err)?
+    .into_ts()?)
+}
+
+/// Approves a joining device: wraps the collection key for it, signs the grant,
+/// and signs the roster step that adds it.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn core_pair_approve(
+    mldsa_seed_b64: &str,
+    ed25519_sk_b64: &str,
+    context: Ts<RosterContext>,
+    ck_b64: &str,
+    key_epoch: u64,
+    verified: Ts<VerifiedRoster>,
+    preview: Ts<CorePairPreview>,
+    typed: &str,
+) -> Result<Ts<PairApproval>, JsError> {
+    Ok(sealbook_core::pair_approve(
+        &core_secrets(mldsa_seed_b64, ed25519_sk_b64)?,
+        &context.to_rust()?,
+        &core_session(ck_b64, key_epoch)?,
+        &verified.to_rust()?,
+        &preview.to_rust()?,
+        typed,
+    )
+    .map_err(core_err)?
+    .into_ts()?)
+}
+
+/// Strips spacing and case differences from a typed code.
+#[wasm_bindgen]
+pub fn core_normalize_confirmation(entered: &str) -> String {
+    sealbook_core::normalize_confirmation(entered)
+}
+
+/// A code split into display groups.
+#[wasm_bindgen]
+pub fn core_confirmation_groups(code: &str) -> Vec<String> {
+    sealbook_core::confirmation_groups(code)
+}
+
+/// A code grouped for display.
+#[wasm_bindgen]
+pub fn core_format_confirmation(code: &str) -> String {
+    sealbook_core::format_confirmation(code)
 }

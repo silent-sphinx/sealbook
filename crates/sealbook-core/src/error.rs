@@ -74,6 +74,10 @@ pub enum CoreError {
     Rotation {
         refusal: crate::rotation::RotationRefusal,
     },
+    #[error("{refusal}")]
+    Pair {
+        refusal: crate::pairing::PairRefusal,
+    },
     /// A core function called out of order by its host, not a server fault.
     #[error("core state machine misuse: {detail}")]
     Misuse { detail: String },
@@ -127,6 +131,7 @@ impl CoreError {
             CoreError::CollectionBusy => "CollectionBusy",
             CoreError::RecoveryRotationPending => "RecoveryRotationPending",
             CoreError::Rotation { .. } => "Rotation",
+            CoreError::Pair { .. } => "Pair",
             CoreError::Misuse { .. } => "Misuse",
         }
     }

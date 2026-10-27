@@ -112,6 +112,30 @@ both builds already require for the wasm module and the JNI library.
   the AEAD nonce is random, which also means a carried tombstone's digest is of
   the bytes that run stored.
 
+- `pairing/handshake.json` — one account mid-pairing, as both sides see it: the
+  join response the new device checks, the status response the approver
+  previews, the code both sides have to compute from those, and the roster the
+  approval extends. Alongside them every refusal either side can raise, the
+  forms of the code a user may type, and the lookup paths a typed code resolves
+  to. Under the same collection and alpha device as the fixtures above, with the
+  joining device as delta. Pins the rule the server cannot check for either
+  side: each computes the confirmation code itself and only ever compares the
+  server's copy against it, because a server that substituted the joining
+  device's keys could show the real code and keep the ones it swapped in. Read
+  by `sealbook-core`'s pairing tests,
+  `sealbook-web/src/lib/pairingParity.test.ts` and Android's
+  `DevicePairingTest`.
+
+  Generated from fixed seeds by the ignored `regenerate_the_pairing_fixture`
+  test in `crates/sealbook-core/tests/pairing.rs`:
+
+  ```
+  REGENERATE_PAIRING_FIXTURE=1 cargo test -p sealbook-core -- --ignored regenerate
+  ```
+
+  The check compares the codes, the refusals and the served responses rather
+  than an approval's bytes, because the HPKE wrap in one is freshly random.
+
 One payload per remaining content type is phase 8 work in `UNIFICATION_PLAN.md`,
 added as each type moves into `sealbook-core`.
 

@@ -10,14 +10,14 @@ use sealbook_crypto::{
     enrollment_transcript, entropy_from_phrase, generate_device_hpke, generate_device_signing,
     generate_kdf_salt, generate_phrase, key_rotation_transcript, key_wraps_digest,
     login_start_transcript, login_transcript, manifest_digest, object_aad, open_login_challenge,
-    pair_confirmation, pair_grant_transcript, password_change_payload, phrase_lookup_id,
-    phrase_recovery_public, phrase_recovery_transcript, recovery_password_payload,
-    rotated_objects_digest, rotation_recovery_payload, sign, sign_phrase_recovery,
-    unwrap_collection_key, unwrap_for_device, unwrap_for_phrase, username_change_payload,
-    wrap_collection_key, wrap_for_device, wrap_for_phrase, CollectionKey, DeviceHpkePublic,
-    DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets, EncryptedObject, ManifestDigestEntry,
-    ObjectDigestEntry, RecoveryWrap, WrapDigestEntry, PHRASE_CIPHERSUITE, PHRASE_SCHEME,
-    RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
+    pair_confirmation, password_change_payload, phrase_lookup_id, phrase_recovery_public,
+    phrase_recovery_transcript, recovery_password_payload, rotated_objects_digest,
+    rotation_recovery_payload, sign, sign_phrase_recovery, unwrap_collection_key,
+    unwrap_for_device, unwrap_for_phrase, username_change_payload, wrap_collection_key,
+    wrap_for_device, wrap_for_phrase, CollectionKey, DeviceHpkePublic, DeviceHpkeSecret,
+    DeviceHpkeWrap, DeviceSigningSecrets, EncryptedObject, ManifestDigestEntry, ObjectDigestEntry,
+    RecoveryWrap, WrapDigestEntry, PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE,
+    XWING_CIPHERSUITE,
 };
 use sealbook_protocol::envelope::{open_envelope, seal_envelope, Unsealed};
 use sealbook_protocol::{DevicePublicKeys, RosterBody, RosterSignerBody, SEALED_CONTENT_TYPE};
@@ -715,9 +715,8 @@ pub struct DualSigResult {
 
 /// The pairing code both screens show.
 ///
-/// Derived here rather than in the client, because it commits to the roster the
-/// two devices are agreeing on and a second implementation of that transcript is
-/// how the clients drifted apart in the first place.
+/// Kept for the tests that stand in for the server, which computes the same
+/// code; the app takes its own from core's pairing decisions.
 #[uniffi::export]
 #[allow(clippy::too_many_arguments)]
 pub fn pair_confirmation_code(
@@ -738,39 +737,6 @@ pub fn pair_confirmation_code(
         roster_seq,
         &digest32(&roster_transcript_b64)?,
     ))
-}
-
-#[uniffi::export]
-#[allow(clippy::too_many_arguments)]
-pub fn pair_grant_sign(
-    mldsa_seed_b64: String,
-    ed25519_sk_b64: String,
-    pair_id: String,
-    approver_device_id: String,
-    new_device_id: String,
-    mldsa_pk_b64: String,
-    ed25519_pk_b64: String,
-    hpke_pk_b64: String,
-    confirm: String,
-) -> Result<DualSigResult, CryptoError> {
-    let secrets = DeviceSigningSecrets {
-        mldsa_seed: unb64(&mldsa_seed_b64)?,
-        ed25519_sk: unb64(&ed25519_sk_b64)?,
-    };
-    let t = pair_grant_transcript(
-        parse_uuid(&pair_id)?,
-        parse_uuid(&approver_device_id)?,
-        parse_uuid(&new_device_id)?,
-        &unb64(&mldsa_pk_b64)?,
-        &unb64(&ed25519_pk_b64)?,
-        &unb64(&hpke_pk_b64)?,
-        &confirm,
-    );
-    let sig = sign(&secrets, &t)?;
-    Ok(DualSigResult {
-        mldsa: b64(&sig.mldsa),
-        ed25519: b64(&sig.ed25519),
-    })
 }
 
 // ── Utility ──

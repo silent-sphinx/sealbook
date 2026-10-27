@@ -4264,9 +4264,14 @@ async fn roster_history_is_pruned_to_a_floor_a_stale_device_cannot_walk_back_pas
     assert_eq!(served["floor"], serde_json::json!(9));
     assert_eq!(served["rosters"].as_array().unwrap().len(), 64);
 
-    // `pair_approve` verifies the chain without moving the pin, so the owner is
-    // still anchored on the genesis roster, which is now below the floor.
-    assert_eq!(owner.state.as_ref().unwrap().roster_seq, 1);
+    // `pair_approve` moves the pin onto the roster it signed, so the approver
+    // itself is current.
+    assert_eq!(owner.state.as_ref().unwrap().roster_seq, 72);
+
+    // A device that was offline across the pruning is not. Rewinding the pin to
+    // the genesis roster, which is now below the floor, is what that device
+    // comes back holding.
+    owner.state.as_mut().unwrap().roster_seq = 1;
     let error = owner
         .sync_roster()
         .await

@@ -163,6 +163,35 @@ impl SealbookClient {
         parse(req.send().await?).await
     }
 
+    /// POSTs a body core has already serialized, for the flow whose request
+    /// shape is core's rather than this crate's.
+    pub(crate) async fn post_raw<R: serde::de::DeserializeOwned>(
+        &self,
+        url: &str,
+        body: String,
+        token: Option<&str>,
+    ) -> Result<R, ClientError> {
+        let mut req = self
+            .http
+            .post(url)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body);
+        if let Some(token) = token {
+            req = req.bearer_auth(token);
+        }
+        parse(req.send().await?).await
+    }
+
+    /// GETs a URL and hands back the status code with the body.
+    ///
+    /// For the one read whose answer is in the status rather than the body: a
+    /// pairing that has timed out is a 404, which every other path raises.
+    pub(crate) async fn get_status(&self, url: &str) -> Result<(u16, String), ClientError> {
+        let resp = self.http.get(url).send().await?;
+        let status = resp.status().as_u16();
+        Ok((status, resp.text().await?))
+    }
+
     /// Sends what core asked for and hands back what came, unparsed.
     ///
     /// Non-2xx is raised here with the server's own message rather than passed

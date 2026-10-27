@@ -1,19 +1,19 @@
 //! Enrolling a second device: the joining side, the approving side, and the
 //! confirmation code both sides compare.
+//!
+//! Every decision here is core's: which code to show, whether the server's copy
+//! of it agrees, whether the roster has moved under the pairing, and what an
+//! approval signs. This module moves bytes and persists what comes back.
 
+use sealbook_core::{PairStatus, RosterContext};
+use sealbook_crypto::{generate_device_hpke, generate_device_signing, DeviceSigningSecrets};
+use sealbook_protocol::{PairStatusResponse, RosterBody};
 use uuid::Uuid;
 
-use sealbook_crypto::{
-    enrollment_transcript, generate_device_hpke, generate_device_signing, pair_confirmation,
-    pair_grant_transcript, sign, wrap_for_device, DeviceHpkePublic, DeviceSigningSecrets,
-    XWING_CIPHERSUITE,
-};
-use sealbook_protocol::{
-    DevicePublicKeys, DualSignatureBody, KeyWrapBody, PairApproveRequest, PairJoinRequest,
-    PairJoinResponse, PairStatusResponse, RosterBody, RosterSignerBody,
-};
-
 use crate::{ClientError, LocalState, SealbookClient};
+
+/// Re-exported so the CLI groups a code the way the other clients do.
+pub use sealbook_core::{format_confirmation, normalize_confirmation};
 
 impl SealbookClient {
     pub async fn pair_join(
@@ -24,71 +24,41 @@ impl SealbookClient {
         self.check_protocol(server).await?;
         let (hpke_sk, hpke_pk) = generate_device_hpke()?;
         let (sign_sk, sign_pk) = generate_device_signing()?;
-        let device_id = Uuid::new_v4();
-        let transcript = enrollment_transcript(
-            device_id,
-            &sign_pk.mldsa_pk,
-            &sign_pk.ed25519_pk,
-            &hpke_pk.0,
-        );
-        let sig = sign(&sign_sk, &transcript)?;
-        let mldsa_pk = sign_pk.mldsa_pk.clone();
-        let ed25519_pk = sign_pk.ed25519_pk.clone();
-        let xwing_hpke_pk = hpke_pk.0.clone();
-        let start: PairJoinResponse = self
-            .post_json(
-                &format!("{server}/v1/pair/join"),
-                &PairJoinRequest {
-                    username: username.to_string(),
-                    device: DevicePublicKeys {
-                        device_id,
-                        mldsa_pk: sign_pk.mldsa_pk,
-                        ed25519_pk: sign_pk.ed25519_pk,
-                        xwing_hpke_pk: hpke_pk.0,
-                    },
-                    enrollment_signature: DualSignatureBody {
-                        mldsa: sig.mldsa,
-                        ed25519: sig.ed25519,
-                    },
-                },
-                None,
-            )
+        let device = sealbook_core::CoreDevice {
+            device_id: Uuid::new_v4(),
+            mldsa_pk: b64(&sign_pk.mldsa_pk),
+            ed25519_pk: b64(&sign_pk.ed25519_pk),
+            xwing_hpke_pk: b64(&hpke_pk.0),
+        };
+        let secrets = DeviceSigningSecrets {
+            mldsa_seed: sign_sk.mldsa_seed.clone(),
+            ed25519_sk: sign_sk.ed25519_sk.clone(),
+        };
+        let body = sealbook_core::pair_join_body(username, &device, &secrets)?;
+        let served: serde_json::Value = self
+            .post_raw(&format!("{server}/v1/pair/join"), body, None)
             .await?;
-
-        if start.roster_seq == 0 || start.roster_transcript.len() != 32 {
-            return Err(ClientError::Server(
-                "the server sent no roster for this account to anchor on".into(),
-            ));
-        }
-        let expected_confirm = pair_confirmation(
-            start.pair_id,
-            device_id,
-            &mldsa_pk,
-            &ed25519_pk,
-            &xwing_hpke_pk,
-            start.roster_seq,
-            &start.roster_transcript,
-        );
-        if start.confirm != expected_confirm {
-            return Err(ClientError::Server("pair confirmation mismatch".into()));
-        }
+        let joined = sealbook_core::pair_join_accept(&device, &served.to_string())?;
 
         self.state = Some(LocalState {
             server: server.trim_end_matches('/').to_string(),
             username: username.to_string(),
             account_id: Uuid::nil(),
             collection_id: Uuid::nil(),
-            device_id,
+            device_id: device.device_id,
             session_token: None,
             kdf_salt: Vec::new(),
             hpke_sk: hpke_sk.as_bytes().to_vec(),
             mldsa_seed: sign_sk.mldsa_seed.clone(),
             ed25519_sk: sign_sk.ed25519_sk.clone(),
             manifest_seq: 0,
-            roster_seq: start.roster_seq,
-            roster_transcript: start.roster_transcript,
+            // The anchor the user is about to vouch for by comparing codes, so
+            // the first roster this device fetches has to be a signed step from
+            // it rather than whatever the server serves.
+            roster_seq: joined.pin.roster_seq,
+            roster_transcript: decode(&joined.pin.transcript)?,
         });
-        Ok((start.pair_code, expected_confirm))
+        Ok((joined.pair_code, joined.confirm))
     }
 
     pub async fn pair_ready(&self, pair_code: &str) -> Result<bool, ClientError> {
@@ -98,27 +68,22 @@ impl SealbookClient {
             .ok_or(ClientError::NoState)?
             .server
             .clone();
-        let status: PairStatusResponse = self
-            .get_json(
-                &format!("{server}/v1/pair/{}", pair_code.replace(' ', "%20")),
-                None,
-            )
-            .await?;
-        Ok(status.status == "ready")
+        let url = format!("{server}{}", sealbook_core::pair_path(pair_code));
+        let (status, body) = self.get_status(&url).await?;
+        Ok(sealbook_core::pair_status(status, &body)? == PairStatus::Ready)
     }
 
     pub async fn pair_preview(&self, pair_code: &str) -> Result<PairStatusResponse, ClientError> {
         let state = self.state.as_ref().ok_or(ClientError::NoState)?;
-        let token = state.session_token.as_deref().ok_or(ClientError::NoState)?;
         self.get_json(
-            &format!("{}/v1/pair/{}", state.server, pair_code.replace(' ', "%20")),
-            Some(token),
+            &format!("{}{}", state.server, sealbook_core::pair_path(pair_code)),
+            Some(state.session_token.as_deref().ok_or(ClientError::NoState)?),
         )
         .await
     }
 
     pub async fn pair_approve(
-        &self,
+        &mut self,
         pair_code: &str,
         confirmation: &str,
     ) -> Result<(), ClientError> {
@@ -128,140 +93,68 @@ impl SealbookClient {
     }
 
     pub async fn pair_approve_preview(
-        &self,
+        &mut self,
         pair_code: &str,
         preview: &PairStatusResponse,
         confirmation: &str,
     ) -> Result<(), ClientError> {
-        let pair_id = preview.pair_id;
-        let device = preview
-            .device
-            .clone()
-            .ok_or(ClientError::Server("pair".into()))?;
-        let current = self.verified_roster().await?;
-        if current.key_epoch != self.key_epoch {
-            return Err(ClientError::Server(
-                "the collection key has been rotated since this device fetched it; refresh it \
-                 and approve again"
-                    .into(),
-            ));
-        }
-        if current
-            .devices
-            .iter()
-            .any(|d| d.device_id == device.device_id)
-        {
-            return Err(ClientError::Server(
-                "that device is already enrolled".into(),
-            ));
-        }
-        let state = self.state.as_ref().ok_or(ClientError::NoState)?;
-
-        let anchor = current.pin(state.collection_id);
-        if let Some(seq) = preview.roster_seq.filter(|seq| *seq != anchor.roster_seq) {
-            return Err(ClientError::Server(format!(
-                "the joining device started pairing against roster {seq} but this account is \
-                 now on roster {}; start the pairing again",
-                anchor.roster_seq
-            )));
-        }
-        let confirm = pair_confirmation(
-            pair_id,
-            device.device_id,
-            &device.mldsa_pk,
-            &device.ed25519_pk,
-            &device.xwing_hpke_pk,
-            anchor.roster_seq,
-            &anchor.transcript,
-        );
-        if preview.confirm != confirm {
-            return Err(ClientError::Server("pair confirmation mismatch".into()));
-        }
-        // Codes are 26 characters, so they are usually shown and typed in
-        // groups. Compare on the normalized form, but send the canonical one.
-        if normalize_confirmation(confirmation) != confirm {
-            return Err(ClientError::Server("pair confirmation mismatch".into()));
-        }
-        let ck = self
-            .collection_key
-            .as_ref()
-            .ok_or(ClientError::NoCollectionKey)?;
-        let token = state.session_token.as_deref().ok_or(ClientError::NoState)?;
-        let wrap = wrap_for_device(&DeviceHpkePublic(device.xwing_hpke_pk.clone()), ck)?;
-        let grant_t = pair_grant_transcript(
-            pair_id,
-            state.device_id,
-            device.device_id,
-            &device.mldsa_pk,
-            &device.ed25519_pk,
-            &device.xwing_hpke_pk,
-            &confirm,
-        );
-        let secrets = DeviceSigningSecrets {
-            mldsa_seed: state.mldsa_seed.clone(),
-            ed25519_sk: state.ed25519_sk.clone(),
+        // The anchor is a roster this device verified from its own pin, never the
+        // server's device list: the code is computed over it, and the typed code
+        // is compared against that rather than against anything served.
+        let verified = self.verified_roster_core().await?;
+        let served = json(preview)?;
+        let core_preview = sealbook_core::pair_preview(&self.core_session(), &verified, &served)?;
+        let (server, context, secrets, token) = {
+            let state = self.state.as_ref().ok_or(ClientError::NoState)?;
+            (
+                state.server.clone(),
+                RosterContext {
+                    collection_id: state.collection_id,
+                    device_id: state.device_id,
+                    roster_seq: state.roster_seq,
+                    roster_transcript: b64(&state.roster_transcript),
+                },
+                DeviceSigningSecrets {
+                    mldsa_seed: state.mldsa_seed.clone(),
+                    ed25519_sk: state.ed25519_sk.clone(),
+                },
+                state.session_token.clone().ok_or(ClientError::NoState)?,
+            )
         };
-        let sig = sign(&secrets, &grant_t)?;
-        let mut devices = current.devices.clone();
-        devices.push(device.clone());
-        let roster = RosterBody::seal(
-            state.collection_id,
-            current.roster_seq + 1,
-            current.key_epoch,
-            devices,
-            current.phrase_mldsa_pk.clone(),
-            current.phrase_ed25519_pk.clone(),
-            RosterSignerBody::Device {
-                device_id: state.device_id,
-            },
+        let approval = sealbook_core::pair_approve(
             &secrets,
-            ck,
+            &context,
+            &self.core_session(),
+            &verified,
+            &core_preview,
+            confirmation,
         )?;
         let _: PairStatusResponse = self
-            .post_json(
-                &format!(
-                    "{}/v1/pair/{}/approve",
-                    state.server,
-                    pair_code.replace(' ', "%20")
-                ),
-                &PairApproveRequest {
-                    wrap: KeyWrapBody {
-                        recipient_kind: "device".into(),
-                        recipient_id: device.device_id.to_string(),
-                        hpke_enc: wrap.enc,
-                        wrapped_ck: wrap.ciphertext,
-                        ciphersuite: XWING_CIPHERSUITE.into(),
-                    },
-                    grant: DualSignatureBody {
-                        mldsa: sig.mldsa,
-                        ed25519: sig.ed25519,
-                    },
-                    confirmation: confirm.clone(),
-                    roster,
-                },
-                Some(token),
+            .post_raw(
+                &format!("{server}{}", sealbook_core::pair_approve_path(pair_code)),
+                approval.body,
+                Some(&token),
             )
             .await?;
+        // The account is on the roster this device just signed, so move the pin
+        // onto it rather than waiting to be served it back.
+        let roster: RosterBody = serde_json::from_str(&approval.roster_json).map_err(|err| {
+            ClientError::Server(format!("core returned an unreadable roster: {err}"))
+        })?;
+        self.pin_roster(&roster)?;
         Ok(())
     }
 }
 
-/// Strips spacing and case differences from a typed pairing confirmation code,
-/// so a code shown in groups can be entered as the user sees it.
-pub fn normalize_confirmation(entered: &str) -> String {
-    entered
-        .chars()
-        .filter(|c| !c.is_whitespace() && *c != '-')
-        .flat_map(|c| c.to_uppercase())
-        .collect()
+fn json<T: serde::Serialize>(value: &T) -> Result<String, ClientError> {
+    serde_json::to_string(value).map_err(|err| ClientError::Server(err.to_string()))
 }
 
-/// Groups a confirmation code for display, so 26 characters stay scannable.
-pub fn format_confirmation(code: &str) -> String {
-    const GROUP: usize = 4;
-    code.as_bytes()
-        .chunks(GROUP)
-        .map(|chunk| String::from_utf8_lossy(chunk).into_owned())
-        .collect::<Vec<_>>()
-        .join(" ")
+fn b64(bytes: &[u8]) -> String {
+    base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, bytes)
+}
+
+fn decode(text: &str) -> Result<Vec<u8>, ClientError> {
+    base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, text)
+        .map_err(|err| ClientError::Server(format!("core returned an unreadable pin: {err}")))
 }

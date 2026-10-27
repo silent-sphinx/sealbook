@@ -14,6 +14,7 @@
 mod error;
 mod http;
 mod manifest;
+mod pairing;
 mod roster;
 mod rotation;
 mod state;
@@ -42,6 +43,11 @@ pub use manifest::{
     manifest_verify, wire_entries, AppliedManifest, BucketedManifest, BucketsOutcome,
     CoreManifestEntry, ManifestContext, ManifestOutcome, ManifestPlan, ManifestSigner,
     SignedManifest,
+};
+pub use pairing::{
+    confirmation_groups, format_confirmation, normalize_confirmation, pair_approve,
+    pair_approve_path, pair_join_accept, pair_join_body, pair_path, pair_preview, pair_status,
+    CorePairPreview, PairApproval, PairJoined, PairRefusal, PairStatus,
 };
 pub use roster::{
     pin_roster, read_roster, roster_accept, roster_accept_sealed, roster_answers_for,
