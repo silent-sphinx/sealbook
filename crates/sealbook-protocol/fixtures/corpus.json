@@ -249,6 +249,109 @@
           "expect": "settings"
         }
       ]
+    },
+    {
+      "file": "payloads/fuzz.json",
+      "tables": [
+        {
+          "table": "tasks_parses",
+          "op": "task.parse",
+          "args": [
+            "id",
+            "raw"
+          ],
+          "expect": "task"
+        },
+        {
+          "table": "tasks_list_parses",
+          "op": "task_list.parse",
+          "args": [
+            "id",
+            "raw"
+          ],
+          "expect": "list"
+        },
+        {
+          "table": "bookmarks_parses",
+          "op": "bookmark.parse",
+          "args": [
+            "id",
+            "raw"
+          ],
+          "expect": "bookmark"
+        },
+        {
+          "table": "bookmarks_collection_parses",
+          "op": "bookmark_collection.parse",
+          "args": [
+            "id",
+            "raw"
+          ],
+          "expect": "collection"
+        },
+        {
+          "table": "notes_parses",
+          "op": "note.parse",
+          "args": [
+            "id",
+            "raw"
+          ],
+          "expect": "note"
+        },
+        {
+          "table": "notes_notebook_parses",
+          "op": "notebook.parse",
+          "args": [
+            "id",
+            "raw"
+          ],
+          "expect": "notebook"
+        },
+        {
+          "table": "calendars_calendar_parses",
+          "op": "calendar.parse",
+          "args": [
+            "id",
+            "raw"
+          ],
+          "expect": "calendar"
+        },
+        {
+          "table": "calendars_event_parses",
+          "op": "event.parse",
+          "args": [
+            "id",
+            "raw"
+          ],
+          "expect": "event"
+        },
+        {
+          "table": "contacts_contact_parses",
+          "op": "contact.parse",
+          "args": [
+            "id",
+            "raw"
+          ],
+          "expect": "contact"
+        },
+        {
+          "table": "contacts_address_book_parses",
+          "op": "address_book.parse",
+          "args": [
+            "id",
+            "raw"
+          ],
+          "expect": "address_book"
+        },
+        {
+          "table": "settings_parses",
+          "op": "settings.parse",
+          "args": [
+            "raw"
+          ],
+          "expect": "settings"
+        }
+      ]
     }
   ]
 }

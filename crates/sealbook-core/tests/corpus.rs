@@ -131,3 +131,133 @@ fn every_listed_case_table_matches_core() {
     }
     assert!(ran > 0);
 }
+
+const FUZZ_FILE: &str = "payloads/fuzz.json";
+const FUZZ_MUTANTS: usize = 6;
+
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+
+    fn below(&mut self, bound: usize) -> usize {
+        (self.next() % bound as u64) as usize
+    }
+}
+
+fn odd_value(rng: &mut Rng) -> Value {
+    match rng.below(12) {
+        0 => Value::Null,
+        1 => Value::Bool(rng.below(2) == 0),
+        2 => serde_json::json!(0),
+        3 => serde_json::json!(-1),
+        4 => serde_json::json!(9007199254740993u64),
+        5 => serde_json::json!(1.5),
+        6 => serde_json::json!(""),
+        7 => serde_json::json!("  padded  "),
+        8 => serde_json::json!("caf\u{e9} \u{1f600} \u{202e}"),
+        9 => serde_json::json!([]),
+        10 => serde_json::json!([1, "two", null, {"k": []}]),
+        _ => serde_json::json!({"nested": {"deep": [true]}}),
+    }
+}
+
+fn mutate(value: &mut Value, rng: &mut Rng) {
+    let Value::Object(map) = value else { return };
+    let keys: Vec<String> = map.keys().cloned().collect();
+    match rng.below(6) {
+        0 => {
+            map.insert(format!("x-unknown-{}", rng.below(1000)), odd_value(rng));
+        }
+        1 if !keys.is_empty() => {
+            let key = keys[rng.below(keys.len())].clone();
+            map.insert(key, odd_value(rng));
+        }
+        2 if !keys.is_empty() => {
+            let key = keys[rng.below(keys.len())].clone();
+            map.remove(&key);
+        }
+        3 => {
+            let version = ["1.0", "1.7", "1.x", "2.0", "0.9", ""][rng.below(6)];
+            map.insert("version".into(), Value::String(version.into()));
+        }
+        4 if !keys.is_empty() => {
+            let key = keys[rng.below(keys.len())].clone();
+            if let Some(inner) = map.get_mut(&key) {
+                mutate(inner, rng);
+            }
+        }
+        _ => {
+            map.insert("version".into(), odd_value(rng));
+        }
+    }
+}
+
+/// Rewrites `payloads/fuzz.json`: near-valid stored payloads, made by mutating
+/// every parse row's `raw`, with core's own reading as the expected value.
+#[test]
+#[ignore]
+fn regenerate_the_fuzz_fixture() {
+    let seed: u64 = std::env::var("FUZZ_SEED")
+        .ok()
+        .and_then(|seed| seed.parse().ok())
+        .unwrap_or(0x5ea1_b00c);
+    let mut rng = Rng(seed | 1);
+    let corpus = load("corpus.json");
+    let mut fixture = serde_json::Map::new();
+    let mut tables = Vec::new();
+    for entry in corpus["fixtures"].as_array().expect("fixtures") {
+        let file = entry["file"].as_str().expect("file");
+        if file == FUZZ_FILE {
+            continue;
+        }
+        let source = load(file);
+        let stem = file.trim_start_matches("payloads/").trim_end_matches(".json");
+        for table in entry["tables"].as_array().expect("tables") {
+            let op = table["op"].as_str().expect("op");
+            let args = table["args"].as_array().expect("args");
+            if !op.ends_with(".parse") || !args.iter().any(|arg| arg == "raw") {
+                continue;
+            }
+            let name = format!("{stem}_{}", table["table"].as_str().expect("table"));
+            let expect = table["expect"].as_str().expect("expect");
+            let mut rows = Vec::new();
+            for row in source[table["table"].as_str().expect("table")]
+                .as_array()
+                .expect("rows")
+            {
+                let Some(Ok(base)) = row["raw"].as_str().map(serde_json::from_str::<Value>) else {
+                    continue;
+                };
+                for index in 0..FUZZ_MUTANTS {
+                    let mut raw = base.clone();
+                    for _ in 0..=rng.below(3) {
+                        mutate(&mut raw, &mut rng);
+                    }
+                    let mut next = row.clone();
+                    next["case"] = Value::String(format!("{} (mutant {index})", row["case"]));
+                    next["raw"] = Value::String(raw.to_string());
+                    let call_args: Vec<Value> = args
+                        .iter()
+                        .map(|key| next.get(key.as_str().expect("arg")).cloned().unwrap_or(Value::Null))
+                        .collect();
+                    next[expect] = call(op, &call_args);
+                    rows.push(next);
+                }
+            }
+            tables.push(serde_json::json!({
+                "table": name, "op": op, "args": args, "expect": expect
+            }));
+            fixture.insert(name, Value::Array(rows));
+        }
+    }
+    fixture.insert("seed".into(), Value::from(seed));
+    let text = serde_json::to_string_pretty(&Value::Object(fixture)).expect("serialises");
+    std::fs::write(format!("{ROOT}{FUZZ_FILE}"), text + "\n").expect("writes");
+    println!("{}", serde_json::to_string_pretty(&tables).expect("tables"));
+}

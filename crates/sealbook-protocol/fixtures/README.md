@@ -303,6 +303,21 @@ The cases that decide whether two implementations drift live in the tables:
   `PayloadSchema`;
 - unknown keys inside `nthWeekday` are dropped today. This is the one known gap.
 
+### Fuzzed cases
+
+`payloads/fuzz.json` is generated: every parse row's stored payload is mutated
+(unknown keys, wrong types, dropped keys, odd versions, integers past 2^53,
+astral and bidirectional text) and core's reading of each mutant is the expected
+value. It is listed in the manifest like any other file, so no host needs code
+for it. Regenerate with a seed to hunt for a divergence:
+
+```
+FUZZ_SEED=12345 cargo test -p sealbook-core --test corpus -- --ignored regenerate
+```
+
+A seed that makes a host disagree with core is kept by committing the file it
+wrote.
+
 ### Adding a case
 
 Add a row to the table that covers it. No runner changes. For a new operation,
