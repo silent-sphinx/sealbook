@@ -1,0 +1,34 @@
+BEGIN:VCARD
+VERSION:3.0
+FN:Ada Lovelace
+N:Lovelace;Ada;Augusta;Countess;
+NICKNAME:Ada
+EMAIL;TYPE=INTERNET;TYPE=WORK:ada@analytical.example
+EMAIL;TYPE=HOME:ada@home.example
+TEL;TYPE=CELL:+44 7700 900123
+TEL;TYPE=WORK,VOICE:+44 20 7946 0000
+ADR;TYPE=HOME:;;12 St James Sq;London;;SW1Y 4JH;United Kingdom
+ORG:Analytical Engines Ltd;Research
+TITLE:Programmer
+BDAY:1815-12-10
+URL:https://ada.example/
+NOTE:First line\nSecond line\, with a comma\; and semicolon
+END:VCARD
+BEGIN:VCARD
+VERSION:3.0
+N:Babbage;Charles;;;
+EMAIL:charles@engine.example
+NOTE:A very long note that has been folded across several physical lines by an exporter so that
+  no line exceeds seventy-five octets as the specification requires of writers.
+END:VCARD
+BEGIN:VCARD
+VERSION:4.0
+FN:Grace Hopper
+TEL;VALUE=uri;TYPE=cell:tel:+1-555-0100
+EMAIL;TYPE=work:grace@navy.example
+ORG:US Navy
+END:VCARD
+BEGIN:VCARD
+VERSION:3.0
+FN:Only A Name
+END:VCARD

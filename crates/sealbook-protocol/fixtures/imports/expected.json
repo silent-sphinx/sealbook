@@ -1,0 +1,272 @@
+{
+  "csv": [
+    {
+      "@type": "Card",
+      "addresses": {
+        "a1": {
+          "street": [
+            "ada@analytical.example"
+          ]
+        }
+      },
+      "emails": {
+        "e1": {
+          "address": "ada@analytical.example",
+          "contexts": {
+            "private": true
+          }
+        }
+      },
+      "name": {
+        "full": "Ada"
+      },
+      "notes": {
+        "n1": {
+          "note": "Line one\r\nline two, with comma and \"quotes\"\",1815-12-10\r\n,,,,,,,\r\nGrace,Hopper,grace@navy.example,,US Navy,,,\r\nSolo,,,,,,,"
+        }
+      },
+      "organizations": {
+        "o1": {
+          "name": "Analytical Engines Ltd"
+        }
+      },
+      "phones": {
+        "p1": {
+          "features": {
+            "mobile": true
+          },
+          "number": "+44 7700 900123"
+        }
+      },
+      "sealbook:addressBookId": "book",
+      "titles": {
+        "t1": {
+          "kind": "title",
+          "name": "Programmer",
+          "organization": "o1"
+        }
+      },
+      "version": "1.0"
+    }
+  ],
+  "ics": {
+    "events": [
+      {
+        "@type": "CalendarEvent",
+        "end": "2026-10-01T09:15:00Z",
+        "location": "Room 3",
+        "start": "2026-10-01T09:00:00Z",
+        "timezone": "Europe/London",
+        "title": "Standup",
+        "version": "1.0"
+      },
+      {
+        "@type": "CalendarEvent",
+        "end": "2026-10-02T12:30:00Z",
+        "notes": "Bring notes\nand the long agenda that is folded across two lines",
+        "participants": [
+          "ada@analytical.example"
+        ],
+        "start": "2026-10-02T11:30:00Z",
+        "timezone": "Europe/London",
+        "title": "Lunch, with Ada",
+        "version": "1.0"
+      },
+      {
+        "@type": "CalendarEvent",
+        "end": "2026-12-27",
+        "start": "2026-12-24",
+        "timezone": "Europe/London",
+        "title": "Holiday",
+        "version": "1.0"
+      },
+      {
+        "@type": "CalendarEvent",
+        "recurrence": {
+          "frequency": "yearly"
+        },
+        "start": "2026-11-10",
+        "timezone": "Europe/London",
+        "title": "Birthday",
+        "version": "1.0"
+      },
+      {
+        "@type": "CalendarEvent",
+        "end": "2026-10-05T19:00:00Z",
+        "recurrence": {
+          "count": 6,
+          "frequency": "weekly",
+          "interval": 2,
+          "weekdays": [
+            1,
+            3
+          ]
+        },
+        "start": "2026-10-05T18:00:00Z",
+        "timezone": "Europe/London",
+        "title": "Gym",
+        "version": "1.0"
+      },
+      {
+        "@type": "CalendarEvent",
+        "recurrence": {
+          "frequency": "monthly",
+          "nthWeekday": {
+            "ordinal": 1,
+            "weekday": 5
+          },
+          "until": "2027-12-31"
+        },
+        "start": "2026-10-01",
+        "timezone": "Europe/London",
+        "title": "Review",
+        "version": "1.0"
+      },
+      {
+        "@type": "CalendarEvent",
+        "recurrence": {
+          "dayOfMonth": 31,
+          "frequency": "monthly"
+        },
+        "start": "2026-10-31",
+        "timezone": "Europe/London",
+        "title": "Payday",
+        "version": "1.0"
+      }
+    ]
+  },
+  "vcf": [
+    {
+      "@type": "Card",
+      "addresses": {
+        "a1": {
+          "country": "United Kingdom",
+          "locality": "London",
+          "postCode": "SW1Y 4JH",
+          "street": [
+            "12 St James Sq"
+          ]
+        }
+      },
+      "anniversaries": {
+        "a1": {
+          "date": "1815-12-10",
+          "kind": "birth"
+        }
+      },
+      "emails": {
+        "e1": {
+          "address": "ada@analytical.example",
+          "contexts": {
+            "work": true
+          }
+        },
+        "e2": {
+          "address": "ada@home.example",
+          "contexts": {
+            "private": true
+          }
+        }
+      },
+      "name": {
+        "full": "Ada Lovelace"
+      },
+      "nickNames": {
+        "n1": {
+          "name": "Ada"
+        }
+      },
+      "notes": {
+        "n1": {
+          "note": "First line\nSecond line, with a comma; and semicolon"
+        }
+      },
+      "organizations": {
+        "o1": {
+          "name": "Analytical Engines Ltd"
+        }
+      },
+      "phones": {
+        "p1": {
+          "features": {
+            "mobile": true
+          },
+          "number": "+44 7700 900123"
+        },
+        "p2": {
+          "contexts": {
+            "work": true
+          },
+          "number": "+44 20 7946 0000"
+        }
+      },
+      "sealbook:addressBookId": "book",
+      "titles": {
+        "t1": {
+          "kind": "title",
+          "name": "Programmer",
+          "organization": "o1"
+        }
+      },
+      "version": "1.0"
+    },
+    {
+      "@type": "Card",
+      "emails": {
+        "e1": {
+          "address": "charles@engine.example",
+          "contexts": {
+            "private": true
+          }
+        }
+      },
+      "name": {
+        "full": "Charles Babbage"
+      },
+      "notes": {
+        "n1": {
+          "note": "A very long note that has been folded across several physical lines by an exporter so that no line exceeds seventy-five octets as the specification requires of writers."
+        }
+      },
+      "sealbook:addressBookId": "book",
+      "version": "1.0"
+    },
+    {
+      "@type": "Card",
+      "emails": {
+        "e1": {
+          "address": "grace@navy.example",
+          "contexts": {
+            "work": true
+          }
+        }
+      },
+      "name": {
+        "full": "Grace Hopper"
+      },
+      "organizations": {
+        "o1": {
+          "name": "US Navy"
+        }
+      },
+      "phones": {
+        "p1": {
+          "features": {
+            "mobile": true
+          },
+          "number": "tel:+1-555-0100"
+        }
+      },
+      "sealbook:addressBookId": "book",
+      "version": "1.0"
+    },
+    {
+      "@type": "Card",
+      "name": {
+        "full": "Only A Name"
+      },
+      "sealbook:addressBookId": "book",
+      "version": "1.0"
+    }
+  ]
+}

@@ -238,3 +238,12 @@ A fixture is only worth keeping if more than one implementation reads it, or if
 it is output from a release that can no longer be regenerated. Name it for what
 it pins, note it in the table above, and say in the comment which drift it
 catches.
+
+- `imports/contacts.vcf`, `imports/contacts.csv`, `imports/calendar.ics` and
+  `imports/expected.json` — sample files for the web and Android importers, and
+  the stored payloads both must produce from them. Written by hand, not
+  generated; `expected.json` is the contact and event payloads (timestamps
+  without `created`/`updated`, instants without milliseconds) after each
+  client's own parser and core's writer. Held by `importParity.test.ts` and
+  Android's `ImportParityTest`.
+
