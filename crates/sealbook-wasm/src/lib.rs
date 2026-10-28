@@ -2,18 +2,19 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sealbook_core::{
     AppliedManifest, AttachmentLimits, AttachmentPlan, AttachmentRow, AuthRequest,
-    BucketedManifest, BucketsOutcome, ChangesPage, ChunkRange, CoreAddressBook,
-    CoreAddressBookDraft, CoreBookmark, CoreBookmarkCollection, CoreBookmarkCollectionDraft,
-    CoreBookmarkDraft, CoreBuild, CoreCalendar, CoreCalendarDraft, CoreCalendarEvent,
-    CoreCalendarEventDraft, CoreContact, CoreContactDraft, CoreContactProfile, CoreDevice,
-    CoreDeviceSecrets, CoreDeviceState, CoreManifestEntry, CoreNote, CoreNoteDraft, CoreNotebook,
-    CorePairPreview, CoreRoster, CoreRosterPin, CoreSealedRow, CoreSession, CoreTask,
-    CoreTaskDraft, CoreTaskList, CoreTaskListDraft, HttpRequest, HttpResponse, LoggedIn,
-    LoginStarting, ManifestContext, ManifestOutcome, ManifestPlan, ManifestSigner, OpaqueStart,
-    PairApproval, PairJoined, PairStatus, PasswordChange, PasswordChangeStarted, RecoverStarted,
-    Recovering, RegisterIdentity, Registering, ResealRow, RosterContext, RotationPlan,
-    RotationState, RowOutcome, RowRef, SignedManifest, SweepCursor, SweepPage, VerifiedRoster,
-    WalkCursor, WalkStep,
+    BucketedManifest, BucketsOutcome, ChangesPage, ChunkRange, CoreAccountSettings,
+    CoreAccountSettingsDraft, CoreAddressBook, CoreAddressBookDraft, CoreBookmark,
+    CoreBookmarkCollection, CoreBookmarkCollectionDraft, CoreBookmarkDraft, CoreBuild,
+    CoreCalendar, CoreCalendarDraft, CoreCalendarEvent, CoreCalendarEventDraft, CoreContact,
+    CoreContactDraft, CoreContactProfile, CoreDevice, CoreDeviceSecrets, CoreDeviceState,
+    CoreManifestEntry, CoreNote, CoreNoteDraft, CoreNotebook, CorePairPreview, CoreRoster,
+    CoreRosterPin, CoreSealedRow, CoreSession, CoreTask, CoreTaskDraft, CoreTaskList,
+    CoreTaskListDraft, HttpRequest, HttpResponse, LoggedIn, LoginStarting, ManifestContext,
+    ManifestOutcome, ManifestPlan, ManifestSigner, OpaqueStart, PairApproval, PairJoined,
+    PairStatus, PasswordChange, PasswordChangeStarted, RecoverStarted, Recovering,
+    RegisterIdentity, Registering, ResealRow, RosterContext, RotationPlan, RotationState,
+    RowOutcome, RowRef, SignedManifest, SweepCursor, SweepPage, VerifiedRoster, WalkCursor,
+    WalkStep,
 };
 use sealbook_crypto::RosterPin;
 use sealbook_crypto::{
@@ -2443,4 +2444,55 @@ pub fn core_contact_profile_write(
     profile: Ts<CoreContactProfile>,
 ) -> Result<Option<String>, JsError> {
     Ok(sealbook_core::profile_write(&profile.to_rust()?))
+}
+
+/// Every key the settings writer owns.
+#[wasm_bindgen]
+pub fn core_account_settings_keys() -> Vec<String> {
+    sealbook_core::ACCOUNT_SETTINGS_KEYS
+        .iter()
+        .map(|key| key.to_string())
+        .collect()
+}
+
+/// The settings of an account that has never chosen.
+#[wasm_bindgen]
+pub fn core_default_account_settings() -> Result<Ts<CoreAccountSettings>, JsError> {
+    Ok(sealbook_core::default_account_settings().into_ts()?)
+}
+
+/// Reads a stored settings payload. Lenient throughout: one that will not parse
+/// reads as the defaults.
+#[wasm_bindgen]
+pub fn core_settings_parse(raw: &str) -> Result<Ts<CoreAccountSettings>, JsError> {
+    Ok(sealbook_core::settings_parse(raw).into_ts()?)
+}
+
+/// Serialises settings onto `draft.raw`. Throws on a payload from a newer schema
+/// major.
+#[wasm_bindgen]
+pub fn core_settings_write(draft: Ts<CoreAccountSettingsDraft>) -> Result<String, JsError> {
+    sealbook_core::settings_write(&draft.to_rust()?).map_err(core_err)
+}
+
+/// The settings with one feature flipped, or unchanged when that would leave
+/// none on.
+#[wasm_bindgen]
+pub fn core_settings_with_feature(
+    settings: Ts<CoreAccountSettings>,
+    feature: &str,
+    enabled: bool,
+) -> Result<Ts<CoreAccountSettings>, JsError> {
+    Ok(sealbook_core::settings_with_feature(&settings.to_rust()?, feature, enabled).into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_can_disable_feature(
+    settings: Ts<CoreAccountSettings>,
+    feature: &str,
+) -> Result<bool, JsError> {
+    Ok(sealbook_core::can_disable_feature(
+        &settings.to_rust()?,
+        feature,
+    ))
 }

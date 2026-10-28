@@ -31,6 +31,7 @@ mod pairing;
 mod payload;
 mod roster;
 mod rotation;
+mod settings;
 mod state;
 mod sync;
 mod tasks;
@@ -131,6 +132,13 @@ pub use roster::{
 pub use rotation::{
     reseal_row, rotation_entries, rotation_plan, rotation_recipients, ResealRow, RotationPlan,
     RotationRefusal, RotationState,
+};
+pub use settings::{
+    can_disable_feature, default_account_settings, normalize_accent, normalize_contact_mode,
+    settings_parse, settings_with_feature, settings_write, CoreAccountSettings,
+    CoreAccountSettingsDraft, CoreFeatureFlag, ACCENTS, ACCOUNT_SETTINGS_CONTENT_TYPE,
+    ACCOUNT_SETTINGS_ID, ACCOUNT_SETTINGS_KEYS, CONTACT_MODES, DEFAULT_ACCENT,
+    DEFAULT_CONTACT_MODE, FEATURES, LEGACY_ACCOUNT_SETTINGS_ID,
 };
 pub use state::{CoreDeviceState, CoreSession};
 pub use sync::{

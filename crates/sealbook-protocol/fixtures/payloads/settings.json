@@ -1,0 +1,940 @@
+{
+  "constants": {
+    "content_type": "application/sealbook.settings+json",
+    "object_id": "00000000-0000-0000-0000-000000000004",
+    "legacy_object_id": "00000000-0000-0000-0000-000000000003",
+    "keys": [
+      "@type",
+      "version",
+      "features",
+      "contactMode",
+      "accent"
+    ],
+    "features": [
+      "contacts",
+      "calendar",
+      "notes",
+      "bookmarks",
+      "tasks"
+    ],
+    "contact_modes": [
+      "basic",
+      "detailed"
+    ],
+    "default_contact_mode": "basic",
+    "accents": [
+      "blue",
+      "cyan",
+      "green",
+      "amber",
+      "rose",
+      "purple"
+    ],
+    "default_accent": "blue"
+  },
+  "writes": [
+    {
+      "case": "defaults",
+      "draft": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": true
+          },
+          {
+            "key": "calendar",
+            "enabled": true
+          },
+          {
+            "key": "notes",
+            "enabled": true
+          },
+          {
+            "key": "bookmarks",
+            "enabled": true
+          },
+          {
+            "key": "tasks",
+            "enabled": true
+          }
+        ],
+        "unknown_features": [],
+        "contact_mode": "basic",
+        "accent": "blue"
+      },
+      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"blue\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":true,\"calendar\":true,\"contacts\":true,\"notes\":true,\"tasks\":true},\"version\":\"1.0\"}"
+    },
+    {
+      "case": "some features off, detailed contacts, rose",
+      "draft": {
+        "features": [
+          {
+            "key": "notes",
+            "enabled": false
+          },
+          {
+            "key": "tasks",
+            "enabled": false
+          }
+        ],
+        "unknown_features": [],
+        "contact_mode": "detailed",
+        "accent": "rose"
+      },
+      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"rose\",\"contactMode\":\"detailed\",\"features\":{\"bookmarks\":true,\"calendar\":true,\"contacts\":true,\"notes\":false,\"tasks\":false},\"version\":\"1.0\"}"
+    },
+    {
+      "case": "every feature off is repaired to the first",
+      "draft": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": false
+          },
+          {
+            "key": "calendar",
+            "enabled": false
+          },
+          {
+            "key": "notes",
+            "enabled": false
+          },
+          {
+            "key": "bookmarks",
+            "enabled": false
+          },
+          {
+            "key": "tasks",
+            "enabled": false
+          }
+        ],
+        "unknown_features": [],
+        "contact_mode": "basic",
+        "accent": "blue"
+      },
+      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"blue\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":false,\"calendar\":false,\"contacts\":true,\"notes\":false,\"tasks\":false},\"version\":\"1.0\"}"
+    },
+    {
+      "case": "an unknown mode and accent are the defaults",
+      "draft": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": true
+          },
+          {
+            "key": "calendar",
+            "enabled": true
+          },
+          {
+            "key": "notes",
+            "enabled": true
+          },
+          {
+            "key": "bookmarks",
+            "enabled": true
+          },
+          {
+            "key": "tasks",
+            "enabled": true
+          }
+        ],
+        "unknown_features": [],
+        "contact_mode": "Detailed",
+        "accent": "teal"
+      },
+      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"blue\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":true,\"calendar\":true,\"contacts\":true,\"notes\":true,\"tasks\":true},\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a feature the draft does not name is on",
+      "draft": {
+        "features": [
+          {
+            "key": "calendar",
+            "enabled": false
+          }
+        ],
+        "unknown_features": [],
+        "contact_mode": "basic",
+        "accent": "blue"
+      },
+      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"blue\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":true,\"calendar\":false,\"contacts\":true,\"notes\":true,\"tasks\":true},\"version\":\"1.0\"}"
+    },
+    {
+      "case": "flags of any type from a newer build survive, with other keys",
+      "draft": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": true
+          },
+          {
+            "key": "calendar",
+            "enabled": true
+          },
+          {
+            "key": "notes",
+            "enabled": true
+          },
+          {
+            "key": "bookmarks",
+            "enabled": true
+          },
+          {
+            "key": "tasks",
+            "enabled": true
+          }
+        ],
+        "unknown_features": [
+          {
+            "key": "journal",
+            "enabled": false
+          }
+        ],
+        "contact_mode": "basic",
+        "accent": "green",
+        "raw": "{\"@type\":\"AccountSettings\",\"version\":\"1.0\",\"features\":{\"contacts\":true,\"journal\":false,\"labs\":\"beta\",\"depth\":3},\"contactMode\":\"basic\",\"accent\":\"blue\",\"theme\":\"dark\"}"
+      },
+      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"green\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":true,\"calendar\":true,\"contacts\":true,\"depth\":3,\"journal\":false,\"labs\":\"beta\",\"notes\":true,\"tasks\":true},\"theme\":\"dark\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "an unknown flag cannot overwrite a known one",
+      "draft": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": true
+          },
+          {
+            "key": "calendar",
+            "enabled": true
+          },
+          {
+            "key": "notes",
+            "enabled": true
+          },
+          {
+            "key": "bookmarks",
+            "enabled": true
+          },
+          {
+            "key": "tasks",
+            "enabled": true
+          }
+        ],
+        "unknown_features": [
+          {
+            "key": "contacts",
+            "enabled": false
+          },
+          {
+            "key": "journal",
+            "enabled": true
+          }
+        ],
+        "contact_mode": "basic",
+        "accent": "blue"
+      },
+      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"blue\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":true,\"calendar\":true,\"contacts\":true,\"journal\":true,\"notes\":true,\"tasks\":true},\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a known feature the host has no screen for rides in the unknown list",
+      "draft": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": true
+          }
+        ],
+        "unknown_features": [
+          {
+            "key": "tasks",
+            "enabled": false
+          },
+          {
+            "key": "journal",
+            "enabled": true
+          }
+        ],
+        "contact_mode": "basic",
+        "accent": "blue"
+      },
+      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"blue\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":true,\"calendar\":true,\"contacts\":true,\"journal\":true,\"notes\":true,\"tasks\":false},\"version\":\"1.0\"}"
+    },
+    {
+      "case": "an unreadable stored payload is replaced",
+      "draft": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": true
+          },
+          {
+            "key": "calendar",
+            "enabled": true
+          },
+          {
+            "key": "notes",
+            "enabled": true
+          },
+          {
+            "key": "bookmarks",
+            "enabled": true
+          },
+          {
+            "key": "tasks",
+            "enabled": true
+          }
+        ],
+        "unknown_features": [],
+        "contact_mode": "basic",
+        "accent": "amber",
+        "raw": "not json"
+      },
+      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"amber\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":true,\"calendar\":true,\"contacts\":true,\"notes\":true,\"tasks\":true},\"version\":\"1.0\"}"
+    }
+  ],
+  "parses": [
+    {
+      "case": "empty",
+      "raw": "",
+      "settings": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": true
+          },
+          {
+            "key": "calendar",
+            "enabled": true
+          },
+          {
+            "key": "notes",
+            "enabled": true
+          },
+          {
+            "key": "bookmarks",
+            "enabled": true
+          },
+          {
+            "key": "tasks",
+            "enabled": true
+          }
+        ],
+        "unknown_features": [],
+        "contact_mode": "basic",
+        "accent": "blue",
+        "readable": true,
+        "raw": ""
+      }
+    },
+    {
+      "case": "not json",
+      "raw": "not json",
+      "settings": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": true
+          },
+          {
+            "key": "calendar",
+            "enabled": true
+          },
+          {
+            "key": "notes",
+            "enabled": true
+          },
+          {
+            "key": "bookmarks",
+            "enabled": true
+          },
+          {
+            "key": "tasks",
+            "enabled": true
+          }
+        ],
+        "unknown_features": [],
+        "contact_mode": "basic",
+        "accent": "blue",
+        "readable": true,
+        "raw": "not json"
+      }
+    },
+    {
+      "case": "an array",
+      "raw": "[]",
+      "settings": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": true
+          },
+          {
+            "key": "calendar",
+            "enabled": true
+          },
+          {
+            "key": "notes",
+            "enabled": true
+          },
+          {
+            "key": "bookmarks",
+            "enabled": true
+          },
+          {
+            "key": "tasks",
+            "enabled": true
+          }
+        ],
+        "unknown_features": [],
+        "contact_mode": "basic",
+        "accent": "blue",
+        "readable": true,
+        "raw": "[]"
+      }
+    },
+    {
+      "case": "an empty object",
+      "raw": "{}",
+      "settings": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": true
+          },
+          {
+            "key": "calendar",
+            "enabled": true
+          },
+          {
+            "key": "notes",
+            "enabled": true
+          },
+          {
+            "key": "bookmarks",
+            "enabled": true
+          },
+          {
+            "key": "tasks",
+            "enabled": true
+          }
+        ],
+        "unknown_features": [],
+        "contact_mode": "basic",
+        "accent": "blue",
+        "readable": true,
+        "raw": "{}"
+      }
+    },
+    {
+      "case": "every flag present",
+      "raw": "{\"features\":{\"contacts\":false,\"calendar\":true,\"notes\":false,\"bookmarks\":true,\"tasks\":true},\"contactMode\":\"detailed\",\"accent\":\"purple\"}",
+      "settings": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": false
+          },
+          {
+            "key": "calendar",
+            "enabled": true
+          },
+          {
+            "key": "notes",
+            "enabled": false
+          },
+          {
+            "key": "bookmarks",
+            "enabled": true
+          },
+          {
+            "key": "tasks",
+            "enabled": true
+          }
+        ],
+        "unknown_features": [],
+        "contact_mode": "detailed",
+        "accent": "purple",
+        "readable": true,
+        "raw": "{\"features\":{\"contacts\":false,\"calendar\":true,\"notes\":false,\"bookmarks\":true,\"tasks\":true},\"contactMode\":\"detailed\",\"accent\":\"purple\"}"
+      }
+    },
+    {
+      "case": "a flag that is not a boolean is on",
+      "raw": "{\"features\":{\"contacts\":\"no\",\"calendar\":0,\"notes\":null,\"bookmarks\":false}}",
+      "settings": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": true
+          },
+          {
+            "key": "calendar",
+            "enabled": true
+          },
+          {
+            "key": "notes",
+            "enabled": true
+          },
+          {
+            "key": "bookmarks",
+            "enabled": false
+          },
+          {
+            "key": "tasks",
+            "enabled": true
+          }
+        ],
+        "unknown_features": [],
+        "contact_mode": "basic",
+        "accent": "blue",
+        "readable": true,
+        "raw": "{\"features\":{\"contacts\":\"no\",\"calendar\":0,\"notes\":null,\"bookmarks\":false}}"
+      }
+    },
+    {
+      "case": "every feature off reads as the first on",
+      "raw": "{\"features\":{\"contacts\":false,\"calendar\":false,\"notes\":false,\"bookmarks\":false,\"tasks\":false}}",
+      "settings": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": true
+          },
+          {
+            "key": "calendar",
+            "enabled": false
+          },
+          {
+            "key": "notes",
+            "enabled": false
+          },
+          {
+            "key": "bookmarks",
+            "enabled": false
+          },
+          {
+            "key": "tasks",
+            "enabled": false
+          }
+        ],
+        "unknown_features": [],
+        "contact_mode": "basic",
+        "accent": "blue",
+        "readable": true,
+        "raw": "{\"features\":{\"contacts\":false,\"calendar\":false,\"notes\":false,\"bookmarks\":false,\"tasks\":false}}"
+      }
+    },
+    {
+      "case": "unknown boolean flags are kept, others are not read",
+      "raw": "{\"features\":{\"zeta\":true,\"alpha\":false,\"labs\":\"beta\",\"depth\":3}}",
+      "settings": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": true
+          },
+          {
+            "key": "calendar",
+            "enabled": true
+          },
+          {
+            "key": "notes",
+            "enabled": true
+          },
+          {
+            "key": "bookmarks",
+            "enabled": true
+          },
+          {
+            "key": "tasks",
+            "enabled": true
+          }
+        ],
+        "unknown_features": [
+          {
+            "key": "alpha",
+            "enabled": false
+          },
+          {
+            "key": "zeta",
+            "enabled": true
+          }
+        ],
+        "contact_mode": "basic",
+        "accent": "blue",
+        "readable": true,
+        "raw": "{\"features\":{\"zeta\":true,\"alpha\":false,\"labs\":\"beta\",\"depth\":3}}"
+      }
+    },
+    {
+      "case": "features that is not an object",
+      "raw": "{\"features\":[\"contacts\"],\"accent\":\"cyan\"}",
+      "settings": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": true
+          },
+          {
+            "key": "calendar",
+            "enabled": true
+          },
+          {
+            "key": "notes",
+            "enabled": true
+          },
+          {
+            "key": "bookmarks",
+            "enabled": true
+          },
+          {
+            "key": "tasks",
+            "enabled": true
+          }
+        ],
+        "unknown_features": [],
+        "contact_mode": "basic",
+        "accent": "cyan",
+        "readable": true,
+        "raw": "{\"features\":[\"contacts\"],\"accent\":\"cyan\"}"
+      }
+    },
+    {
+      "case": "mode and accent that are not strings",
+      "raw": "{\"contactMode\":1,\"accent\":[\"green\"]}",
+      "settings": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": true
+          },
+          {
+            "key": "calendar",
+            "enabled": true
+          },
+          {
+            "key": "notes",
+            "enabled": true
+          },
+          {
+            "key": "bookmarks",
+            "enabled": true
+          },
+          {
+            "key": "tasks",
+            "enabled": true
+          }
+        ],
+        "unknown_features": [],
+        "contact_mode": "basic",
+        "accent": "blue",
+        "readable": true,
+        "raw": "{\"contactMode\":1,\"accent\":[\"green\"]}"
+      }
+    },
+    {
+      "case": "an accent that is not known",
+      "raw": "{\"accent\":\"teal\"}",
+      "settings": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": true
+          },
+          {
+            "key": "calendar",
+            "enabled": true
+          },
+          {
+            "key": "notes",
+            "enabled": true
+          },
+          {
+            "key": "bookmarks",
+            "enabled": true
+          },
+          {
+            "key": "tasks",
+            "enabled": true
+          }
+        ],
+        "unknown_features": [],
+        "contact_mode": "basic",
+        "accent": "blue",
+        "readable": true,
+        "raw": "{\"accent\":\"teal\"}"
+      }
+    },
+    {
+      "case": "a mode with the wrong case",
+      "raw": "{\"contactMode\":\"Detailed\"}",
+      "settings": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": true
+          },
+          {
+            "key": "calendar",
+            "enabled": true
+          },
+          {
+            "key": "notes",
+            "enabled": true
+          },
+          {
+            "key": "bookmarks",
+            "enabled": true
+          },
+          {
+            "key": "tasks",
+            "enabled": true
+          }
+        ],
+        "unknown_features": [],
+        "contact_mode": "basic",
+        "accent": "blue",
+        "readable": true,
+        "raw": "{\"contactMode\":\"Detailed\"}"
+      }
+    },
+    {
+      "case": "a newer schema major",
+      "raw": "{\"version\":\"9.0\",\"features\":{\"notes\":false},\"accent\":\"rose\"}",
+      "settings": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": true
+          },
+          {
+            "key": "calendar",
+            "enabled": true
+          },
+          {
+            "key": "notes",
+            "enabled": false
+          },
+          {
+            "key": "bookmarks",
+            "enabled": true
+          },
+          {
+            "key": "tasks",
+            "enabled": true
+          }
+        ],
+        "unknown_features": [],
+        "contact_mode": "basic",
+        "accent": "rose",
+        "readable": false,
+        "raw": "{\"version\":\"9.0\",\"features\":{\"notes\":false},\"accent\":\"rose\"}"
+      }
+    }
+  ],
+  "toggles": [
+    {
+      "case": "switch a feature off",
+      "raw": "{}",
+      "feature": "notes",
+      "enabled": false,
+      "settings": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": true
+          },
+          {
+            "key": "calendar",
+            "enabled": true
+          },
+          {
+            "key": "notes",
+            "enabled": false
+          },
+          {
+            "key": "bookmarks",
+            "enabled": true
+          },
+          {
+            "key": "tasks",
+            "enabled": true
+          }
+        ],
+        "unknown_features": [],
+        "contact_mode": "basic",
+        "accent": "blue",
+        "readable": true,
+        "raw": "{}"
+      },
+      "can_disable": true
+    },
+    {
+      "case": "switch a feature on",
+      "raw": "{\"features\":{\"contacts\":true,\"calendar\":false,\"notes\":false,\"bookmarks\":false,\"tasks\":false,\"journal\":true}}",
+      "feature": "calendar",
+      "enabled": true,
+      "settings": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": true
+          },
+          {
+            "key": "calendar",
+            "enabled": true
+          },
+          {
+            "key": "notes",
+            "enabled": false
+          },
+          {
+            "key": "bookmarks",
+            "enabled": false
+          },
+          {
+            "key": "tasks",
+            "enabled": false
+          }
+        ],
+        "unknown_features": [
+          {
+            "key": "journal",
+            "enabled": true
+          }
+        ],
+        "contact_mode": "basic",
+        "accent": "blue",
+        "readable": true,
+        "raw": "{\"features\":{\"contacts\":true,\"calendar\":false,\"notes\":false,\"bookmarks\":false,\"tasks\":false,\"journal\":true}}"
+      },
+      "can_disable": false
+    },
+    {
+      "case": "the last feature cannot go off",
+      "raw": "{\"features\":{\"contacts\":true,\"calendar\":false,\"notes\":false,\"bookmarks\":false,\"tasks\":false,\"journal\":true}}",
+      "feature": "contacts",
+      "enabled": false,
+      "settings": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": true
+          },
+          {
+            "key": "calendar",
+            "enabled": false
+          },
+          {
+            "key": "notes",
+            "enabled": false
+          },
+          {
+            "key": "bookmarks",
+            "enabled": false
+          },
+          {
+            "key": "tasks",
+            "enabled": false
+          }
+        ],
+        "unknown_features": [
+          {
+            "key": "journal",
+            "enabled": true
+          }
+        ],
+        "contact_mode": "basic",
+        "accent": "blue",
+        "readable": true,
+        "raw": "{\"features\":{\"contacts\":true,\"calendar\":false,\"notes\":false,\"bookmarks\":false,\"tasks\":false,\"journal\":true}}"
+      },
+      "can_disable": false
+    },
+    {
+      "case": "a feature already off stays off",
+      "raw": "{\"features\":{\"contacts\":true,\"calendar\":false,\"notes\":false,\"bookmarks\":false,\"tasks\":false,\"journal\":true}}",
+      "feature": "notes",
+      "enabled": false,
+      "settings": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": true
+          },
+          {
+            "key": "calendar",
+            "enabled": false
+          },
+          {
+            "key": "notes",
+            "enabled": false
+          },
+          {
+            "key": "bookmarks",
+            "enabled": false
+          },
+          {
+            "key": "tasks",
+            "enabled": false
+          }
+        ],
+        "unknown_features": [
+          {
+            "key": "journal",
+            "enabled": true
+          }
+        ],
+        "contact_mode": "basic",
+        "accent": "blue",
+        "readable": true,
+        "raw": "{\"features\":{\"contacts\":true,\"calendar\":false,\"notes\":false,\"bookmarks\":false,\"tasks\":false,\"journal\":true}}"
+      },
+      "can_disable": false
+    },
+    {
+      "case": "an unknown feature changes nothing",
+      "raw": "{}",
+      "feature": "journal",
+      "enabled": false,
+      "settings": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": true
+          },
+          {
+            "key": "calendar",
+            "enabled": true
+          },
+          {
+            "key": "notes",
+            "enabled": true
+          },
+          {
+            "key": "bookmarks",
+            "enabled": true
+          },
+          {
+            "key": "tasks",
+            "enabled": true
+          }
+        ],
+        "unknown_features": [],
+        "contact_mode": "basic",
+        "accent": "blue",
+        "readable": true,
+        "raw": "{}"
+      },
+      "can_disable": false
+    }
+  ],
+  "refusals": [
+    {
+      "case": "saving over a newer schema major",
+      "error": "PayloadSchema"
+    }
+  ]
+}
