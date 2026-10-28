@@ -232,6 +232,84 @@ both builds already require for the wasm module and the JNI library.
 One payload per remaining content type is phase 8 work in `UNIFICATION_PLAN.md`,
 added as each type moves into `sealbook-core`.
 
+## The corpus manifest
+
+`corpus.json` is the contract for the payload fixtures: the tasks, bookmarks,
+notes, calendars, contacts and settings files under `payloads/`. A client that
+runs every table it lists, and gets every expected value, reads and writes those
+payloads as the others do. The rest of this directory (rosters, manifests,
+changes, rotation, pairing, auth, attachments) is protocol and is read by
+hand-written tests.
+
+### Shape
+
+```
+{ "fixtures": [ { "file": "payloads/tasks.json",
+                  "tables": [ { "table": "writes", "op": "task.write",
+                                "args": ["draft", "$now"], "expect": "payload" } ] } ] }
+```
+
+A fixture file is one JSON object. It may carry a `now` and any number of tables,
+each an array of rows. A row is an object with a `case` (its name, quoted in a
+failure) and the fields a table's `args` and `expect` name.
+
+For each row of each listed table a runner:
+
+1. builds the arguments, in order, from `args`: a name is that field of the row,
+   `$now` is the fixture's own `now`, and `{"value": x}` is the literal `x`. A
+   field the row lacks is `null`;
+2. calls `op` with them;
+3. compares the result with the row's `expect` field, deep-equal for JSON and
+   exact for strings. A write returns the payload text, so the comparison is on
+   bytes, and a parse returns the record as the core type serialises.
+
+An operation that refuses returns the string `error: <message>`, and the row's
+expected value is that same string.
+
+The fixture's other keys (`constants`, `refusals`, the scenario tables) are not
+in the manifest. They stay hand-written because they test a host's own
+constants or error type, not a pure function of the payload.
+
+### Operations
+
+Every `op` names one function of `sealbook-core`, in the form `<type>.<verb>`:
+`write` takes a draft (and the clock when the table passes `$now`) and returns
+the payload text, `parse` takes an id and the stored text and returns the
+record; `tone` and `normalize_due` are the two rules that are not a payload
+read or write. Rust calls them directly, the web through the wasm
+module and Android through uniffi, so a client does not implement an operation:
+it binds it. A runner that meets an `op` it does not know fails the run, so a
+fixture cannot name one a host has not wired.
+
+### What a fifth client has to do
+
+1. Bind `sealbook-core` (wasm, uniffi, or link the crate) and expose each `op`
+   in the registry.
+2. Read `corpus.json`, then each listed file, and run the loop above.
+3. Read the fixture files from this directory rather than a copy.
+
+The existing runners are `crates/sealbook-core/tests/corpus.rs`,
+`sealbook-web/src/test/corpus.test.ts` and `sealbook-app`'s `CorpusTest.kt`.
+Firefox imports the web library and does not run its own.
+
+### Forward compatibility
+
+The cases that decide whether two implementations drift live in the tables:
+
+- unknown keys at the top level, and inside contact entries, repeat rules and
+  work, date and social entries, are kept on a save;
+- a stored later minor version is kept on a save, and is not stamped back to 1.0;
+- a payload from a newer major is read for display and refused on write, with
+  `PayloadSchema`;
+- unknown keys inside `nthWeekday` are dropped today. This is the one known gap.
+
+### Adding a case
+
+Add a row to the table that covers it. No runner changes. For a new operation,
+add its line to each runner's registry and a table to the manifest. For a new
+payload type, add a fixture file, list it in `corpus.json`, and add its
+operations to the three registries.
+
 ## Adding one
 
 A fixture is only worth keeping if more than one implementation reads it, or if
