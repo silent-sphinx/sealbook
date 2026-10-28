@@ -3,7 +3,8 @@ use base64::Engine;
 use sealbook_core::{
     AppliedManifest, AttachmentLimits, AttachmentPlan, AttachmentRow, AuthRequest,
     BucketedManifest, BucketsOutcome, ChangesPage, ChunkRange, CoreAddressBook,
-    CoreAddressBookDraft, CoreBuild, CoreCalendar, CoreCalendarDraft, CoreCalendarEvent,
+    CoreAddressBookDraft, CoreBookmark, CoreBookmarkCollection, CoreBookmarkCollectionDraft,
+    CoreBookmarkDraft, CoreBuild, CoreCalendar, CoreCalendarDraft, CoreCalendarEvent,
     CoreCalendarEventDraft, CoreContact, CoreContactDraft, CoreContactProfile, CoreDevice,
     CoreDeviceSecrets, CoreDeviceState, CoreManifestEntry, CoreNote, CoreNoteDraft, CoreNotebook,
     CorePairPreview, CoreRoster, CoreRosterPin, CoreSealedRow, CoreSession, HttpRequest,
@@ -2101,6 +2102,104 @@ pub fn core_notebook_name_by_id(
     Ok(sealbook_core::notebook_name_by_id(
         &notebooks.to_rust()?.0,
         notebook_id,
+    ))
+}
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct CoreBookmarkCollectionList(pub Vec<CoreBookmarkCollection>);
+
+/// Every key a bookmark writer owns, which is the union across all four clients.
+#[wasm_bindgen]
+pub fn core_bookmark_keys() -> Vec<String> {
+    sealbook_core::BOOKMARK_KEYS
+        .iter()
+        .map(|key| key.to_string())
+        .collect()
+}
+
+#[wasm_bindgen]
+pub fn core_bookmark_collection_keys() -> Vec<String> {
+    sealbook_core::BOOKMARK_COLLECTION_KEYS
+        .iter()
+        .map(|key| key.to_string())
+        .collect()
+}
+
+#[wasm_bindgen]
+pub fn core_default_bookmark_collection_id() -> String {
+    sealbook_core::default_bookmark_collection_id()
+}
+
+#[wasm_bindgen]
+pub fn core_resolve_collection_id(collection_id: Option<String>) -> String {
+    sealbook_core::resolve_collection_id(collection_id)
+}
+
+/// The address as it should be stored: trimmed, and given `https://` when it was
+/// typed as a bare host.
+#[wasm_bindgen]
+pub fn core_normalize_url(url: &str) -> String {
+    sealbook_core::normalize_url(url)
+}
+
+#[wasm_bindgen]
+pub fn core_normalize_tags(tags: Vec<String>) -> Vec<String> {
+    sealbook_core::normalize_tags(&tags)
+}
+
+/// Reads a stored bookmark payload. Lenient throughout: a payload that will not
+/// parse comes back as a row the user can still find and delete.
+#[wasm_bindgen]
+pub fn core_bookmark_parse(id: &str, raw: &str) -> Result<Ts<CoreBookmark>, JsError> {
+    Ok(sealbook_core::bookmark_parse(id, raw).into_ts()?)
+}
+
+/// Serialises a bookmark onto `draft.raw`. `now` is the caller's clock. Throws on
+/// a payload from a newer schema major.
+#[wasm_bindgen]
+pub fn core_bookmark_write(draft: Ts<CoreBookmarkDraft>, now: &str) -> Result<String, JsError> {
+    sealbook_core::bookmark_write(&draft.to_rust()?, now).map_err(core_err)
+}
+
+#[wasm_bindgen]
+pub fn core_bookmark_collection_parse(
+    id: &str,
+    raw: &str,
+) -> Result<Ts<CoreBookmarkCollection>, JsError> {
+    Ok(sealbook_core::bookmark_collection_parse(id, raw).into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_bookmark_collection_write(
+    draft: Ts<CoreBookmarkCollectionDraft>,
+) -> Result<String, JsError> {
+    sealbook_core::bookmark_collection_write(&draft.to_rust()?).map_err(core_err)
+}
+
+/// The name to show for a bookmark's collection. One that is gone shows the
+/// default collection's name rather than nothing.
+#[wasm_bindgen]
+pub fn core_bookmark_collection_name_by_id(
+    collections: Ts<CoreBookmarkCollectionList>,
+    collection_id: Option<String>,
+) -> Result<String, JsError> {
+    Ok(sealbook_core::bookmark_collection_name_by_id(
+        &collections.to_rust()?.0,
+        collection_id,
+    ))
+}
+
+/// A collection's colour: its root's explicit colour, else one hashed from the
+/// root's id.
+#[wasm_bindgen]
+pub fn core_bookmark_collection_tone(
+    collections: Ts<CoreBookmarkCollectionList>,
+    id: &str,
+) -> Result<String, JsError> {
+    Ok(sealbook_core::bookmark_collection_tone(
+        &collections.to_rust()?.0,
+        id,
     ))
 }
 

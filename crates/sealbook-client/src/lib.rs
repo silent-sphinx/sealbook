@@ -32,12 +32,15 @@ pub use tls::{certificate_from_pem, pq_tls_config, TrustAnchors};
 /// The content-payload decisions, straight from core: every client writes a
 /// note through these, so the CLI has no key list of its own.
 pub use sealbook_core::{
-    address_book_name_by_id, address_book_parse, address_book_write, calendar_name_by_id,
-    calendar_parse, calendar_write, contact_parse, contact_write, event_parse, event_write,
-    note_parse, note_write, notebook_name_by_id, notebook_parse, notebook_write, CoreAddressBook,
-    CoreAddressBookDraft, CoreCalendar, CoreCalendarDraft, CoreCalendarEvent,
-    CoreCalendarEventDraft, CoreChannelKind, CoreContact, CoreContactChannel, CoreContactDraft,
-    CoreNote, CoreNoteAttachment, CoreNoteDraft, CoreNotebook, CoreRecurrence,
+    address_book_name_by_id, address_book_parse, address_book_write,
+    bookmark_collection_name_by_id, bookmark_collection_parse, bookmark_collection_tone,
+    bookmark_collection_write, bookmark_parse, bookmark_write, calendar_name_by_id, calendar_parse,
+    calendar_write, contact_parse, contact_write, event_parse, event_write, note_parse, note_write,
+    notebook_name_by_id, notebook_parse, notebook_write, CoreAddressBook, CoreAddressBookDraft,
+    CoreBookmark, CoreBookmarkCollection, CoreBookmarkCollectionDraft, CoreBookmarkDraft,
+    CoreCalendar, CoreCalendarDraft, CoreCalendarEvent, CoreCalendarEventDraft, CoreChannelKind,
+    CoreContact, CoreContactChannel, CoreContactDraft, CoreNote, CoreNoteAttachment, CoreNoteDraft,
+    CoreNotebook, CoreRecurrence,
 };
 
 pub use sealbook_protocol::{

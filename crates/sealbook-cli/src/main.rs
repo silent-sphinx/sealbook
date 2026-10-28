@@ -16,12 +16,12 @@ use rand::RngCore;
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::CertificateDer;
 use sealbook_client::{
-    contact_parse, contact_write, event_parse, merge_payload, note_parse, note_write,
-    CoreAddressBookDraft, CoreCalendarDraft, CoreCalendarEventDraft, CoreChannelKind,
-    CoreContactChannel, CoreContactDraft, CoreNoteDraft, ExportedObject, LocalState,
-    SealbookClient, ACCOUNT_EXPORT_TYPE, ACCOUNT_EXPORT_VERSION, DEFAULT_ADDRESS_BOOK_ID,
+    contact_parse, contact_write, event_parse, note_parse, note_write, CoreAddressBookDraft,
+    CoreCalendarDraft, CoreCalendarEventDraft, CoreChannelKind, CoreContactChannel,
+    CoreContactDraft, CoreNoteDraft, ExportedObject, LocalState, SealbookClient,
+    ACCOUNT_EXPORT_TYPE, ACCOUNT_EXPORT_VERSION, DEFAULT_ADDRESS_BOOK_ID,
     DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_BOOKMARK_COLLECTION_NAME, DEFAULT_CALENDAR_COLOR,
-    DEFAULT_CALENDAR_ID, DEFAULT_CALENDAR_NAME, DEFAULT_NOTEBOOK_NAME, PAYLOAD_SCHEMA_VERSION,
+    DEFAULT_CALENDAR_ID, DEFAULT_CALENDAR_NAME, DEFAULT_NOTEBOOK_NAME,
 };
 use sha2::{Digest, Sha256};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
@@ -710,8 +710,7 @@ async fn main() -> Result<()> {
                         title.as_deref(),
                         collection.unwrap_or(default_collection),
                         None,
-                        None,
-                    );
+                    )?;
                     let revision = client
                         .put_bookmark(id, &bookmark)
                         .await
@@ -724,22 +723,15 @@ async fn main() -> Result<()> {
                     title,
                     collection,
                 } => {
-                    // Only a client knows when a bookmark was saved: the server
-                    // keeps no user timestamps, so an update that does not carry
-                    // the original forward loses it.
                     let existing = find_bookmark(&mut client, id).await?;
-                    let created = bookmark_field(&existing, "createdAt");
-                    // Merged onto the stored bookmark, so `notes`, `tags` and
-                    // anything newer survive an edit made from here.
                     let bookmark = bookmark_json(
                         &url,
                         title.as_deref(),
                         collection.unwrap_or_else(|| {
                             bookmark_collection_id(&existing, default_collection)
                         }),
-                        created.as_deref(),
                         Some(&existing),
-                    );
+                    )?;
                     let revision = client
                         .put_bookmark(id, &bookmark)
                         .await
@@ -1134,48 +1126,28 @@ async fn find_bookmark_collection(client: &mut SealbookClient, id: Uuid) -> Resu
         .with_context(|| format!("no collection with id {id}"))
 }
 
-/// Every key this CLI writes for a bookmark.
+/// Writes a bookmark through core, onto the stored one when there is one.
 ///
-/// Shorter than the web client's list: `notes` and `tags` are the web's to
-/// manage, and leaving them out of this set is what carries them through an edit
-/// made here.
-const BOOKMARK_KEYS: &[&str] = &[
-    "@type",
-    "version",
-    "url",
-    "title",
-    "collectionId",
-    "createdAt",
-    "updatedAt",
-];
-
+/// The stored bookmark is read into core's record and handed back whole, so
+/// `notes`, `tags` and anything a newer client added travel through the edit.
+/// A title left out keeps the stored one, and on a new bookmark is left empty:
+/// the address is what a reader lists it by, and is not written as a title.
 fn bookmark_json(
     url: &str,
     title: Option<&str>,
     collection_id: Uuid,
-    created_at: Option<&str>,
     previous: Option<&str>,
-) -> String {
-    let now = OffsetDateTime::now_utc()
-        .format(&Rfc3339)
+) -> Result<String> {
+    let now = OffsetDateTime::now_utc().format(&Rfc3339)?;
+    let mut draft = previous
+        .map(|raw| sealbook_client::bookmark_parse("", raw).draft())
         .unwrap_or_default();
-    // An omitted title falls back to the URL rather than to an empty string, so
-    // a bookmark added from here still lists as something readable.
-    let title = title.map(str::trim).filter(|title| !title.is_empty());
-    merge_payload(
-        previous,
-        serde_json::json!({
-            "@type": "Bookmark",
-            "version": PAYLOAD_SCHEMA_VERSION,
-            "url": url.trim(),
-            "title": title.unwrap_or(url.trim()),
-            "collectionId": collection_id.to_string(),
-            "createdAt": created_at.unwrap_or(&now),
-            "updatedAt": now,
-        }),
-        BOOKMARK_KEYS,
-    )
-    .to_string()
+    draft.url = url.to_string();
+    if let Some(title) = title.map(str::trim).filter(|title| !title.is_empty()) {
+        draft.title = title.to_string();
+    }
+    draft.collection_id = collection_id.to_string();
+    Ok(sealbook_client::bookmark_write(&draft, &now)?)
 }
 
 fn bookmark_field(json: &str, field: &str) -> Option<String> {
@@ -1630,6 +1602,7 @@ fn validate_state_permissions(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sealbook_client::PAYLOAD_SCHEMA_VERSION;
 
     /// The seeds have to leave the blocks they were in, not just the name.
     #[test]
@@ -1742,13 +1715,7 @@ mod tests {
     #[test]
     fn a_bookmark_carries_its_url_title_and_collection() {
         let collection = Uuid::from_u128(5);
-        let json = bookmark_json(
-            "https://example.com/a",
-            Some("Example"),
-            collection,
-            None,
-            None,
-        );
+        let json = bookmark_json("example.com/a", Some("Example"), collection, None).unwrap();
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(value["@type"], "Bookmark");
         assert_eq!(value["version"], PAYLOAD_SCHEMA_VERSION);
@@ -1765,40 +1732,39 @@ mod tests {
     }
 
     #[test]
-    fn a_bookmark_without_a_title_falls_back_to_its_url() {
+    fn a_bookmark_without_a_title_is_not_titled_with_its_url() {
         for title in [None, Some(""), Some("   ")] {
-            let json = bookmark_json(
-                "https://example.com/b",
-                title,
-                Uuid::from_u128(5),
-                None,
-                None,
-            );
+            let json =
+                bookmark_json("https://example.com/b", title, Uuid::from_u128(5), None).unwrap();
             let value: serde_json::Value = serde_json::from_str(&json).unwrap();
-            assert_eq!(value["title"], "https://example.com/b");
+            assert_eq!(value["title"], "");
         }
     }
 
     #[test]
-    fn a_bookmark_update_keeps_the_original_creation_time() {
-        let created = "2020-05-04T03:02:01Z";
+    fn a_bookmark_update_keeps_the_original_creation_time_and_title() {
+        let stored = serde_json::json!({
+            "@type": "Bookmark",
+            "url": "https://example.com/c",
+            "title": "kept",
+            "createdAt": "2020-05-04T03:02:01Z",
+        })
+        .to_string();
         let json = bookmark_json(
             "https://example.com/c",
-            Some("t"),
-            Uuid::from_u128(5),
-            Some(created),
             None,
-        );
+            Uuid::from_u128(5),
+            Some(&stored),
+        )
+        .unwrap();
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(value["createdAt"], created);
-        assert_ne!(value["updatedAt"], created);
+        assert_eq!(value["createdAt"], "2020-05-04T03:02:01Z");
+        assert_eq!(value["title"], "kept");
+        assert_ne!(value["updatedAt"], "2020-05-04T03:02:01Z");
     }
 
     #[test]
     fn a_bookmark_update_keeps_the_fields_this_cli_does_not_write() {
-        // `notes` and `tags` are the web client's, and a newer build may add
-        // more. Rebuilding the payload from the fields this command takes would
-        // drop all of them, which is silent data loss.
         let stored = serde_json::json!({
             "@type": "Bookmark",
             "version": "1.0",
@@ -1817,9 +1783,9 @@ mod tests {
             "https://example.com/new",
             Some("new"),
             Uuid::from_u128(5),
-            Some("2020-05-04T03:02:01Z"),
             Some(&stored),
-        );
+        )
+        .unwrap();
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(value["url"], "https://example.com/new");
         assert_eq!(value["title"], "new");

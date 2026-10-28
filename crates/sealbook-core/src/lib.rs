@@ -19,6 +19,7 @@
 
 mod attachments;
 mod auth;
+mod bookmarks;
 mod calendars;
 mod contact_profile;
 mod contacts;
@@ -67,6 +68,15 @@ pub use auth::{
     register_finish_request, register_start_accept, register_start_request, AuthRefusal,
     AuthRequest, CoreDeviceSecrets, LoggedIn, LoginStarting, OpaqueStart, PasswordChange,
     PasswordChangeStarted, RecoverStarted, Recovering, RegisterIdentity, Registering,
+};
+pub use bookmarks::{
+    bookmark_collection_name_by_id, bookmark_collection_parse, bookmark_collection_tone,
+    bookmark_collection_write, bookmark_parse, bookmark_write, default_bookmark_collection_id,
+    normalize_tags, normalize_url, resolve_collection_id, CoreBookmark, CoreBookmarkCollection,
+    CoreBookmarkCollectionDraft, CoreBookmarkDraft, BOOKMARK_COLLECTION_CONTENT_TYPE,
+    BOOKMARK_COLLECTION_KEYS, BOOKMARK_CONTENT_TYPE, BOOKMARK_KEYS,
+    DEFAULT_BOOKMARK_COLLECTION_NAME, MAX_BOOKMARK_TAGS, UNREADABLE_BOOKMARK_TITLE,
+    UNTITLED_BOOKMARK_TITLE, UNTITLED_COLLECTION_NAME,
 };
 pub use calendars::{
     calendar_name_by_id, calendar_parse, calendar_write, default_calendar_id, event_parse,

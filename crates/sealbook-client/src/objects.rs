@@ -410,27 +410,21 @@ impl SealbookClient {
         Ok(out)
     }
 
-    /// Writes a collection, carrying through any field this build does not own.
-    ///
-    /// `parentId` is the one that matters: collections nest, but the nesting is
-    /// the web client's to manage, so a rename from here must not flatten the
-    /// tree. `previous` is the stored payload, or `None` when creating.
+    /// Writes a collection. `previous` is the stored payload when this is a
+    /// rename, so `parentId`, `color` and any key a later build added survive it.
     pub async fn put_bookmark_collection(
         &mut self,
         object_id: Uuid,
         name: &str,
         previous: Option<&str>,
     ) -> Result<u64, ClientError> {
-        let plaintext = sealbook_protocol::merge_payload(
-            previous,
-            serde_json::json!({
-                "@type": "BookmarkCollection",
-                "version": sealbook_protocol::PAYLOAD_SCHEMA_VERSION,
-                "name": name,
-            }),
-            BOOKMARK_COLLECTION_KEYS,
-        )
-        .to_string();
+        let mut draft = previous
+            .map(|raw| {
+                sealbook_core::bookmark_collection_parse(&object_id.to_string(), raw).draft()
+            })
+            .unwrap_or_default();
+        draft.name = name.to_string();
+        let plaintext = sealbook_core::bookmark_collection_write(&draft)?;
         self.put_sealed(
             object_id,
             plaintext.as_bytes(),
@@ -470,7 +464,10 @@ impl SealbookClient {
             if obj.content_type != BOOKMARK_COLLECTION_CONTENT_TYPE {
                 continue;
             }
-            out.push((obj.id, container_name(&obj.plaintext)));
+            out.push((
+                obj.id,
+                sealbook_core::bookmark_collection_parse(&obj.id.to_string(), &obj.plaintext).name,
+            ));
         }
         out.sort_by(|a, b| {
             if a.0 == DEFAULT_BOOKMARK_COLLECTION_ID {
@@ -842,27 +839,6 @@ impl SealbookClient {
         self.accept_manifest_seq(written_seq)?;
         Ok(resp.latest_revision)
     }
-}
-
-/// Every key a collection write from here owns.
-///
-/// Deliberately short: `parentId` is the web client's, and leaving it out is
-/// what carries a collection's place in the tree through a rename made here.
-const BOOKMARK_COLLECTION_KEYS: &[&str] = &["@type", "version", "name"];
-
-/// The `name` of any container object: address book, notebook or collection.
-pub(crate) fn container_name(plaintext: &str) -> String {
-    serde_json::from_str::<serde_json::Value>(plaintext)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("name")
-                .and_then(|name| name.as_str())
-                .map(str::trim)
-                .filter(|name| !name.is_empty())
-                .map(ToOwned::to_owned)
-        })
-        .unwrap_or_else(|| "Untitled".to_string())
 }
 
 #[cfg(test)]

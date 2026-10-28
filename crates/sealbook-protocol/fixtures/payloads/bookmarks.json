@@ -1,0 +1,681 @@
+{
+  "now": "2026-10-28T12:00:00Z",
+  "constants": {
+    "bookmark_content_type": "application/sealbook.bookmark+json",
+    "collection_content_type": "application/sealbook.bookmark-collection+json",
+    "bookmark_keys": [
+      "@type",
+      "version",
+      "url",
+      "title",
+      "notes",
+      "tags",
+      "collectionId",
+      "createdAt",
+      "updatedAt"
+    ],
+    "collection_keys": [
+      "@type",
+      "version",
+      "name",
+      "parentId",
+      "color"
+    ],
+    "default_collection_id": "00000000-0000-0000-0000-000000000005",
+    "default_collection_name": "Default Collection",
+    "untitled_bookmark_title": "Untitled bookmark",
+    "unreadable_bookmark_title": "Unreadable bookmark",
+    "untitled_collection_name": "Untitled",
+    "max_tags": 32
+  },
+  "writes": [
+    {
+      "case": "a bookmark written from scratch",
+      "draft": {
+        "url": "https://example.com/a",
+        "title": "Example",
+        "notes": "",
+        "tags": [],
+        "collection_id": "00000000-0000-0000-0000-000000000005"
+      },
+      "payload": "{\"@type\":\"Bookmark\",\"collectionId\":\"00000000-0000-0000-0000-000000000005\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"title\":\"Example\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"url\":\"https://example.com/a\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a bare host is given a scheme, and a title is trimmed",
+      "draft": {
+        "url": "  example.com/a  ",
+        "title": "  Example  ",
+        "notes": "",
+        "tags": [],
+        "collection_id": "00000000-0000-0000-0000-000000000005"
+      },
+      "payload": "{\"@type\":\"Bookmark\",\"collectionId\":\"00000000-0000-0000-0000-000000000005\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"title\":\"Example\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"url\":\"https://example.com/a\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "no title is written when none was given",
+      "draft": {
+        "url": "https://example.com",
+        "title": "",
+        "notes": "",
+        "tags": [],
+        "collection_id": "00000000-0000-0000-0000-000000000005"
+      },
+      "payload": "{\"@type\":\"Bookmark\",\"collectionId\":\"00000000-0000-0000-0000-000000000005\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"title\":\"\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"url\":\"https://example.com\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a blank collection resolves to the default",
+      "draft": {
+        "url": "https://example.com",
+        "title": "",
+        "notes": "",
+        "tags": [],
+        "collection_id": "   "
+      },
+      "payload": "{\"@type\":\"Bookmark\",\"collectionId\":\"00000000-0000-0000-0000-000000000005\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"title\":\"\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"url\":\"https://example.com\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "notes and tags, the tags trimmed and de-duplicated",
+      "draft": {
+        "url": "https://example.com",
+        "title": "",
+        "notes": "  a note  ",
+        "tags": [
+          "Rust",
+          " rust ",
+          "",
+          "web"
+        ],
+        "collection_id": "00000000-0000-0000-0000-000000000005"
+      },
+      "payload": "{\"@type\":\"Bookmark\",\"collectionId\":\"00000000-0000-0000-0000-000000000005\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"notes\":\"a note\",\"tags\":[\"Rust\",\"web\"],\"title\":\"\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"url\":\"https://example.com\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "an edit keeps a key a later build added",
+      "draft": {
+        "url": "https://example.com/a",
+        "title": "Renamed",
+        "notes": "worth keeping",
+        "tags": [
+          "rust",
+          "web"
+        ],
+        "collection_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "created_at": "2026-01-01T00:00:00Z",
+        "raw": "{\"@type\":\"Bookmark\",\"collectionId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"notes\":\"worth keeping\",\"somethingNewer\":{\"from\":\"a later build\"},\"tags\":[\"rust\",\"web\"],\"title\":\"Example\",\"updatedAt\":\"2026-02-02T00:00:00Z\",\"url\":\"https://example.com/a\",\"version\":\"1.0\"}"
+      },
+      "payload": "{\"@type\":\"Bookmark\",\"collectionId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"notes\":\"worth keeping\",\"somethingNewer\":{\"from\":\"a later build\"},\"tags\":[\"rust\",\"web\"],\"title\":\"Renamed\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"url\":\"https://example.com/a\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "an edit that clears the notes and tags",
+      "draft": {
+        "url": "https://example.com/a",
+        "title": "Example",
+        "notes": "",
+        "tags": [],
+        "collection_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "created_at": "2026-01-01T00:00:00Z",
+        "raw": "{\"@type\":\"Bookmark\",\"collectionId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"notes\":\"worth keeping\",\"somethingNewer\":{\"from\":\"a later build\"},\"tags\":[\"rust\",\"web\"],\"title\":\"Example\",\"updatedAt\":\"2026-02-02T00:00:00Z\",\"url\":\"https://example.com/a\",\"version\":\"1.0\"}"
+      },
+      "payload": "{\"@type\":\"Bookmark\",\"collectionId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"somethingNewer\":{\"from\":\"a later build\"},\"title\":\"Example\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"url\":\"https://example.com/a\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "an untitled bookmark saved unchanged stays untitled",
+      "draft": {
+        "url": "https://example.com",
+        "title": "",
+        "notes": "",
+        "tags": [],
+        "collection_id": "00000000-0000-0000-0000-000000000005",
+        "created_at": "2026-01-01T00:00:00Z",
+        "raw": "{\"@type\":\"Bookmark\",\"url\":\"https://example.com\",\"createdAt\":\"2026-01-01T00:00:00Z\"}"
+      },
+      "payload": "{\"@type\":\"Bookmark\",\"collectionId\":\"00000000-0000-0000-0000-000000000005\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"title\":\"\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"url\":\"https://example.com\",\"version\":\"1.0\"}"
+    }
+  ],
+  "parses": [
+    {
+      "case": "the richest payload any client writes",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{\"@type\":\"Bookmark\",\"collectionId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"notes\":\"worth keeping\",\"somethingNewer\":{\"from\":\"a later build\"},\"tags\":[\"rust\",\"web\"],\"title\":\"Example\",\"updatedAt\":\"2026-02-02T00:00:00Z\",\"url\":\"https://example.com/a\",\"version\":\"1.0\"}",
+      "bookmark": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "url": "https://example.com/a",
+        "title": "Example",
+        "derived_title": false,
+        "notes": "worth keeping",
+        "tags": [
+          "rust",
+          "web"
+        ],
+        "collection_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-02-02T00:00:00Z",
+        "readable": true,
+        "raw": "{\"@type\":\"Bookmark\",\"collectionId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"notes\":\"worth keeping\",\"somethingNewer\":{\"from\":\"a later build\"},\"tags\":[\"rust\",\"web\"],\"title\":\"Example\",\"updatedAt\":\"2026-02-02T00:00:00Z\",\"url\":\"https://example.com/a\",\"version\":\"1.0\"}"
+      }
+    },
+    {
+      "case": "an empty object",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{}",
+      "bookmark": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "url": "",
+        "title": "Untitled bookmark",
+        "derived_title": true,
+        "notes": "",
+        "tags": [],
+        "collection_id": "00000000-0000-0000-0000-000000000005",
+        "readable": true,
+        "raw": "{}"
+      }
+    },
+    {
+      "case": "a title that is only space falls back to the address",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{\"url\":\"https://example.com\",\"title\":\"   \"}",
+      "bookmark": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "url": "https://example.com",
+        "title": "https://example.com",
+        "derived_title": true,
+        "notes": "",
+        "tags": [],
+        "collection_id": "00000000-0000-0000-0000-000000000005",
+        "readable": true,
+        "raw": "{\"url\":\"https://example.com\",\"title\":\"   \"}"
+      }
+    },
+    {
+      "case": "a payload that is not JSON at all",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "never a bookmark",
+      "bookmark": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "url": "",
+        "title": "Unreadable bookmark",
+        "derived_title": true,
+        "notes": "",
+        "tags": [],
+        "collection_id": "00000000-0000-0000-0000-000000000005",
+        "readable": true,
+        "raw": "never a bookmark"
+      }
+    },
+    {
+      "case": "a payload that is JSON but not an object",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "[1,2]",
+      "bookmark": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "url": "",
+        "title": "Unreadable bookmark",
+        "derived_title": true,
+        "notes": "",
+        "tags": [],
+        "collection_id": "00000000-0000-0000-0000-000000000005",
+        "readable": true,
+        "raw": "[1,2]"
+      }
+    },
+    {
+      "case": "tags that are not all strings",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{\"url\":\"https://example.com\",\"tags\":[\"a\",{\"x\":1},3,\"A\",\"b\"]}",
+      "bookmark": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "url": "https://example.com",
+        "title": "https://example.com",
+        "derived_title": true,
+        "notes": "",
+        "tags": [
+          "a",
+          "b"
+        ],
+        "collection_id": "00000000-0000-0000-0000-000000000005",
+        "readable": true,
+        "raw": "{\"url\":\"https://example.com\",\"tags\":[\"a\",{\"x\":1},3,\"A\",\"b\"]}"
+      }
+    },
+    {
+      "case": "tags that are not an array",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{\"url\":\"https://example.com\",\"tags\":{\"a\":1}}",
+      "bookmark": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "url": "https://example.com",
+        "title": "https://example.com",
+        "derived_title": true,
+        "notes": "",
+        "tags": [],
+        "collection_id": "00000000-0000-0000-0000-000000000005",
+        "readable": true,
+        "raw": "{\"url\":\"https://example.com\",\"tags\":{\"a\":1}}"
+      }
+    },
+    {
+      "case": "notes of the wrong type",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{\"url\":\"https://example.com\",\"notes\":42}",
+      "bookmark": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "url": "https://example.com",
+        "title": "https://example.com",
+        "derived_title": true,
+        "notes": "",
+        "tags": [],
+        "collection_id": "00000000-0000-0000-0000-000000000005",
+        "readable": true,
+        "raw": "{\"url\":\"https://example.com\",\"notes\":42}"
+      }
+    },
+    {
+      "case": "a payload from a newer schema major",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{\"@type\":\"Bookmark\",\"version\":\"2.0\",\"url\":\"https://example.com\"}",
+      "bookmark": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "url": "https://example.com",
+        "title": "https://example.com",
+        "derived_title": true,
+        "notes": "",
+        "tags": [],
+        "collection_id": "00000000-0000-0000-0000-000000000005",
+        "readable": false,
+        "raw": "{\"@type\":\"Bookmark\",\"version\":\"2.0\",\"url\":\"https://example.com\"}"
+      }
+    }
+  ],
+  "collection_writes": [
+    {
+      "case": "a collection created from scratch",
+      "draft": {
+        "name": "Work"
+      },
+      "payload": "{\"@type\":\"BookmarkCollection\",\"name\":\"Work\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a name with surrounding space, under another collection",
+      "draft": {
+        "name": "  Work  ",
+        "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+      },
+      "payload": "{\"@type\":\"BookmarkCollection\",\"name\":\"Work\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a coloured top-level collection",
+      "draft": {
+        "name": "Work",
+        "color": "#112233"
+      },
+      "payload": "{\"@type\":\"BookmarkCollection\",\"color\":\"#112233\",\"name\":\"Work\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a rename keeps the parent, the colour and a later build's key",
+      "draft": {
+        "name": "Renamed",
+        "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "color": "#112233",
+        "raw": "{\"@type\":\"BookmarkCollection\",\"color\":\"#112233\",\"name\":\"Work\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sortKey\":\"from a later build\",\"version\":\"1.0\"}"
+      },
+      "payload": "{\"@type\":\"BookmarkCollection\",\"color\":\"#112233\",\"name\":\"Renamed\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sortKey\":\"from a later build\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "moving to the top level clears the parent",
+      "draft": {
+        "name": "Work",
+        "color": "#112233",
+        "raw": "{\"@type\":\"BookmarkCollection\",\"color\":\"#112233\",\"name\":\"Work\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sortKey\":\"from a later build\",\"version\":\"1.0\"}"
+      },
+      "payload": "{\"@type\":\"BookmarkCollection\",\"color\":\"#112233\",\"name\":\"Work\",\"sortKey\":\"from a later build\",\"version\":\"1.0\"}"
+    }
+  ],
+  "collection_parses": [
+    {
+      "case": "a named, nested, coloured collection",
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "raw": "{\"name\":\"  Work  \",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"color\":\"#112233\"}",
+      "collection": {
+        "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "name": "Work",
+        "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "color": "#112233",
+        "readable": true,
+        "raw": "{\"name\":\"  Work  \",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"color\":\"#112233\"}"
+      }
+    },
+    {
+      "case": "the default collection, unnamed",
+      "id": "00000000-0000-0000-0000-000000000005",
+      "raw": "{}",
+      "collection": {
+        "id": "00000000-0000-0000-0000-000000000005",
+        "name": "Default Collection",
+        "readable": true,
+        "raw": "{}"
+      }
+    },
+    {
+      "case": "any other collection, unnamed",
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "raw": "not json",
+      "collection": {
+        "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "name": "Untitled",
+        "readable": true,
+        "raw": "not json"
+      }
+    },
+    {
+      "case": "an empty parent and colour read as none",
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "raw": "{\"name\":\"Work\",\"parentId\":\"  \",\"color\":\"\"}",
+      "collection": {
+        "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "name": "Work",
+        "readable": true,
+        "raw": "{\"name\":\"Work\",\"parentId\":\"  \",\"color\":\"\"}"
+      }
+    }
+  ],
+  "tones": [
+    {
+      "case": "a root with an explicit colour",
+      "collections": [
+        {
+          "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "name": "Root",
+          "color": "#112233",
+          "readable": true,
+          "raw": "{\"name\":\"Root\",\"color\":\"#112233\"}"
+        },
+        {
+          "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "name": "Child",
+          "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "readable": true,
+          "raw": "{\"name\":\"Child\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"
+        },
+        {
+          "id": "plain",
+          "name": "Plain",
+          "readable": true,
+          "raw": "{\"name\":\"Plain\"}"
+        },
+        {
+          "id": "orphan",
+          "name": "Orphan",
+          "parent_id": "missing",
+          "readable": true,
+          "raw": "{\"name\":\"Orphan\",\"parentId\":\"missing\"}"
+        },
+        {
+          "id": "loop-a",
+          "name": "A",
+          "parent_id": "loop-b",
+          "readable": true,
+          "raw": "{\"name\":\"A\",\"parentId\":\"loop-b\"}"
+        },
+        {
+          "id": "loop-b",
+          "name": "B",
+          "parent_id": "loop-a",
+          "readable": true,
+          "raw": "{\"name\":\"B\",\"parentId\":\"loop-a\"}"
+        }
+      ],
+      "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "tone": "#112233"
+    },
+    {
+      "case": "a child takes its root's colour",
+      "collections": [
+        {
+          "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "name": "Root",
+          "color": "#112233",
+          "readable": true,
+          "raw": "{\"name\":\"Root\",\"color\":\"#112233\"}"
+        },
+        {
+          "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "name": "Child",
+          "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "readable": true,
+          "raw": "{\"name\":\"Child\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"
+        },
+        {
+          "id": "plain",
+          "name": "Plain",
+          "readable": true,
+          "raw": "{\"name\":\"Plain\"}"
+        },
+        {
+          "id": "orphan",
+          "name": "Orphan",
+          "parent_id": "missing",
+          "readable": true,
+          "raw": "{\"name\":\"Orphan\",\"parentId\":\"missing\"}"
+        },
+        {
+          "id": "loop-a",
+          "name": "A",
+          "parent_id": "loop-b",
+          "readable": true,
+          "raw": "{\"name\":\"A\",\"parentId\":\"loop-b\"}"
+        },
+        {
+          "id": "loop-b",
+          "name": "B",
+          "parent_id": "loop-a",
+          "readable": true,
+          "raw": "{\"name\":\"B\",\"parentId\":\"loop-a\"}"
+        }
+      ],
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "tone": "#112233"
+    },
+    {
+      "case": "a root with none is hashed from its id",
+      "collections": [
+        {
+          "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "name": "Root",
+          "color": "#112233",
+          "readable": true,
+          "raw": "{\"name\":\"Root\",\"color\":\"#112233\"}"
+        },
+        {
+          "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "name": "Child",
+          "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "readable": true,
+          "raw": "{\"name\":\"Child\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"
+        },
+        {
+          "id": "plain",
+          "name": "Plain",
+          "readable": true,
+          "raw": "{\"name\":\"Plain\"}"
+        },
+        {
+          "id": "orphan",
+          "name": "Orphan",
+          "parent_id": "missing",
+          "readable": true,
+          "raw": "{\"name\":\"Orphan\",\"parentId\":\"missing\"}"
+        },
+        {
+          "id": "loop-a",
+          "name": "A",
+          "parent_id": "loop-b",
+          "readable": true,
+          "raw": "{\"name\":\"A\",\"parentId\":\"loop-b\"}"
+        },
+        {
+          "id": "loop-b",
+          "name": "B",
+          "parent_id": "loop-a",
+          "readable": true,
+          "raw": "{\"name\":\"B\",\"parentId\":\"loop-a\"}"
+        }
+      ],
+      "id": "plain",
+      "tone": "#bb9af7"
+    },
+    {
+      "case": "a collection whose parent is gone is its own root",
+      "collections": [
+        {
+          "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "name": "Root",
+          "color": "#112233",
+          "readable": true,
+          "raw": "{\"name\":\"Root\",\"color\":\"#112233\"}"
+        },
+        {
+          "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "name": "Child",
+          "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "readable": true,
+          "raw": "{\"name\":\"Child\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"
+        },
+        {
+          "id": "plain",
+          "name": "Plain",
+          "readable": true,
+          "raw": "{\"name\":\"Plain\"}"
+        },
+        {
+          "id": "orphan",
+          "name": "Orphan",
+          "parent_id": "missing",
+          "readable": true,
+          "raw": "{\"name\":\"Orphan\",\"parentId\":\"missing\"}"
+        },
+        {
+          "id": "loop-a",
+          "name": "A",
+          "parent_id": "loop-b",
+          "readable": true,
+          "raw": "{\"name\":\"A\",\"parentId\":\"loop-b\"}"
+        },
+        {
+          "id": "loop-b",
+          "name": "B",
+          "parent_id": "loop-a",
+          "readable": true,
+          "raw": "{\"name\":\"B\",\"parentId\":\"loop-a\"}"
+        }
+      ],
+      "id": "orphan",
+      "tone": "#7aa2f7"
+    },
+    {
+      "case": "a loop ends the walk",
+      "collections": [
+        {
+          "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "name": "Root",
+          "color": "#112233",
+          "readable": true,
+          "raw": "{\"name\":\"Root\",\"color\":\"#112233\"}"
+        },
+        {
+          "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "name": "Child",
+          "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "readable": true,
+          "raw": "{\"name\":\"Child\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"
+        },
+        {
+          "id": "plain",
+          "name": "Plain",
+          "readable": true,
+          "raw": "{\"name\":\"Plain\"}"
+        },
+        {
+          "id": "orphan",
+          "name": "Orphan",
+          "parent_id": "missing",
+          "readable": true,
+          "raw": "{\"name\":\"Orphan\",\"parentId\":\"missing\"}"
+        },
+        {
+          "id": "loop-a",
+          "name": "A",
+          "parent_id": "loop-b",
+          "readable": true,
+          "raw": "{\"name\":\"A\",\"parentId\":\"loop-b\"}"
+        },
+        {
+          "id": "loop-b",
+          "name": "B",
+          "parent_id": "loop-a",
+          "readable": true,
+          "raw": "{\"name\":\"B\",\"parentId\":\"loop-a\"}"
+        }
+      ],
+      "id": "loop-a",
+      "tone": "#9ece6a"
+    },
+    {
+      "case": "an id in no list is hashed",
+      "collections": [
+        {
+          "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "name": "Root",
+          "color": "#112233",
+          "readable": true,
+          "raw": "{\"name\":\"Root\",\"color\":\"#112233\"}"
+        },
+        {
+          "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "name": "Child",
+          "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "readable": true,
+          "raw": "{\"name\":\"Child\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"
+        },
+        {
+          "id": "plain",
+          "name": "Plain",
+          "readable": true,
+          "raw": "{\"name\":\"Plain\"}"
+        },
+        {
+          "id": "orphan",
+          "name": "Orphan",
+          "parent_id": "missing",
+          "readable": true,
+          "raw": "{\"name\":\"Orphan\",\"parentId\":\"missing\"}"
+        },
+        {
+          "id": "loop-a",
+          "name": "A",
+          "parent_id": "loop-b",
+          "readable": true,
+          "raw": "{\"name\":\"A\",\"parentId\":\"loop-b\"}"
+        },
+        {
+          "id": "loop-b",
+          "name": "B",
+          "parent_id": "loop-a",
+          "readable": true,
+          "raw": "{\"name\":\"B\",\"parentId\":\"loop-a\"}"
+        }
+      ],
+      "id": "unknown",
+      "tone": "#bb9af7"
+    }
+  ],
+  "refusals": [
+    {
+      "case": "editing a bookmark from a newer schema major",
+      "error": "PayloadSchema"
+    },
+    {
+      "case": "renaming a collection from a newer schema major",
+      "error": "PayloadSchema"
+    }
+  ]
+}
