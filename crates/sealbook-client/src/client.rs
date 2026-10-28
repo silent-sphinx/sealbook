@@ -260,9 +260,6 @@ impl SealbookClient {
         })
     }
 
-    /// Header carrying an attachment chunk's base64url nonce, matching the server.
-    pub(crate) const NONCE_HEADER: &'static str = "x-sealbook-nonce";
-
     /// PUTs one sealed attachment chunk as raw bytes, with its nonce in a header.
     ///
     /// Attachment ciphertext is binary and multi-megabyte, so it does not go
@@ -278,26 +275,11 @@ impl SealbookClient {
             .http
             .put(url)
             .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
-            .header(Self::NONCE_HEADER, nonce_b64)
+            .header(sealbook_core::NONCE_HEADER, nonce_b64)
             .bearer_auth(token)
             .body(body)
             .send()
             .await?;
-        let status = resp.status();
-        if !status.is_success() {
-            let bytes = resp.bytes().await?;
-            let msg = serde_json::from_slice::<sealbook_protocol::ErrorBody>(&bytes)
-                .map(|e| e.error)
-                .unwrap_or_else(|_| String::from_utf8_lossy(&bytes).into_owned());
-            return Err(ClientError::Server(msg));
-        }
-        Ok(())
-    }
-
-    /// DELETEs a resource whose success response carries no body (204), so there
-    /// is nothing to parse. Used by the attachment delete, which is idempotent.
-    pub(crate) async fn delete_no_body(&self, url: &str, token: &str) -> Result<(), ClientError> {
-        let resp = self.http.delete(url).bearer_auth(token).send().await?;
         let status = resp.status();
         if !status.is_success() {
             let bytes = resp.bytes().await?;
@@ -320,7 +302,7 @@ impl SealbookClient {
         let status = resp.status();
         let nonce = resp
             .headers()
-            .get(Self::NONCE_HEADER)
+            .get(sealbook_core::NONCE_HEADER)
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned);
         let bytes = resp.bytes().await?;

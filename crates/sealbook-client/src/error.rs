@@ -120,6 +120,9 @@ impl From<sealbook_core::CoreError> for ClientError {
             // as the reason the pairing did not go through.
             CoreError::Pair { refusal } => ClientError::Server(refusal.to_string()),
             CoreError::Auth { refusal } => ClientError::Server(refusal.to_string()),
+            // As above: the refusal states why the attachment was not sent or
+            // not trusted, and the CLI prints it.
+            CoreError::Attachment { refusal } => ClientError::Server(refusal.to_string()),
         }
     }
 }

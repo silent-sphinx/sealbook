@@ -219,9 +219,19 @@ impl AttachmentHasher {
         }
     }
 
+    /// One chunk's plaintext digest, the unit the roll-up is built from.
+    pub fn chunk_digest(chunk_plaintext: &[u8]) -> [u8; 32] {
+        Sha256::digest(chunk_plaintext).into()
+    }
+
     pub fn update(&mut self, chunk_plaintext: &[u8]) {
-        let chunk_hash = Sha256::digest(chunk_plaintext);
-        self.chunks.update(chunk_hash);
+        self.update_digest(&Self::chunk_digest(chunk_plaintext));
+    }
+
+    /// Rolls in a chunk whose digest was taken elsewhere, for a caller that
+    /// hashes each chunk as it is produced and assembles the result later.
+    pub fn update_digest(&mut self, chunk_digest: &[u8; 32]) {
+        self.chunks.update(chunk_digest);
         self.count += 1;
     }
 

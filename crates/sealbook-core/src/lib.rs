@@ -12,11 +12,12 @@
 //! [`PROTOCOL_VERSION`].
 //!
 //! Randomness is the one exception, confined to [`new_device`],
-//! [`new_registration`] and the key wraps the auth bodies build: each returns
-//! what it drew for the host to persist. It lives here rather than in each
-//! binding crate because three copies of "what a new device is" is how two
-//! hosts came to choose the collection id and one did not.
+//! [`new_registration`], [`attachment_plan`] and the key wraps the auth bodies
+//! build: each returns what it drew for the host to persist. It lives here
+//! rather than in each binding crate because three copies of "what a new device
+//! is" is how two hosts came to choose the collection id and one did not.
 
+mod attachments;
 mod auth;
 mod error;
 mod http;
@@ -41,6 +42,16 @@ uniffi::custom_type!(Uuid, String, {
     try_lift: |s| Ok(s.parse::<Uuid>()?),
 });
 
+pub use attachments::{
+    attachment_chunk_digest, attachment_chunk_nonce, attachment_chunk_path,
+    attachment_commit_accept, attachment_commit_request, attachment_content_hash,
+    attachment_create_accept, attachment_create_request, attachment_delete_request,
+    attachment_limits, attachment_meta_accept, attachment_meta_request, attachment_plan,
+    attachment_ranges, attachment_verify, open_attachment_chunk, seal_attachment_chunk,
+    sweep_orphans, sweep_page, sweep_request, sweep_start, AttachmentLimits, AttachmentPlan,
+    AttachmentRefusal, AttachmentRow, ChunkRange, SweepCursor, SweepPage, NONCE_HEADER,
+    ORPHAN_GRACE_SECS,
+};
 pub use auth::{
     account_challenge_request, change_password_request, change_username_request,
     delete_account_request, login_accept, login_challenge_request, login_finish_request,

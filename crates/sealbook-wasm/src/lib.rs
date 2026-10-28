@@ -1,13 +1,15 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sealbook_core::{
-    AppliedManifest, AuthRequest, BucketedManifest, BucketsOutcome, ChangesPage, CoreBuild,
-    CoreDevice, CoreDeviceSecrets, CoreDeviceState, CoreManifestEntry, CorePairPreview, CoreRoster,
+    AppliedManifest, AttachmentLimits, AttachmentPlan, AttachmentRow, AuthRequest,
+    BucketedManifest, BucketsOutcome, ChangesPage, ChunkRange, CoreBuild, CoreDevice,
+    CoreDeviceSecrets, CoreDeviceState, CoreManifestEntry, CorePairPreview, CoreRoster,
     CoreRosterPin, CoreSealedRow, CoreSession, HttpRequest, HttpResponse, LoggedIn, LoginStarting,
     ManifestContext, ManifestOutcome, ManifestPlan, ManifestSigner, OpaqueStart, PairApproval,
     PairJoined, PairStatus, PasswordChange, PasswordChangeStarted, RecoverStarted, Recovering,
     RegisterIdentity, Registering, ResealRow, RosterContext, RotationPlan, RotationState,
-    RowOutcome, RowRef, SignedManifest, VerifiedRoster, WalkCursor, WalkStep,
+    RowOutcome, RowRef, SignedManifest, SweepCursor, SweepPage, VerifiedRoster, WalkCursor,
+    WalkStep,
 };
 use sealbook_crypto::RosterPin;
 use sealbook_crypto::{
@@ -366,129 +368,6 @@ fn text(bytes: Vec<u8>) -> Result<String, JsError> {
 #[wasm_bindgen]
 pub fn new_collection_key() -> String {
     b64(CollectionKey::generate().as_bytes())
-}
-
-// --- Attachments -----------------------------------------------------------
-//
-// Binary-safe by design, unlike `seal_object`/`open_object`: a photo's bytes are
-// never valid UTF-8, so these take and return raw `Vec<u8>` (a `Uint8Array` on
-// the JS side) and carry the nonce as a base64 string alongside. The attachment
-// key is independent of any collection key — it lives inside the owning note's
-// sealed JSON — so a key rotation never has to touch stored chunks.
-
-fn adk_from_b64(s: &str) -> Result<sealbook_crypto::AttachmentKey, JsError> {
-    let bytes = unb64(s)?;
-    if bytes.len() != sealbook_crypto::ATTACHMENT_KEY_LEN {
-        return Err(JsError::new("attachment key length"));
-    }
-    let mut key = [0u8; sealbook_crypto::ATTACHMENT_KEY_LEN];
-    key.copy_from_slice(&bytes);
-    Ok(sealbook_crypto::AttachmentKey::from_bytes(key))
-}
-
-/// A fresh random attachment key, base64url, to store in the owning note.
-#[wasm_bindgen]
-pub fn new_attachment_key() -> String {
-    b64(sealbook_crypto::AttachmentKey::generate().as_bytes())
-}
-
-/// Seals one attachment chunk. Returns the 24-byte nonce followed by the
-/// ciphertext in one buffer; the caller splits the first `nonceLen()` bytes off
-/// as the nonce and sends the rest as the chunk body.
-#[wasm_bindgen]
-pub fn seal_attachment_chunk(
-    adk_b64: &str,
-    attachment_id: &str,
-    collection_id: &str,
-    chunk_index: u32,
-    chunk_count: u32,
-    plaintext: &[u8],
-) -> Result<Vec<u8>, JsError> {
-    let attachment_id = parse_uuid(attachment_id)?;
-    let collection_id = parse_uuid(collection_id)?;
-    let aad = sealbook_crypto::attachment_chunk_aad(
-        attachment_id.as_bytes(),
-        collection_id.as_bytes(),
-        chunk_index,
-        chunk_count,
-    );
-    let sealed =
-        sealbook_crypto::encrypt_chunk(&adk_from_b64(adk_b64)?, plaintext, &aad).map_err(js_err)?;
-    let mut out = Vec::with_capacity(sealed.nonce.len() + sealed.ciphertext.len());
-    out.extend_from_slice(&sealed.nonce);
-    out.extend_from_slice(&sealed.ciphertext);
-    Ok(out)
-}
-
-/// Opens one attachment chunk, returning its plaintext bytes.
-#[wasm_bindgen]
-#[allow(clippy::too_many_arguments)]
-pub fn open_attachment_chunk(
-    adk_b64: &str,
-    attachment_id: &str,
-    collection_id: &str,
-    chunk_index: u32,
-    chunk_count: u32,
-    nonce_b64: &str,
-    ciphertext: &[u8],
-) -> Result<Vec<u8>, JsError> {
-    let attachment_id = parse_uuid(attachment_id)?;
-    let collection_id = parse_uuid(collection_id)?;
-    let nonce_bytes = unb64(nonce_b64)?;
-    if nonce_bytes.len() != sealbook_crypto::NONCE_LEN {
-        return Err(JsError::new("nonce length"));
-    }
-    let mut nonce = [0u8; sealbook_crypto::NONCE_LEN];
-    nonce.copy_from_slice(&nonce_bytes);
-    let aad = sealbook_crypto::attachment_chunk_aad(
-        attachment_id.as_bytes(),
-        collection_id.as_bytes(),
-        chunk_index,
-        chunk_count,
-    );
-    sealbook_crypto::decrypt_chunk(
-        &adk_from_b64(adk_b64)?,
-        &sealbook_crypto::EncryptedChunk {
-            nonce,
-            ciphertext: ciphertext.to_vec(),
-        },
-        &aad,
-    )
-    .map_err(js_err)
-}
-
-/// Rolls per-chunk plaintext hashes into one attachment content hash, fed chunk
-/// by chunk. Exposed as a class so the web client produces the exact hash the
-/// Rust verifier expects, on both upload and download.
-#[wasm_bindgen]
-pub struct AttachmentHash {
-    inner: sealbook_crypto::AttachmentHasher,
-}
-
-#[wasm_bindgen]
-impl AttachmentHash {
-    #[wasm_bindgen(constructor)]
-    pub fn new() -> Self {
-        Self {
-            inner: sealbook_crypto::AttachmentHasher::new(),
-        }
-    }
-
-    pub fn update(&mut self, chunk_plaintext: &[u8]) {
-        self.inner.update(chunk_plaintext);
-    }
-
-    /// Consumes the hasher and returns the base64url content hash. Each instance
-    /// finalizes once; the JS wrapper must not reuse it afterward.
-    pub fn finalize(self) -> String {
-        b64(&self.inner.finalize())
-    }
-}
-
-impl Default for AttachmentHash {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 #[wasm_bindgen]
@@ -1897,4 +1776,251 @@ pub fn core_delete_account_request(
             .map_err(core_err)?
             .into_ts()?,
     )
+}
+
+// ── Core: attachments ──
+//
+// The sealed and opened chunk buffers are function arguments and returns rather
+// than fields of a boundary record: wasm carries those as a `Uint8Array`, where
+// a `Vec<u8>` inside a tsify record would cross element by element. Everything
+// else here is a decision core owns.
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct ChunkRangeList(pub Vec<ChunkRange>);
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct AttachmentRowList(pub Vec<AttachmentRow>);
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct UuidList(#[tsify(type = "string[]")] pub Vec<Uuid>);
+
+/// The protocol's ceiling, the chunk size, the nonce header and the sweep's
+/// grace period. A host wanting a lower ceiling of its own applies it first.
+#[wasm_bindgen]
+pub fn core_attachment_limits() -> Result<Ts<AttachmentLimits>, JsError> {
+    Ok(sealbook_core::attachment_limits().into_ts()?)
+}
+
+/// Decides an upload: a fresh id and key, and how the plaintext is cut up.
+///
+/// Throws on an empty file and on one over the protocol ceiling, so neither
+/// becomes a server error the user cannot act on.
+#[wasm_bindgen]
+pub fn core_attachment_plan(total_plaintext_size: u64) -> Result<Ts<AttachmentPlan>, JsError> {
+    Ok(sealbook_core::attachment_plan(total_plaintext_size)
+        .map_err(core_err)?
+        .into_ts()?)
+}
+
+/// The slices of plaintext the plan's chunks are taken from, in order.
+#[wasm_bindgen]
+pub fn core_attachment_ranges(plan: Ts<AttachmentPlan>) -> Result<Ts<ChunkRangeList>, JsError> {
+    Ok(ChunkRangeList(sealbook_core::attachment_ranges(&plan.to_rust()?)).into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_attachment_create_request(
+    collection_id: &str,
+    plan: Ts<AttachmentPlan>,
+) -> Result<Ts<HttpRequest>, JsError> {
+    Ok(
+        sealbook_core::attachment_create_request(parse_uuid(collection_id)?, &plan.to_rust()?)
+            .into_ts()?,
+    )
+}
+
+#[wasm_bindgen]
+pub fn core_attachment_create_accept(plan: Ts<AttachmentPlan>, body: &str) -> Result<(), JsError> {
+    sealbook_core::attachment_create_accept(&plan.to_rust()?, body).map_err(core_err)
+}
+
+#[wasm_bindgen]
+pub fn core_attachment_chunk_path(
+    collection_id: &str,
+    attachment_id: &str,
+    index: u32,
+) -> Result<String, JsError> {
+    Ok(sealbook_core::attachment_chunk_path(
+        parse_uuid(collection_id)?,
+        parse_uuid(attachment_id)?,
+        index,
+    ))
+}
+
+/// Seals one chunk, returning its nonce followed by its ciphertext. The caller
+/// splits the first `nonce_len` bytes off: the two travel apart on the wire, and
+/// a second call would seal under a second nonce.
+#[wasm_bindgen]
+pub fn core_seal_attachment_chunk(
+    key_b64: &str,
+    attachment_id: &str,
+    collection_id: &str,
+    index: u32,
+    chunk_count: u32,
+    plaintext: &[u8],
+) -> Result<Vec<u8>, JsError> {
+    sealbook_core::seal_attachment_chunk(
+        key_b64,
+        parse_uuid(attachment_id)?,
+        parse_uuid(collection_id)?,
+        index,
+        chunk_count,
+        plaintext,
+    )
+    .map_err(core_err)
+}
+
+/// Opens one chunk. A chunk that will not open is a tampered or corrupt
+/// download, never something to retry.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn core_open_attachment_chunk(
+    key_b64: &str,
+    attachment_id: &str,
+    collection_id: &str,
+    index: u32,
+    chunk_count: u32,
+    nonce_b64: &str,
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, JsError> {
+    sealbook_core::open_attachment_chunk(
+        key_b64,
+        parse_uuid(attachment_id)?,
+        parse_uuid(collection_id)?,
+        index,
+        chunk_count,
+        nonce_b64,
+        ciphertext,
+    )
+    .map_err(core_err)
+}
+
+/// The nonce a chunk response carried, or a refusal for one that carried none.
+#[wasm_bindgen]
+pub fn core_attachment_chunk_nonce(header: Option<String>) -> Result<String, JsError> {
+    sealbook_core::attachment_chunk_nonce(header).map_err(core_err)
+}
+
+#[wasm_bindgen]
+pub fn core_attachment_commit_request(
+    collection_id: &str,
+    attachment_id: &str,
+) -> Result<Ts<HttpRequest>, JsError> {
+    Ok(sealbook_core::attachment_commit_request(
+        parse_uuid(collection_id)?,
+        parse_uuid(attachment_id)?,
+    )
+    .into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_attachment_commit_accept(attachment_id: &str, body: &str) -> Result<(), JsError> {
+    sealbook_core::attachment_commit_accept(parse_uuid(attachment_id)?, body).map_err(core_err)
+}
+
+#[wasm_bindgen]
+pub fn core_attachment_meta_request(
+    collection_id: &str,
+    attachment_id: &str,
+) -> Result<Ts<HttpRequest>, JsError> {
+    Ok(sealbook_core::attachment_meta_request(
+        parse_uuid(collection_id)?,
+        parse_uuid(attachment_id)?,
+    )
+    .into_ts()?)
+}
+
+/// Whether the server is holding the attachment this record references, checked
+/// against the chunk count the record carries rather than the server's own.
+#[wasm_bindgen]
+pub fn core_attachment_meta_accept(
+    attachment_id: &str,
+    chunk_count: u32,
+    body: &str,
+) -> Result<(), JsError> {
+    sealbook_core::attachment_meta_accept(parse_uuid(attachment_id)?, chunk_count, body)
+        .map(|_| ())
+        .map_err(core_err)
+}
+
+#[wasm_bindgen]
+pub fn core_attachment_delete_request(
+    collection_id: &str,
+    attachment_id: &str,
+) -> Result<Ts<HttpRequest>, JsError> {
+    Ok(sealbook_core::attachment_delete_request(
+        parse_uuid(collection_id)?,
+        parse_uuid(attachment_id)?,
+    )
+    .into_ts()?)
+}
+
+/// One chunk's plaintext digest, rolled up later by `core_attachment_content_hash`.
+///
+/// Replaces the hasher object the web used to construct and free: the digests
+/// are values, so there is nothing to leak if a download throws part way.
+#[wasm_bindgen]
+pub fn core_attachment_chunk_digest(plaintext: &[u8]) -> String {
+    sealbook_core::attachment_chunk_digest(plaintext)
+}
+
+/// The hash the owning record commits to, rolled from every chunk's digest.
+#[wasm_bindgen]
+pub fn core_attachment_content_hash(digests: Vec<String>) -> Result<String, JsError> {
+    sealbook_core::attachment_content_hash(&digests).map_err(core_err)
+}
+
+/// Checks a download reproduced what the record committed to.
+#[wasm_bindgen]
+pub fn core_attachment_verify(
+    attachment_id: &str,
+    expected_hash_b64: &str,
+    digests: Vec<String>,
+) -> Result<(), JsError> {
+    sealbook_core::attachment_verify(parse_uuid(attachment_id)?, expected_hash_b64, &digests)
+        .map_err(core_err)
+}
+
+#[wasm_bindgen]
+pub fn core_attachment_sweep_start() -> Result<Ts<SweepCursor>, JsError> {
+    Ok(sealbook_core::sweep_start().into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_attachment_sweep_request(
+    collection_id: &str,
+    cursor: Ts<SweepCursor>,
+) -> Result<Ts<HttpRequest>, JsError> {
+    Ok(sealbook_core::sweep_request(parse_uuid(collection_id)?, &cursor.to_rust()?).into_ts()?)
+}
+
+/// One page of the listing, and where to ask next. `next` is absent once the
+/// listing is exhausted, which includes a cursor the sweep already followed.
+#[wasm_bindgen]
+pub fn core_attachment_sweep_page(
+    cursor: Ts<SweepCursor>,
+    body: &str,
+) -> Result<Ts<SweepPage>, JsError> {
+    Ok(sealbook_core::sweep_page(&cursor.to_rust()?, body)
+        .map_err(core_err)?
+        .into_ts()?)
+}
+
+/// Which listed attachments are safe to delete. `now_secs` is the caller's
+/// clock: core has none.
+#[wasm_bindgen]
+pub fn core_attachment_sweep_orphans(
+    rows: Ts<AttachmentRowList>,
+    referenced: Ts<UuidList>,
+    now_secs: i64,
+) -> Result<Ts<UuidList>, JsError> {
+    Ok(UuidList(sealbook_core::sweep_orphans(
+        &rows.to_rust()?.0,
+        &referenced.to_rust()?.0,
+        now_secs,
+    ))
+    .into_ts()?)
 }

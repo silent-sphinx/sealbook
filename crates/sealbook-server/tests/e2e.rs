@@ -4677,6 +4677,13 @@ async fn deleting_an_account_leaves_nothing_in_any_table() {
         .await
         .expect("revise");
 
+    // An attachment too: its chunks live outside the sealed-object set, so a
+    // delete that cascaded everything else could still leave them behind.
+    owner
+        .upload_attachment(&vec![9u8; 2048])
+        .await
+        .expect("upload attachment");
+
     let mut joiner = SealbookClient::plaintext_http();
     let (code, confirm) = joiner.pair_join(&base, "erasealice").await.expect("join");
     owner.pair_approve(&code, &confirm).await.expect("approve");
@@ -7193,7 +7200,7 @@ async fn an_attachment_round_trips_through_chunked_upload_and_download() {
     assert_eq!(reference.chunk_count, 3);
 
     let meta = client
-        .get_attachment_meta(reference.attachment_id)
+        .get_attachment_meta(reference.attachment_id, reference.chunk_count)
         .await
         .expect("meta");
     assert_eq!(meta.state, "committed");
