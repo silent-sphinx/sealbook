@@ -1253,6 +1253,7 @@ fn jscontact(
                 kind: CoreChannelKind::Home,
                 label: None,
                 value: email.to_string(),
+                extra: None,
             }),
         }
     }
