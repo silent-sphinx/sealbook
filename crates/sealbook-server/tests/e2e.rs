@@ -6,7 +6,7 @@ use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::CertificateDer;
 use rustls::version::TLS13;
 use rustls::{ClientConfig, RootCertStore};
-use sealbook_client::{ExportedObject, SealbookClient};
+use sealbook_client::{CoreCalendarDraft, CoreCalendarEventDraft, ExportedObject, SealbookClient};
 use sealbook_crypto::opaque::{
     client_login_start, client_register_finish, client_register_start, SealbookCipherSuite,
 };
@@ -453,7 +453,13 @@ async fn address_books_are_encrypted_and_hidden_from_contact_list() {
 
     let work_id = Uuid::new_v4();
     client
-        .put_address_book(work_id, "Work")
+        .put_address_book(
+            work_id,
+            &sealbook_client::CoreAddressBookDraft {
+                name: "Work".into(),
+                raw: None,
+            },
+        )
         .await
         .expect("work book");
 
@@ -842,7 +848,11 @@ async fn an_account_export_carries_every_live_object_and_no_deleted_one() {
     client
         .put_calendar_event(
             event_id,
-            r#"{"@type":"CalendarEvent","title":"Launch","start":"2026-10-10T09:00:00Z"}"#,
+            &CoreCalendarEventDraft {
+                title: "Launch".into(),
+                start: "2026-10-10T09:00:00Z".into(),
+                ..Default::default()
+            },
         )
         .await
         .expect("event");
@@ -1155,7 +1165,8 @@ async fn an_import_restores_an_object_that_was_deleted_since_the_export() {
         !client
             .export_objects()
             .await
-            .expect("export after delete").objects
+            .expect("export after delete")
+            .objects
             .iter()
             .any(|object| object.id == note_id),
         "the note is still live, so the restore below proves nothing"
@@ -1163,7 +1174,11 @@ async fn an_import_restores_an_object_that_was_deleted_since_the_export() {
 
     client.import_objects(&exported).await.expect("import");
 
-    let restored = client.export_objects().await.expect("export after import").objects;
+    let restored = client
+        .export_objects()
+        .await
+        .expect("export after import")
+        .objects;
     let note = restored
         .iter()
         .find(|object| object.id == note_id)
@@ -5863,20 +5878,27 @@ async fn the_default_calendar_is_created_once_and_keyed_by_id() {
 
     let calendars = client.list_calendars().await.expect("calendars");
     assert_eq!(calendars.len(), 1);
-    assert!(
-        calendars[0]
-            .1
-            .contains(sealbook_client::DEFAULT_CALENDAR_NAME),
-        "the default calendar carries its reserved name: {}",
-        calendars[0].1
+    assert_eq!(
+        calendars[0].1,
+        sealbook_client::DEFAULT_CALENDAR_NAME,
+        "the default calendar carries its reserved name"
     );
-    assert!(
-        calendars[0]
-            .1
-            .contains(sealbook_client::DEFAULT_CALENDAR_COLOR),
-        "and the colour every client creates it with: {}",
-        calendars[0].1
-    );
+    // The listing is names now, so the colour is checked against the payload
+    // itself: it is what the other clients draw the dot from, and it is one of
+    // the keys the CLI used to drop whenever it wrote a calendar.
+    let stored = client
+        .export_objects()
+        .await
+        .expect("export")
+        .objects
+        .into_iter()
+        .find(|object| object.id == default_id)
+        .expect("the default calendar is in the vault");
+    let parsed = sealbook_client::calendar_parse(&default_id.to_string(), &stored.payload);
+    assert_eq!(parsed.color, sealbook_client::DEFAULT_CALENDAR_COLOR);
+    assert_eq!(parsed.name, sealbook_client::DEFAULT_CALENDAR_NAME);
+    assert!(!parsed.favorite);
+    assert!(!parsed.archived);
 
     // A second ensure is a no-op rather than a second container.
     assert_eq!(
@@ -5887,7 +5909,14 @@ async fn the_default_calendar_is_created_once_and_keyed_by_id() {
 
     // Renamed, it is still the default: the identity is the id, not the name.
     client
-        .put_calendar(default_id, "Work", "#ff0000")
+        .put_calendar(
+            default_id,
+            &CoreCalendarDraft {
+                name: "Work".into(),
+                color: "#ff0000".into(),
+                ..Default::default()
+            },
+        )
         .await
         .expect("rename");
     assert_eq!(
@@ -5899,21 +5928,19 @@ async fn the_default_calendar_is_created_once_and_keyed_by_id() {
     );
     let calendars = client.list_calendars().await.expect("calendars");
     assert_eq!(calendars.len(), 1);
-    assert!(calendars[0].1.contains("Work"));
+    assert_eq!(calendars[0].1, "Work");
 
     // An event written without a calendar of its own is readable from the
     // default one.
     client
         .put_calendar_event(
             Uuid::new_v4(),
-            &serde_json::json!({
-                "@type": "CalendarEvent",
-                "version": "1.0",
-                "title": "Standup",
-                "start": "2026-10-07T09:00:00Z",
-                "calendarId": default_id.to_string(),
-            })
-            .to_string(),
+            &CoreCalendarEventDraft {
+                title: "Standup".into(),
+                start: "2026-10-07T09:00:00Z".into(),
+                calendar_id: Some(default_id.to_string()),
+                ..Default::default()
+            },
         )
         .await
         .expect("event");
@@ -5953,7 +5980,13 @@ async fn the_server_never_learns_what_kind_of_object_it_holds() {
         .expect("note");
     let doomed = Uuid::new_v4();
     client
-        .put_calendar_event(doomed, r#"{"@type":"Event","title":"Standup"}"#)
+        .put_calendar_event(
+            doomed,
+            &CoreCalendarEventDraft {
+                title: "Standup".into(),
+                ..Default::default()
+            },
+        )
         .await
         .expect("event");
     client.delete_calendar_event(doomed).await.expect("delete");
@@ -7210,8 +7243,14 @@ async fn an_attachment_round_trips_through_chunked_upload_and_download() {
     assert_eq!(meta.state, "committed");
     assert_eq!(meta.chunk_count, 3);
 
-    let fetched = client.download_attachment(&reference).await.expect("download");
-    assert_eq!(fetched, photo, "attachment did not round-trip byte-for-byte");
+    let fetched = client
+        .download_attachment(&reference)
+        .await
+        .expect("download");
+    assert_eq!(
+        fetched, photo,
+        "attachment did not round-trip byte-for-byte"
+    );
 
     let raw = std::fs::read(&db).expect("read sqlite");
     assert!(
@@ -7248,19 +7287,21 @@ async fn an_uncommitted_or_incomplete_attachment_is_not_served() {
 
     // Declare three chunks but upload none, then try to commit: refused as
     // incomplete.
-    http.post(format!("{server}/v1/collections/{collection_id}/attachments"))
-        .bearer_auth(&token)
-        .json(&serde_json::json!({
-            "attachment_id": attachment_id,
-            "total_plaintext_size": 3 * sealbook_protocol::ATTACHMENT_CHUNK_SIZE,
-            "chunk_size": sealbook_protocol::ATTACHMENT_CHUNK_SIZE,
-            "chunk_count": 3,
-        }))
-        .send()
-        .await
-        .unwrap()
-        .error_for_status()
-        .expect("create");
+    http.post(format!(
+        "{server}/v1/collections/{collection_id}/attachments"
+    ))
+    .bearer_auth(&token)
+    .json(&serde_json::json!({
+        "attachment_id": attachment_id,
+        "total_plaintext_size": 3 * sealbook_protocol::ATTACHMENT_CHUNK_SIZE,
+        "chunk_size": sealbook_protocol::ATTACHMENT_CHUNK_SIZE,
+        "chunk_count": 3,
+    }))
+    .send()
+    .await
+    .unwrap()
+    .error_for_status()
+    .expect("create");
 
     let commit = http
         .post(format!(
@@ -7302,16 +7343,20 @@ async fn attachment_quota_is_enforced_and_freed_on_delete() {
             // Room for exactly one full chunk's ciphertext, so a second attachment
             // of the same size cannot fit.
             max_attachment_bytes: (sealbook_protocol::ATTACHMENT_CHUNK_SIZE
-                + sealbook_protocol::ATTACHMENT_CHUNK_TAG_LEN) as i64,
+                + sealbook_protocol::ATTACHMENT_CHUNK_TAG_LEN)
+                as i64,
             ..Default::default()
         },
     )
     .await
     .unwrap();
     tokio::spawn(async move {
-        axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-            .await
-            .unwrap();
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        .unwrap();
     });
     let base = format!("http://{addr}");
 
@@ -7322,14 +7367,23 @@ async fn attachment_quota_is_enforced_and_freed_on_delete() {
         .expect("register");
 
     let one_chunk = vec![7u8; sealbook_protocol::ATTACHMENT_CHUNK_SIZE];
-    let first = client.upload_attachment(&one_chunk).await.expect("first fits");
+    let first = client
+        .upload_attachment(&one_chunk)
+        .await
+        .expect("first fits");
 
     // A second identical attachment cannot be reserved.
     let second = client.upload_attachment(&one_chunk).await;
-    assert!(second.is_err(), "second attachment exceeded quota but was accepted");
+    assert!(
+        second.is_err(),
+        "second attachment exceeded quota but was accepted"
+    );
 
     // Deleting the first frees the quota, so an upload of the same size now fits.
-    client.delete_attachment(first.attachment_id).await.expect("delete");
+    client
+        .delete_attachment(first.attachment_id)
+        .await
+        .expect("delete");
     let chunk_rows: i64 = {
         let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
             .await
@@ -7401,7 +7455,10 @@ async fn rotating_a_device_does_not_touch_attachment_chunks() {
     // Pair and revoke a second device, which forces a full key rotation.
     let mut joiner = SealbookClient::plaintext_http();
     let (pair_code, confirm) = joiner.pair_join(&base, "attrotalice").await.expect("join");
-    owner.pair_approve(&pair_code, &confirm).await.expect("approve");
+    owner
+        .pair_approve(&pair_code, &confirm)
+        .await
+        .expect("approve");
     assert!(joiner.pair_ready(&pair_code).await.expect("ready"));
     joiner.login("correct horse battery").await.expect("login");
     let joiner_device = joiner.state.as_ref().unwrap().device_id;
@@ -7432,10 +7489,16 @@ async fn rotating_a_device_does_not_touch_attachment_chunks() {
             })
             .collect()
     };
-    assert_eq!(before, after, "rotation rewrote attachment chunk ciphertext");
+    assert_eq!(
+        before, after,
+        "rotation rewrote attachment chunk ciphertext"
+    );
 
     // And the attachment still downloads under its own unchanged key.
-    let fetched = owner.download_attachment(&reference).await.expect("download");
+    let fetched = owner
+        .download_attachment(&reference)
+        .await
+        .expect("download");
     assert_eq!(fetched, photo);
 }
 
@@ -7475,7 +7538,10 @@ async fn a_tampered_chunk_fails_the_download_integrity_check() {
 
     let result = client.download_attachment(&reference).await;
     assert!(
-        matches!(result, Err(sealbook_client::ClientError::AttachmentIntegrity(_))),
+        matches!(
+            result,
+            Err(sealbook_client::ClientError::AttachmentIntegrity(_))
+        ),
         "a tampered chunk was not rejected: {result:?}"
     );
 }

@@ -9,11 +9,11 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sealbook_core::{
-    accept_manifest_seq, manifest_accept, manifest_apply, manifest_buckets_accept,
-    manifest_absence_ok, manifest_buckets_from_whole, manifest_buckets_request, manifest_entry_for,
-    manifest_request, manifest_sign, manifest_sign_root, manifest_signer, manifest_verify,
-    BucketsOutcome, CoreDevice, CoreError,
-    CoreManifestEntry, HttpResponse, ManifestContext, ManifestOutcome, ManifestPlan, Method,
+    accept_manifest_seq, manifest_absence_ok, manifest_accept, manifest_apply,
+    manifest_buckets_accept, manifest_buckets_from_whole, manifest_buckets_request,
+    manifest_entry_for, manifest_request, manifest_sign, manifest_sign_root, manifest_signer,
+    manifest_verify, BucketsOutcome, CoreDevice, CoreError, CoreManifestEntry, HttpResponse,
+    ManifestContext, ManifestOutcome, ManifestPlan, Method,
 };
 use sealbook_crypto::{signing_from_seeds, DeviceSigningSecrets};
 use serde::{Deserialize, Serialize};
@@ -178,7 +178,8 @@ fn an_object_withheld_from_the_served_set_is_refused() {
 #[test]
 fn a_manifest_signed_by_a_device_outside_the_roster_is_refused() {
     let fixture = fixture();
-    let err = manifest_accept(&fixture.context(), &ok(&fixture.manifest_response), &[]).unwrap_err();
+    let err =
+        manifest_accept(&fixture.context(), &ok(&fixture.manifest_response), &[]).unwrap_err();
     assert!(
         matches!(&err, CoreError::Manifest { detail } if detail.contains("does not have")),
         "{err:?}"
@@ -192,8 +193,8 @@ fn a_manifest_older_than_the_one_this_device_saw_is_refused() {
         manifest_seq: 99,
         ..fixture.context()
     };
-    let err = manifest_accept(&context, &ok(&fixture.manifest_response), &fixture.devices)
-        .unwrap_err();
+    let err =
+        manifest_accept(&context, &ok(&fixture.manifest_response), &fixture.devices).unwrap_err();
     assert!(
         matches!(&err, CoreError::Manifest { detail } if detail.contains("went backwards")),
         "{err:?}"
@@ -331,8 +332,7 @@ fn a_walk_is_checked_against_the_manifest_it_was_served_with() {
 
     // One object dropped from the walk is the rollback this check exists for.
     let short = &entries[..4];
-    let err =
-        manifest_verify(&fixture.context(), &manifest, short, &fixture.devices).unwrap_err();
+    let err = manifest_verify(&fixture.context(), &manifest, short, &fixture.devices).unwrap_err();
     assert!(
         matches!(&err, CoreError::Manifest { detail } if detail.contains("commits to")),
         "{err:?}"
@@ -368,8 +368,7 @@ fn the_bucket_path_and_the_whole_path_agree_on_the_root() {
         &ok(&fixture.manifest_response),
         &fixture.devices,
     )
-    .unwrap()
-    else {
+    .unwrap() else {
         panic!("signed");
     };
     let whole = manifest_buckets_from_whole(&plan, &entries).unwrap();
@@ -423,16 +422,12 @@ fn signing_over_the_entries_and_over_the_root_cover_the_same_value() {
         &ok(&fixture.manifest_response),
         &fixture.devices,
     )
-    .unwrap()
-    else {
+    .unwrap() else {
         panic!("signed");
     };
     let whole = manifest_sign(&fixture.secrets(), &fixture.context(), &plan, &entries).unwrap();
-    let applied = manifest_apply(
-        &manifest_buckets_from_whole(&plan, &entries).unwrap(),
-        &[],
-    )
-    .unwrap();
+    let applied =
+        manifest_apply(&manifest_buckets_from_whole(&plan, &entries).unwrap(), &[]).unwrap();
     assert_eq!(whole.digest, applied.root);
     assert_eq!(whole.object_count, applied.object_count);
 

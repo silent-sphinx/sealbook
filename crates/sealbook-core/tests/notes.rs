@@ -274,7 +274,11 @@ fn parse_cases() -> Vec<(String, String, String)> {
 
 fn notebook_write_cases() -> Vec<(String, String, Option<String>)> {
     vec![
-        ("a notebook created from scratch".into(), "Work".into(), None),
+        (
+            "a notebook created from scratch".into(),
+            "Work".into(),
+            None,
+        ),
         (
             "a name with surrounding space".into(),
             "  Work  ".into(),
@@ -283,9 +287,7 @@ fn notebook_write_cases() -> Vec<(String, String, Option<String>)> {
         (
             "a rename that keeps what this build does not own".into(),
             "Renamed".into(),
-            Some(
-                r#"{"@type":"Notebook","version":"1.0","name":"Work","colour":"amber"}"#.into(),
-            ),
+            Some(r#"{"@type":"Notebook","version":"1.0","name":"Work","colour":"amber"}"#.into()),
         ),
     ]
 }
@@ -317,7 +319,10 @@ fn error_name(error: &CoreError) -> String {
 #[test]
 fn every_written_payload_is_the_one_spelling_the_fixture_holds() {
     let fixture = fixture();
-    assert_eq!(fixture.now, NOW, "the fixture was built under another clock");
+    assert_eq!(
+        fixture.now, NOW,
+        "the fixture was built under another clock"
+    );
     assert_eq!(fixture.writes.len(), write_cases().len());
     for (expected, (case, draft)) in fixture.writes.iter().zip(write_cases()) {
         assert_eq!(expected.case, case);
@@ -355,8 +360,7 @@ fn every_notebook_payload_is_the_one_spelling_the_fixture_holds() {
 
 #[test]
 fn every_notebook_reads_back_as_the_record_the_fixture_holds() {
-    for (expected, (case, id, raw)) in
-        fixture().notebook_parses.iter().zip(notebook_parse_cases())
+    for (expected, (case, id, raw)) in fixture().notebook_parses.iter().zip(notebook_parse_cases())
     {
         assert_eq!(expected.case, case);
         assert_eq!(notebook_parse(&id, &raw), expected.notebook, "{case}");
@@ -409,10 +413,7 @@ fn a_payload_from_a_newer_schema_major_is_read_but_never_written_over() {
 /// deleted notebook leaves behind.
 #[test]
 fn a_note_whose_notebook_is_gone_is_shown_under_the_default_notebooks_name() {
-    let notebooks = vec![notebook_parse(
-        &default_notebook_id(),
-        r#"{"name":"Mine"}"#,
-    )];
+    let notebooks = vec![notebook_parse(&default_notebook_id(), r#"{"name":"Mine"}"#)];
     assert_eq!(notebook_name_by_id(&notebooks, None), "Mine");
     assert_eq!(
         notebook_name_by_id(&notebooks, Some(default_notebook_id())),

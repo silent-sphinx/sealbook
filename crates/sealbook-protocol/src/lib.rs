@@ -4,10 +4,10 @@ pub mod envelope;
 pub mod version;
 
 pub use attachment::{
-    AttachmentListEntry, AttachmentMetaResponse, CommitAttachmentResponse,
-    CreateAttachmentRequest, CreateAttachmentResponse, ListAttachmentsResponse,
-    ATTACHMENT_CHUNK_SIZE, ATTACHMENT_CHUNK_TAG_LEN, ATTACHMENT_STATE_COMMITTED,
-    ATTACHMENT_STATE_PENDING, MAX_ATTACHMENT_SIZE,
+    AttachmentListEntry, AttachmentMetaResponse, CommitAttachmentResponse, CreateAttachmentRequest,
+    CreateAttachmentResponse, ListAttachmentsResponse, ATTACHMENT_CHUNK_SIZE,
+    ATTACHMENT_CHUNK_TAG_LEN, ATTACHMENT_STATE_COMMITTED, ATTACHMENT_STATE_PENDING,
+    MAX_ATTACHMENT_SIZE,
 };
 
 use serde::{Deserialize, Serialize};
@@ -1065,6 +1065,9 @@ mod tests {
         let distinct: std::collections::BTreeSet<_> = types.iter().collect();
         assert_eq!(distinct.len(), types.len());
         assert_eq!(TASK_CONTENT_TYPE, "application/sealbook.task+json");
-        assert_eq!(TASK_LIST_CONTENT_TYPE, "application/sealbook.task-list+json");
+        assert_eq!(
+            TASK_LIST_CONTENT_TYPE,
+            "application/sealbook.task-list+json"
+        );
     }
 }

@@ -854,8 +854,7 @@ const ROTATION_TIMEOUT: Duration = Duration::from_secs(600);
 /// `ATTACHMENT_CHUNK_SIZE` plus the AEAD tag, with no base64 expansion since the
 /// body is octet-stream, not JSON. The small slack covers the tag and framing.
 /// The other attachment routes are small JSON and comfortably under this.
-const MAX_ATTACHMENT_BODY: usize =
-    sealbook_protocol::ATTACHMENT_CHUNK_SIZE + 64 * 1024;
+const MAX_ATTACHMENT_BODY: usize = sealbook_protocol::ATTACHMENT_CHUNK_SIZE + 64 * 1024;
 
 fn router(state: Shared) -> Router<Shared> {
     // The three route groups differ in how much they may carry and how long they

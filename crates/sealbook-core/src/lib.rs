@@ -19,6 +19,9 @@
 
 mod attachments;
 mod auth;
+mod calendars;
+mod contact_profile;
+mod contacts;
 mod error;
 mod http;
 mod manifest;
@@ -65,6 +68,28 @@ pub use auth::{
     AuthRequest, CoreDeviceSecrets, LoggedIn, LoginStarting, OpaqueStart, PasswordChange,
     PasswordChangeStarted, RecoverStarted, Recovering, RegisterIdentity, Registering,
 };
+pub use calendars::{
+    calendar_name_by_id, calendar_parse, calendar_write, default_calendar_id, event_parse,
+    event_write, CoreCalendar, CoreCalendarDraft, CoreCalendarEvent, CoreCalendarEventDraft,
+    CoreNthWeekday, CoreRecurrence, CoreRecurrenceFrequency, CALENDAR_CONTENT_TYPE,
+    CALENDAR_EVENT_CONTENT_TYPE, CALENDAR_EVENT_KEYS, CALENDAR_KEYS, DEFAULT_CALENDAR_COLOR,
+    DEFAULT_CALENDAR_NAME, UNTITLED_CALENDAR_NAME, UNTITLED_EVENT_TITLE,
+};
+pub use contact_profile::{
+    profile_parse, profile_write, CoreContactProfile, CoreFoodPolarity, CoreProfileCareer,
+    CoreProfileCustom, CoreProfileFood, CoreProfileLifeEvent, CoreProfilePerson, CoreProfilePet,
+    CoreProfileRelationship,
+};
+pub use contacts::{
+    address_book_name_by_id, address_book_parse, address_book_write, contact_parse, contact_write,
+    default_address_book_id, resolve_address_book_id, CoreAddressBook, CoreAddressBookDraft,
+    CoreChannelKind, CoreContact, CoreContactAddress, CoreContactChannel, CoreContactDate,
+    CoreContactDateKind, CoreContactDraft, CoreContactSocial, CoreContactWork,
+    ADDRESS_BOOK_CONTENT_TYPE, ADDRESS_BOOK_ID_PROP, ADDRESS_BOOK_KEYS, CONTACT_ARCHIVED_PROP,
+    CONTACT_ATTACHMENTS_PROP, CONTACT_KEYS, CONTACT_PROFILE_PROP, DEFAULT_ADDRESS_BOOK_NAME,
+    DEFAULT_RELATIONSHIP_KIND, JSCONTACT_CONTENT_TYPE, MAX_PROFILE_ENTRIES, MAX_PROFILE_TEXT_CHARS,
+    PROFILE_KEYS, UNNAMED_CONTACT_NAME, UNTITLED_ADDRESS_BOOK_NAME,
+};
 pub use error::CoreError;
 pub use http::{Header, HttpRequest, HttpResponse, Method, Step};
 pub use manifest::{
@@ -81,12 +106,12 @@ pub use notes::{
     DEFAULT_NOTEBOOK_NAME, NOTEBOOK_CONTENT_TYPE, NOTEBOOK_KEYS, NOTE_CONTENT_TYPE, NOTE_KEYS,
     UNREADABLE_NOTE_TITLE, UNTITLED_NOTEBOOK_NAME, UNTITLED_NOTE_TITLE,
 };
-pub use payload::write_payload;
 pub use pairing::{
     confirmation_groups, format_confirmation, normalize_confirmation, pair_approve,
     pair_approve_path, pair_join_accept, pair_join_body, pair_path, pair_preview, pair_status,
     CorePairPreview, PairApproval, PairJoined, PairRefusal, PairStatus,
 };
+pub use payload::write_payload;
 pub use roster::{
     pin_roster, read_roster, roster_accept, roster_accept_sealed, roster_answers_for,
     roster_request, CoreDevice, CoreRoster, CoreRosterPin, CoreRosterSigner, RosterContext,

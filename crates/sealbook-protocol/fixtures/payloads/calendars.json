@@ -1,0 +1,450 @@
+{
+  "constants": {
+    "calendar_content_type": "application/sealbook.calendar+json",
+    "calendar_event_content_type": "application/sealbook.calendar-event+json",
+    "calendar_keys": [
+      "@type",
+      "version",
+      "name",
+      "color",
+      "favorite",
+      "archived"
+    ],
+    "calendar_event_keys": [
+      "@type",
+      "version",
+      "title",
+      "start",
+      "end",
+      "notes",
+      "location",
+      "participants",
+      "timezone",
+      "calendarId",
+      "recurrence"
+    ],
+    "default_calendar_id": "00000000-0000-0000-0000-000000000003",
+    "default_calendar_name": "Default Calendar",
+    "default_calendar_color": "#7aa2f7",
+    "untitled_calendar_name": "Untitled calendar",
+    "untitled_event_title": "Untitled event"
+  },
+  "calendar_writes": [
+    {
+      "case": "a calendar created from scratch",
+      "draft": {
+        "name": "Work",
+        "color": "#7aa2f7",
+        "favorite": false,
+        "archived": false
+      },
+      "payload": "{\"@type\":\"Calendar\",\"color\":\"#7aa2f7\",\"favorite\":false,\"name\":\"Work\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a name with surrounding space, and a favourite",
+      "draft": {
+        "name": "  Work  ",
+        "color": "#7aa2f7",
+        "favorite": true,
+        "archived": false
+      },
+      "payload": "{\"@type\":\"Calendar\",\"color\":\"#7aa2f7\",\"favorite\":true,\"name\":\"Work\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a blank colour takes the one every client defaults to",
+      "draft": {
+        "name": "Work",
+        "color": "   ",
+        "favorite": false,
+        "archived": false
+      },
+      "payload": "{\"@type\":\"Calendar\",\"color\":\"#7aa2f7\",\"favorite\":false,\"name\":\"Work\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a calendar put away, which is the only time the key is written",
+      "draft": {
+        "name": "Old Team",
+        "color": "#9ece6a",
+        "favorite": false,
+        "archived": true
+      },
+      "payload": "{\"@type\":\"Calendar\",\"archived\":true,\"color\":\"#9ece6a\",\"favorite\":false,\"name\":\"Old Team\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a rename that keeps the colour, the flags and a key from a later build",
+      "draft": {
+        "name": "Renamed",
+        "color": "#9ece6a",
+        "favorite": true,
+        "archived": true,
+        "raw": "{\"@type\":\"Calendar\",\"archived\":true,\"color\":\"#9ece6a\",\"favorite\":true,\"name\":\"Old Team\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
+      },
+      "payload": "{\"@type\":\"Calendar\",\"archived\":true,\"color\":\"#9ece6a\",\"favorite\":true,\"name\":\"Renamed\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
+    },
+    {
+      "case": "taking a calendar back out of the archive clears the key",
+      "draft": {
+        "name": "Old Team",
+        "color": "#9ece6a",
+        "favorite": true,
+        "archived": false,
+        "raw": "{\"@type\":\"Calendar\",\"archived\":true,\"color\":\"#9ece6a\",\"favorite\":true,\"name\":\"Old Team\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
+      },
+      "payload": "{\"@type\":\"Calendar\",\"color\":\"#9ece6a\",\"favorite\":true,\"name\":\"Old Team\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
+    }
+  ],
+  "calendar_parses": [
+    {
+      "case": "a calendar that has been through every feature",
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "raw": "{\"@type\":\"Calendar\",\"archived\":true,\"color\":\"#9ece6a\",\"favorite\":true,\"name\":\"Old Team\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}",
+      "calendar": {
+        "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "name": "Old Team",
+        "color": "#9ece6a",
+        "favorite": true,
+        "archived": true,
+        "readable": true,
+        "raw": "{\"@type\":\"Calendar\",\"archived\":true,\"color\":\"#9ece6a\",\"favorite\":true,\"name\":\"Old Team\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
+      }
+    },
+    {
+      "case": "the default calendar, unnamed",
+      "id": "00000000-0000-0000-0000-000000000003",
+      "raw": "{}",
+      "calendar": {
+        "id": "00000000-0000-0000-0000-000000000003",
+        "name": "Default Calendar",
+        "color": "#7aa2f7",
+        "favorite": false,
+        "archived": false,
+        "readable": true,
+        "raw": "{}"
+      }
+    },
+    {
+      "case": "any other calendar, unnamed",
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "raw": "{}",
+      "calendar": {
+        "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "name": "Untitled calendar",
+        "color": "#7aa2f7",
+        "favorite": false,
+        "archived": false,
+        "readable": true,
+        "raw": "{}"
+      }
+    },
+    {
+      "case": "a payload that is not JSON at all",
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "raw": "this was never a calendar",
+      "calendar": {
+        "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "name": "Untitled calendar",
+        "color": "#7aa2f7",
+        "favorite": false,
+        "archived": false,
+        "readable": true,
+        "raw": "this was never a calendar"
+      }
+    },
+    {
+      "case": "a name and a colour that are only space",
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "raw": "{\"name\":\"  \",\"color\":\"   \",\"favorite\":true}",
+      "calendar": {
+        "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "name": "Untitled calendar",
+        "color": "#7aa2f7",
+        "favorite": true,
+        "archived": false,
+        "readable": true,
+        "raw": "{\"name\":\"  \",\"color\":\"   \",\"favorite\":true}"
+      }
+    },
+    {
+      "case": "a payload from a newer schema major",
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "raw": "{\"@type\":\"Calendar\",\"version\":\"2.0\",\"name\":\"future\"}",
+      "calendar": {
+        "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "name": "future",
+        "color": "#7aa2f7",
+        "favorite": false,
+        "archived": false,
+        "readable": false,
+        "raw": "{\"@type\":\"Calendar\",\"version\":\"2.0\",\"name\":\"future\"}"
+      }
+    }
+  ],
+  "event_writes": [
+    {
+      "case": "a timed event with nothing optional set",
+      "draft": {
+        "title": "Standup",
+        "start": "2026-10-01T09:00:00.000Z",
+        "participants": []
+      },
+      "payload": "{\"@type\":\"CalendarEvent\",\"start\":\"2026-10-01T09:00:00.000Z\",\"title\":\"Standup\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "an all-day event, whose end is the inclusive last day",
+      "draft": {
+        "title": "Conference",
+        "start": "2026-10-01",
+        "end": "2026-10-03",
+        "participants": [],
+        "calendar_id": "00000000-0000-0000-0000-000000000003"
+      },
+      "payload": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"00000000-0000-0000-0000-000000000003\",\"end\":\"2026-10-03\",\"start\":\"2026-10-01\",\"title\":\"Conference\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "blank optional fields, which are the same as absent ones",
+      "draft": {
+        "title": "  Standup  ",
+        "start": " 2026-10-01T09:00:00.000Z ",
+        "end": "   ",
+        "notes": "",
+        "location": " Room 3 ",
+        "participants": [
+          "  ",
+          " alice@example.com "
+        ],
+        "calendar_id": "  "
+      },
+      "payload": "{\"@type\":\"CalendarEvent\",\"location\":\"Room 3\",\"participants\":[\"alice@example.com\"],\"start\":\"2026-10-01T09:00:00.000Z\",\"title\":\"Standup\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a weekly rule on five weekdays, every other week, with an end date",
+      "draft": {
+        "title": "Standup",
+        "start": "2026-10-01T09:00:00.000Z",
+        "end": "2026-10-01T09:15:00.000Z",
+        "notes": "Daily sync",
+        "location": "Room 3",
+        "participants": [
+          "alice@example.com",
+          "bob@example.com"
+        ],
+        "timezone": "Europe/London",
+        "calendar_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "recurrence": {
+          "frequency": "weekly",
+          "interval": 2,
+          "until": "2026-12-31",
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        "raw": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"conference\":{\"from\":\"a later build\"},\"end\":\"2026-10-01T09:15:00.000Z\",\"location\":\"Room 3\",\"notes\":\"Daily sync\",\"participants\":[\"alice@example.com\",\"bob@example.com\"],\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"until\":\"2026-12-31\",\"weekdays\":[1,2,3,4,5]},\"start\":\"2026-10-01T09:00:00.000Z\",\"timezone\":\"Europe/London\",\"title\":\"Standup\",\"version\":\"1.0\"}"
+      },
+      "payload": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"conference\":{\"from\":\"a later build\"},\"end\":\"2026-10-01T09:15:00.000Z\",\"location\":\"Room 3\",\"notes\":\"Daily sync\",\"participants\":[\"alice@example.com\",\"bob@example.com\"],\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"until\":\"2026-12-31\",\"weekdays\":[1,2,3,4,5]},\"start\":\"2026-10-01T09:00:00.000Z\",\"timezone\":\"Europe/London\",\"title\":\"Standup\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "the third Tuesday of every month, counted out",
+      "draft": {
+        "title": "Board",
+        "start": "2026-10-20T16:00:00.000Z",
+        "participants": [],
+        "timezone": "Europe/London",
+        "recurrence": {
+          "frequency": "monthly",
+          "count": 12,
+          "weekdays": [],
+          "nth_weekday": {
+            "ordinal": 3,
+            "weekday": 2
+          }
+        }
+      },
+      "payload": "{\"@type\":\"CalendarEvent\",\"recurrence\":{\"count\":12,\"frequency\":\"monthly\",\"nthWeekday\":{\"ordinal\":3,\"weekday\":2}},\"start\":\"2026-10-20T16:00:00.000Z\",\"timezone\":\"Europe/London\",\"title\":\"Board\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "an edit that clears the repeat, the guests and the notes",
+      "draft": {
+        "title": "Standup",
+        "start": "2026-10-01T09:00:00.000Z",
+        "participants": [],
+        "calendar_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "raw": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"conference\":{\"from\":\"a later build\"},\"end\":\"2026-10-01T09:15:00.000Z\",\"location\":\"Room 3\",\"notes\":\"Daily sync\",\"participants\":[\"alice@example.com\",\"bob@example.com\"],\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"until\":\"2026-12-31\",\"weekdays\":[1,2,3,4,5]},\"start\":\"2026-10-01T09:00:00.000Z\",\"timezone\":\"Europe/London\",\"title\":\"Standup\",\"version\":\"1.0\"}"
+      },
+      "payload": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"conference\":{\"from\":\"a later build\"},\"start\":\"2026-10-01T09:00:00.000Z\",\"title\":\"Standup\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "an edit to an event whose rule this build cannot name",
+      "draft": {
+        "title": "Pay day, moved",
+        "start": "2026-10-01",
+        "participants": [],
+        "unreadable_recurrence": "{\"frequency\":\"hourly\",\"interval\":3}",
+        "raw": "{\"@type\":\"CalendarEvent\",\"recurrence\":{\"frequency\":\"hourly\",\"interval\":3},\"start\":\"2026-10-01\",\"title\":\"Pay day\",\"version\":\"1.0\"}"
+      },
+      "payload": "{\"@type\":\"CalendarEvent\",\"recurrence\":{\"frequency\":\"hourly\",\"interval\":3},\"start\":\"2026-10-01\",\"title\":\"Pay day, moved\",\"version\":\"1.0\"}"
+    }
+  ],
+  "event_parses": [
+    {
+      "case": "the richest payload any client writes",
+      "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      "raw": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"conference\":{\"from\":\"a later build\"},\"end\":\"2026-10-01T09:15:00.000Z\",\"location\":\"Room 3\",\"notes\":\"Daily sync\",\"participants\":[\"alice@example.com\",\"bob@example.com\"],\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"until\":\"2026-12-31\",\"weekdays\":[1,2,3,4,5]},\"start\":\"2026-10-01T09:00:00.000Z\",\"timezone\":\"Europe/London\",\"title\":\"Standup\",\"version\":\"1.0\"}",
+      "event": {
+        "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "title": "Standup",
+        "start": "2026-10-01T09:00:00.000Z",
+        "end": "2026-10-01T09:15:00.000Z",
+        "notes": "Daily sync",
+        "location": "Room 3",
+        "participants": [
+          "alice@example.com",
+          "bob@example.com"
+        ],
+        "timezone": "Europe/London",
+        "calendar_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "recurrence": {
+          "frequency": "weekly",
+          "interval": 2,
+          "until": "2026-12-31",
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        "readable": true,
+        "raw": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"conference\":{\"from\":\"a later build\"},\"end\":\"2026-10-01T09:15:00.000Z\",\"location\":\"Room 3\",\"notes\":\"Daily sync\",\"participants\":[\"alice@example.com\",\"bob@example.com\"],\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"until\":\"2026-12-31\",\"weekdays\":[1,2,3,4,5]},\"start\":\"2026-10-01T09:00:00.000Z\",\"timezone\":\"Europe/London\",\"title\":\"Standup\",\"version\":\"1.0\"}"
+      }
+    },
+    {
+      "case": "an empty object",
+      "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      "raw": "{}",
+      "event": {
+        "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "title": "Untitled event",
+        "start": "",
+        "participants": [],
+        "readable": true,
+        "raw": "{}"
+      }
+    },
+    {
+      "case": "a payload that is not JSON at all",
+      "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      "raw": "this was never an event",
+      "event": {
+        "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "title": "Untitled event",
+        "start": "",
+        "participants": [],
+        "readable": true,
+        "raw": "this was never an event"
+      }
+    },
+    {
+      "case": "a payload that is JSON but not an object",
+      "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      "raw": "[1,2,3]",
+      "event": {
+        "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "title": "Untitled event",
+        "start": "",
+        "participants": [],
+        "readable": true,
+        "raw": "[1,2,3]"
+      }
+    },
+    {
+      "case": "a title that is only space, and a start that is not a string",
+      "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      "raw": "{\"title\":\"   \",\"start\":42}",
+      "event": {
+        "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "title": "Untitled event",
+        "start": "",
+        "participants": [],
+        "readable": true,
+        "raw": "{\"title\":\"   \",\"start\":42}"
+      }
+    },
+    {
+      "case": "guests that are not all strings",
+      "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      "raw": "{\"title\":\"t\",\"participants\":[\"alice@example.com\",null,\"  \",7]}",
+      "event": {
+        "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "title": "t",
+        "start": "",
+        "participants": [
+          "alice@example.com"
+        ],
+        "readable": true,
+        "raw": "{\"title\":\"t\",\"participants\":[\"alice@example.com\",null,\"  \",7]}"
+      }
+    },
+    {
+      "case": "a rule naming a frequency this build does not know",
+      "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      "raw": "{\"@type\":\"CalendarEvent\",\"recurrence\":{\"frequency\":\"hourly\",\"interval\":3},\"start\":\"2026-10-01\",\"title\":\"Pay day\",\"version\":\"1.0\"}",
+      "event": {
+        "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "title": "Pay day",
+        "start": "2026-10-01",
+        "participants": [],
+        "unreadable_recurrence": "{\"frequency\":\"hourly\",\"interval\":3}",
+        "readable": true,
+        "raw": "{\"@type\":\"CalendarEvent\",\"recurrence\":{\"frequency\":\"hourly\",\"interval\":3},\"start\":\"2026-10-01\",\"title\":\"Pay day\",\"version\":\"1.0\"}"
+      }
+    },
+    {
+      "case": "a rule whose fields are out of range",
+      "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      "raw": "{\"title\":\"t\",\"recurrence\":{\"frequency\":\"WEEKLY\",\"interval\":1,\"weekdays\":[1,9,3],\"count\":0,\"dayOfMonth\":40,\"nthWeekday\":{\"ordinal\":7,\"weekday\":2}}}",
+      "event": {
+        "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "title": "t",
+        "start": "",
+        "participants": [],
+        "recurrence": {
+          "frequency": "weekly",
+          "weekdays": [
+            1,
+            3
+          ]
+        },
+        "readable": true,
+        "raw": "{\"title\":\"t\",\"recurrence\":{\"frequency\":\"WEEKLY\",\"interval\":1,\"weekdays\":[1,9,3],\"count\":0,\"dayOfMonth\":40,\"nthWeekday\":{\"ordinal\":7,\"weekday\":2}}}"
+      }
+    },
+    {
+      "case": "a payload from a newer schema major",
+      "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      "raw": "{\"@type\":\"CalendarEvent\",\"version\":\"2.0\",\"title\":\"future\"}",
+      "event": {
+        "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "title": "future",
+        "start": "",
+        "participants": [],
+        "readable": false,
+        "raw": "{\"@type\":\"CalendarEvent\",\"version\":\"2.0\",\"title\":\"future\"}"
+      }
+    }
+  ],
+  "refusals": [
+    {
+      "case": "editing a calendar from a newer schema major",
+      "error": "PayloadSchema"
+    },
+    {
+      "case": "editing an event from a newer schema major",
+      "error": "PayloadSchema"
+    }
+  ]
+}

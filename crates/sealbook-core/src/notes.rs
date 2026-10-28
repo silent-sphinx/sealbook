@@ -30,11 +30,13 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use crate::payload::{as_object, text, trimmed, write_payload};
+use crate::payload::{
+    as_object, declared_readable, refuse_newer_major, text, trimmed, write_payload,
+};
 use crate::CoreError;
-use sealbook_protocol::{payload_schema_readable, PAYLOAD_SCHEMA_VERSION};
+use sealbook_protocol::PAYLOAD_SCHEMA_VERSION;
 
-pub use sealbook_protocol::{DEFAULT_NOTEBOOK_NAME, NOTE_CONTENT_TYPE, NOTEBOOK_CONTENT_TYPE};
+pub use sealbook_protocol::{DEFAULT_NOTEBOOK_NAME, NOTEBOOK_CONTENT_TYPE, NOTE_CONTENT_TYPE};
 
 /// What a note with no readable title is listed as.
 pub const UNTITLED_NOTE_TITLE: &str = "Untitled note";
@@ -349,29 +351,6 @@ fn fallback_notebook_name(id: &str) -> String {
     }
 }
 
-fn declared_readable(object: &Map<String, Value>) -> bool {
-    match object.get("version").and_then(Value::as_str) {
-        Some(declared) => payload_schema_readable(declared),
-        None => true,
-    }
-}
-
-fn refuse_newer_major(previous: Option<&str>) -> Result<(), CoreError> {
-    let Some(object) = previous.and_then(as_object) else {
-        return Ok(());
-    };
-    if declared_readable(&object) {
-        return Ok(());
-    }
-    Err(CoreError::PayloadSchema {
-        declared: object
-            .get("version")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
-    })
-}
-
 /// One `attachments` entry.
 ///
 /// An entry missing any field needed to fetch and verify the bytes is dropped
@@ -381,7 +360,12 @@ fn refuse_newer_major(previous: Option<&str>) -> Result<(), CoreError> {
 /// entry that cannot name its own bytes.
 fn parse_attachment(value: &Value) -> Option<CoreNoteAttachment> {
     let object = value.as_object()?;
-    let string = |key: &str| object.get(key).and_then(Value::as_str).map(ToOwned::to_owned);
+    let string = |key: &str| {
+        object
+            .get(key)
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+    };
     let number = |key: &str| object.get(key).and_then(Value::as_u64);
 
     let known = [
@@ -421,14 +405,14 @@ fn parse_attachment(value: &Value) -> Option<CoreNoteAttachment> {
     })
 }
 
-fn parse_attachments(value: Option<&Value>) -> Vec<CoreNoteAttachment> {
+pub(crate) fn parse_attachments(value: Option<&Value>) -> Vec<CoreNoteAttachment> {
     value
         .and_then(Value::as_array)
         .map(|entries| entries.iter().filter_map(parse_attachment).collect())
         .unwrap_or_default()
 }
 
-fn attachment_json(attachment: &CoreNoteAttachment) -> Value {
+pub(crate) fn attachment_json(attachment: &CoreNoteAttachment) -> Value {
     let mut entry = match as_object(&attachment.extra) {
         Some(extra) => extra,
         None => Map::new(),
@@ -500,10 +484,7 @@ pub mod ffi {
     }
 
     #[uniffi::export(name = "notebook_write")]
-    pub fn notebook_write(
-        name: String,
-        previous_raw: Option<String>,
-    ) -> Result<String, CoreError> {
+    pub fn notebook_write(name: String, previous_raw: Option<String>) -> Result<String, CoreError> {
         super::notebook_write(&name, previous_raw.as_deref())
     }
 
@@ -752,10 +733,7 @@ mod tests {
 
     #[test]
     fn a_note_in_a_notebook_that_is_gone_shows_the_default_notebooks_name() {
-        let notebooks = vec![notebook_parse(
-            &default_notebook_id(),
-            r#"{"name":"Mine"}"#,
-        )];
+        let notebooks = vec![notebook_parse(&default_notebook_id(), r#"{"name":"Mine"}"#)];
         assert_eq!(notebook_name_by_id(&notebooks, None), "Mine");
         assert_eq!(
             notebook_name_by_id(&notebooks, Some("missing".into())),

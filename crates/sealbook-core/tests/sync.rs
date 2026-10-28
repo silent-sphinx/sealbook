@@ -92,11 +92,7 @@ impl Fixture {
             tombstone_floor: page["tombstone_floor"].as_u64().unwrap_or(0),
             has_more: page["has_more"].as_bool().unwrap(),
             resync: page["resync"].as_bool().unwrap_or(false),
-            highest_revision: rows(page)
-                .iter()
-                .map(|row| row.revision)
-                .max()
-                .unwrap_or(0),
+            highest_revision: rows(page).iter().map(|row| row.revision).max().unwrap_or(0),
         }
     }
 
@@ -198,10 +194,7 @@ fn only_the_newest_revision_of_each_object_survives_the_walk() {
     let fixture = fixture();
     let current = fixture.current();
     assert_eq!(current.len(), 5);
-    let mut seen: Vec<(Uuid, u64)> = current
-        .iter()
-        .map(|row| (row.id, row.revision))
-        .collect();
+    let mut seen: Vec<(Uuid, u64)> = current.iter().map(|row| (row.id, row.revision)).collect();
     seen.sort();
     let superseded = seen.iter().any(|(_, revision)| *revision == 2);
     assert!(!superseded, "the superseded revision was kept: {seen:?}");
@@ -323,7 +316,10 @@ fn the_checked_in_fixture_is_what_the_generator_builds() {
     assert_eq!(built.pages.len(), have.pages.len());
     for (built, have) in built.pages.iter().zip(&have.pages) {
         assert_eq!(built["request_path"], have["request_path"]);
-        assert_eq!(built["manifest"]["object_count"], have["manifest"]["object_count"]);
+        assert_eq!(
+            built["manifest"]["object_count"],
+            have["manifest"]["object_count"]
+        );
         assert_eq!(built["has_more"], have["has_more"]);
     }
 }

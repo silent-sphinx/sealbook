@@ -28,10 +28,10 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use sealbook_protocol::{
-    AttachmentListEntry, AttachmentMetaResponse, CommitAttachmentResponse,
-    CreateAttachmentRequest, CreateAttachmentResponse, ErrorBody, ListAttachmentsResponse,
-    ATTACHMENT_CHUNK_SIZE, ATTACHMENT_CHUNK_TAG_LEN, ATTACHMENT_STATE_COMMITTED,
-    ATTACHMENT_STATE_PENDING, MAX_ATTACHMENT_SIZE,
+    AttachmentListEntry, AttachmentMetaResponse, CommitAttachmentResponse, CreateAttachmentRequest,
+    CreateAttachmentResponse, ErrorBody, ListAttachmentsResponse, ATTACHMENT_CHUNK_SIZE,
+    ATTACHMENT_CHUNK_TAG_LEN, ATTACHMENT_STATE_COMMITTED, ATTACHMENT_STATE_PENDING,
+    MAX_ATTACHMENT_SIZE,
 };
 
 use crate::session::require_session;
@@ -75,10 +75,7 @@ async fn owns_collection(
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "collection"))
 }
 
-async fn rate_limit(
-    state: &Shared,
-    account_id: &str,
-) -> Result<(), (StatusCode, Json<ErrorBody>)> {
+async fn rate_limit(state: &Shared, account_id: &str) -> Result<(), (StatusCode, Json<ErrorBody>)> {
     if !state
         .limiter
         .allow_account(
@@ -114,11 +111,12 @@ pub(crate) async fn create_attachment(
     }
     // The declared chunking must be the one and only tiling of the declared size,
     // so the completeness check at commit (count of stored chunks) is meaningful.
-    let expected_chunks = body
-        .total_plaintext_size
-        .div_ceil(body.chunk_size as u64);
+    let expected_chunks = body.total_plaintext_size.div_ceil(body.chunk_size as u64);
     if expected_chunks != body.chunk_count as u64 {
-        return Err(err(StatusCode::BAD_REQUEST, "chunk count does not match size"));
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "chunk count does not match size",
+        ));
     }
 
     // An upper-bound reservation: every chunk at full size plus its AEAD tag. The
@@ -525,10 +523,7 @@ pub(crate) async fn list_attachments(
     // Ids and age only. The server is content-blind, so it cannot know which
     // attachments a note still references: the orphan sweep is the client's,
     // driven by cross-referencing this list against its decrypted notes.
-    let after = query
-        .after
-        .map(|id| id.to_string())
-        .unwrap_or_default();
+    let after = query.after.map(|id| id.to_string()).unwrap_or_default();
     let rows = sqlx::query(
         "SELECT attachment_id, state, created_at FROM attachments
          WHERE account_id = ? AND collection_id = ? AND attachment_id > ?

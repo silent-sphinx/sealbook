@@ -2,15 +2,16 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sealbook_core::{
     AppliedManifest, AttachmentLimits, AttachmentPlan, AttachmentRow, AuthRequest,
-    BucketedManifest, BucketsOutcome, ChangesPage, ChunkRange, CoreBuild, CoreDevice,
-    CoreDeviceSecrets, CoreDeviceState, CoreManifestEntry, CorePairPreview, CoreRoster,
-    CoreNote, CoreNoteDraft, CoreNotebook, CoreRosterPin, CoreSealedRow, CoreSession, HttpRequest,
-    HttpResponse, LoggedIn, LoginStarting,
-    ManifestContext, ManifestOutcome, ManifestPlan, ManifestSigner, OpaqueStart, PairApproval,
-    PairJoined, PairStatus, PasswordChange, PasswordChangeStarted, RecoverStarted, Recovering,
-    RegisterIdentity, Registering, ResealRow, RosterContext, RotationPlan, RotationState,
-    RowOutcome, RowRef, SignedManifest, SweepCursor, SweepPage, VerifiedRoster, WalkCursor,
-    WalkStep,
+    BucketedManifest, BucketsOutcome, ChangesPage, ChunkRange, CoreAddressBook,
+    CoreAddressBookDraft, CoreBuild, CoreCalendar, CoreCalendarDraft, CoreCalendarEvent,
+    CoreCalendarEventDraft, CoreContact, CoreContactDraft, CoreContactProfile, CoreDevice,
+    CoreDeviceSecrets, CoreDeviceState, CoreManifestEntry, CoreNote, CoreNoteDraft, CoreNotebook,
+    CorePairPreview, CoreRoster, CoreRosterPin, CoreSealedRow, CoreSession, HttpRequest,
+    HttpResponse, LoggedIn, LoginStarting, ManifestContext, ManifestOutcome, ManifestPlan,
+    ManifestSigner, OpaqueStart, PairApproval, PairJoined, PairStatus, PasswordChange,
+    PasswordChangeStarted, RecoverStarted, Recovering, RegisterIdentity, Registering, ResealRow,
+    RosterContext, RotationPlan, RotationState, RowOutcome, RowRef, SignedManifest, SweepCursor,
+    SweepPage, VerifiedRoster, WalkCursor, WalkStep,
 };
 use sealbook_crypto::RosterPin;
 use sealbook_crypto::{
@@ -2101,4 +2102,163 @@ pub fn core_notebook_name_by_id(
         &notebooks.to_rust()?.0,
         notebook_id,
     ))
+}
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct CoreCalendarList(pub Vec<CoreCalendar>);
+
+/// Every key a calendar writer owns, and every key an event writer owns: the
+/// union across all four clients rather than the subset this one's editor shows.
+#[wasm_bindgen]
+pub fn core_calendar_keys() -> Vec<String> {
+    sealbook_core::CALENDAR_KEYS
+        .iter()
+        .map(|key| key.to_string())
+        .collect()
+}
+
+#[wasm_bindgen]
+pub fn core_calendar_event_keys() -> Vec<String> {
+    sealbook_core::CALENDAR_EVENT_KEYS
+        .iter()
+        .map(|key| key.to_string())
+        .collect()
+}
+
+#[wasm_bindgen]
+pub fn core_default_calendar_id() -> String {
+    sealbook_core::default_calendar_id()
+}
+
+/// Reads a stored calendar payload. Lenient throughout: one that will not parse
+/// comes back as a named row the user can still find and delete.
+#[wasm_bindgen]
+pub fn core_calendar_parse(id: &str, raw: &str) -> Result<Ts<CoreCalendar>, JsError> {
+    Ok(sealbook_core::calendar_parse(id, raw).into_ts()?)
+}
+
+/// Serialises a calendar onto `draft.raw`, so the colour and the flags a host
+/// did not change survive the write. Throws on a payload from a newer schema
+/// major, which this build may read but must not write over.
+#[wasm_bindgen]
+pub fn core_calendar_write(draft: Ts<CoreCalendarDraft>) -> Result<String, JsError> {
+    sealbook_core::calendar_write(&draft.to_rust()?).map_err(core_err)
+}
+
+#[wasm_bindgen]
+pub fn core_event_parse(id: &str, raw: &str) -> Result<Ts<CoreCalendarEvent>, JsError> {
+    Ok(sealbook_core::event_parse(id, raw).into_ts()?)
+}
+
+/// Serialises an event onto `draft.raw`. A repeat rule core cannot name rides
+/// through in `unreadable_recurrence` rather than being dropped.
+#[wasm_bindgen]
+pub fn core_event_write(draft: Ts<CoreCalendarEventDraft>) -> Result<String, JsError> {
+    sealbook_core::event_write(&draft.to_rust()?).map_err(core_err)
+}
+
+/// The name to show for an event's calendar. A calendar that is gone shows the
+/// default calendar's name; an event in no calendar has no name to show.
+#[wasm_bindgen]
+pub fn core_calendar_name_by_id(
+    calendars: Ts<CoreCalendarList>,
+    calendar_id: Option<String>,
+) -> Result<Option<String>, JsError> {
+    Ok(sealbook_core::calendar_name_by_id(
+        &calendars.to_rust()?.0,
+        calendar_id,
+    ))
+}
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct CoreAddressBookList(pub Vec<CoreAddressBook>);
+
+fn key_list(keys: &[&str]) -> Vec<String> {
+    keys.iter().map(|key| key.to_string()).collect()
+}
+
+/// Every key a card writer owns: the union across all four clients, legacy
+/// spellings included, rather than the subset this one's editor shows.
+#[wasm_bindgen]
+pub fn core_contact_keys() -> Vec<String> {
+    key_list(sealbook_core::CONTACT_KEYS)
+}
+
+#[wasm_bindgen]
+pub fn core_address_book_keys() -> Vec<String> {
+    key_list(sealbook_core::ADDRESS_BOOK_KEYS)
+}
+
+#[wasm_bindgen]
+pub fn core_contact_profile_keys() -> Vec<String> {
+    key_list(sealbook_core::PROFILE_KEYS)
+}
+
+#[wasm_bindgen]
+pub fn core_default_address_book_id() -> String {
+    sealbook_core::default_address_book_id()
+}
+
+/// A blank id, or the sidebar's `all`, is the default address book.
+#[wasm_bindgen]
+pub fn core_resolve_address_book_id(id: Option<String>) -> String {
+    sealbook_core::resolve_address_book_id(id)
+}
+
+/// Reads a stored card. Lenient throughout: one that will not parse comes back
+/// as a named row the user can still find and delete.
+#[wasm_bindgen]
+pub fn core_contact_parse(id: &str, raw: &str) -> Result<Ts<CoreContact>, JsError> {
+    Ok(sealbook_core::contact_parse(id, raw).into_ts()?)
+}
+
+/// Serialises a card onto `draft.raw`, so the entries the editor does not show
+/// survive the write. `now` is the caller's clock. Throws on a payload from a
+/// newer schema major, which this build may read but must not write over.
+#[wasm_bindgen]
+pub fn core_contact_write(draft: Ts<CoreContactDraft>, now: &str) -> Result<String, JsError> {
+    sealbook_core::contact_write(&draft.to_rust()?, now).map_err(core_err)
+}
+
+#[wasm_bindgen]
+pub fn core_address_book_parse(id: &str, raw: &str) -> Result<Ts<CoreAddressBook>, JsError> {
+    Ok(sealbook_core::address_book_parse(id, raw).into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_address_book_write(draft: Ts<CoreAddressBookDraft>) -> Result<String, JsError> {
+    sealbook_core::address_book_write(&draft.to_rust()?).map_err(core_err)
+}
+
+/// The name to show for a card's address book. A book that is gone shows the
+/// default book's name.
+#[wasm_bindgen]
+pub fn core_address_book_name_by_id(
+    books: Ts<CoreAddressBookList>,
+    address_book_id: Option<String>,
+) -> Result<String, JsError> {
+    Ok(sealbook_core::address_book_name_by_id(
+        &books.to_rust()?.0,
+        address_book_id,
+    ))
+}
+
+/// Reads a profile from its JSON text, for the importers that carry one outside
+/// a card. Undefined for text that is not a profile.
+#[wasm_bindgen]
+pub fn core_contact_profile_parse(raw: &str) -> Result<Option<Ts<CoreContactProfile>>, JsError> {
+    match sealbook_core::profile_parse(raw) {
+        Some(profile) => Ok(Some(profile.into_ts()?)),
+        None => Ok(None),
+    }
+}
+
+/// A profile as JSON text, or undefined when nothing in it would survive a write.
+#[wasm_bindgen]
+pub fn core_contact_profile_write(
+    profile: Ts<CoreContactProfile>,
+) -> Result<Option<String>, JsError> {
+    Ok(sealbook_core::profile_write(&profile.to_rust()?))
 }

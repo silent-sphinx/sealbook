@@ -20,7 +20,8 @@ use sealbook_protocol::{
 
 use crate::{ClientError, SealbookClient};
 use sealbook_core::{
-    manifest_apply, open_stored, BucketedManifest, ManifestPlan, RowOutcome, StoredRow,
+    manifest_apply, open_stored, BucketedManifest, CoreAddressBookDraft, CoreCalendarDraft,
+    CoreCalendarEventDraft, ManifestPlan, RowOutcome, StoredRow,
 };
 
 /// One object's encrypted bytes, waiting to be written.
@@ -138,17 +139,15 @@ impl SealbookClient {
             .await
     }
 
+    /// Writes an address book, merging onto `draft.raw`. This used to rebuild the
+    /// record from the name alone, so a write dropped any key another client had
+    /// put there.
     pub async fn put_address_book(
         &mut self,
         object_id: Uuid,
-        name: &str,
+        draft: &CoreAddressBookDraft,
     ) -> Result<u64, ClientError> {
-        let plaintext = serde_json::json!({
-            "@type": "AddressBook",
-            "version": "1.0",
-            "name": name,
-        })
-        .to_string();
+        let plaintext = sealbook_core::address_book_write(draft)?;
         self.put_sealed(object_id, plaintext.as_bytes(), ADDRESS_BOOK_CONTENT_TYPE)
             .await
     }
@@ -158,8 +157,14 @@ impl SealbookClient {
         if books.iter().any(|(id, _)| *id == DEFAULT_ADDRESS_BOOK_ID) {
             return Ok(DEFAULT_ADDRESS_BOOK_ID);
         }
-        self.put_address_book(DEFAULT_ADDRESS_BOOK_ID, DEFAULT_ADDRESS_BOOK_NAME)
-            .await?;
+        self.put_address_book(
+            DEFAULT_ADDRESS_BOOK_ID,
+            &CoreAddressBookDraft {
+                name: DEFAULT_ADDRESS_BOOK_NAME.to_string(),
+                raw: None,
+            },
+        )
+        .await?;
         Ok(DEFAULT_ADDRESS_BOOK_ID)
     }
 
@@ -169,7 +174,10 @@ impl SealbookClient {
             if obj.content_type != ADDRESS_BOOK_CONTENT_TYPE {
                 continue;
             }
-            out.push((obj.id, container_name(&obj.plaintext)));
+            out.push((
+                obj.id,
+                sealbook_core::address_book_parse(&obj.id.to_string(), &obj.plaintext).name,
+            ));
         }
         out.sort_by(|a, b| {
             if a.0 == DEFAULT_ADDRESS_BOOK_ID {
@@ -197,30 +205,27 @@ impl SealbookClient {
     pub async fn put_calendar_event(
         &mut self,
         object_id: Uuid,
-        event: &str,
+        draft: &CoreCalendarEventDraft,
     ) -> Result<u64, ClientError> {
-        self.put_sealed(object_id, event.as_bytes(), CALENDAR_EVENT_CONTENT_TYPE)
+        let plaintext = sealbook_core::event_write(draft)?;
+        self.put_sealed(object_id, plaintext.as_bytes(), CALENDAR_EVENT_CONTENT_TYPE)
             .await
     }
 
+    /// Writes a calendar, merging onto `draft.raw`.
+    ///
+    /// The `previous` payload matters here as it does for a notebook: this used
+    /// to rebuild the record from the name and the colour, so a write dropped
+    /// the favourite and archived flags the other clients had set, and declared
+    /// `"1.0"` as a literal rather than the schema version this build speaks.
     pub async fn put_calendar(
         &mut self,
         object_id: Uuid,
-        name: &str,
-        color: &str,
+        draft: &CoreCalendarDraft,
     ) -> Result<u64, ClientError> {
-        let calendar = serde_json::json!({
-            "@type": "Calendar",
-            "version": "1.0",
-            "name": name,
-            "color": color,
-        });
-        self.put_sealed(
-            object_id,
-            calendar.to_string().as_bytes(),
-            CALENDAR_CONTENT_TYPE,
-        )
-        .await
+        let plaintext = sealbook_core::calendar_write(draft)?;
+        self.put_sealed(object_id, plaintext.as_bytes(), CALENDAR_CONTENT_TYPE)
+            .await
     }
 
     /// Creates the reserved default calendar if the collection has none.
@@ -234,20 +239,38 @@ impl SealbookClient {
         }
         self.put_calendar(
             DEFAULT_CALENDAR_ID,
-            DEFAULT_CALENDAR_NAME,
-            DEFAULT_CALENDAR_COLOR,
+            &CoreCalendarDraft {
+                name: DEFAULT_CALENDAR_NAME.to_string(),
+                color: DEFAULT_CALENDAR_COLOR.to_string(),
+                ..Default::default()
+            },
         )
         .await?;
         Ok(DEFAULT_CALENDAR_ID)
     }
 
+    /// Every calendar, by name, with the default one first as the other clients
+    /// list it.
     pub async fn list_calendars(&mut self) -> Result<Vec<(Uuid, String)>, ClientError> {
         let mut out = Vec::new();
         for obj in self.listed_objects().await? {
-            if obj.content_type == CALENDAR_CONTENT_TYPE {
-                out.push((obj.id, obj.plaintext));
+            if obj.content_type != CALENDAR_CONTENT_TYPE {
+                continue;
             }
+            out.push((
+                obj.id,
+                sealbook_core::calendar_parse(&obj.id.to_string(), &obj.plaintext).name,
+            ));
         }
+        out.sort_by(|a, b| {
+            if a.0 == DEFAULT_CALENDAR_ID {
+                return std::cmp::Ordering::Less;
+            }
+            if b.0 == DEFAULT_CALENDAR_ID {
+                return std::cmp::Ordering::Greater;
+            }
+            a.1.to_lowercase().cmp(&b.1.to_lowercase())
+        });
         Ok(out)
     }
 

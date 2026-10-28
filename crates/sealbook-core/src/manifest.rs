@@ -136,7 +136,9 @@ pub struct BucketedManifest {
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum BucketsOutcome {
-    Signed { held: BucketedManifest },
+    Signed {
+        held: BucketedManifest,
+    },
     /// No manifest yet. A bucket answer carries no revision for the entries it
     /// did not serve, so the collection's next revision cannot be chosen from
     /// it: the host reads the whole set and calls
@@ -277,7 +279,9 @@ pub fn manifest_buckets_accept(
     }
     for entry in &served.entries {
         if !wanted.contains(&manifest_bucket_of(entry.id)) {
-            return Err(CoreError::manifest("server put an entry in the wrong bucket"));
+            return Err(CoreError::manifest(
+                "server put an entry in the wrong bucket",
+            ));
         }
     }
     let Some(manifest) = served.manifest else {
@@ -558,7 +562,11 @@ fn unmanifested(
     entries: Vec<CoreManifestEntry>,
 ) -> Result<ManifestOutcome, CoreError> {
     manifest_absence_ok(context)?;
-    let latest_revision = entries.iter().map(|entry| entry.revision).max().unwrap_or(0);
+    let latest_revision = entries
+        .iter()
+        .map(|entry| entry.revision)
+        .max()
+        .unwrap_or(0);
     Ok(ManifestOutcome::Unmanifested {
         latest_revision,
         entries,
@@ -707,7 +715,8 @@ fn decode(text: &str, what: &str) -> Result<Vec<u8>, CoreError> {
 pub mod ffi {
     use super::{
         AppliedManifest, BucketedManifest, BucketsOutcome, CoreError, CoreManifestEntry,
-        HttpRequest, ManifestContext, ManifestOutcome, ManifestPlan, ManifestSigner, SignedManifest,
+        HttpRequest, ManifestContext, ManifestOutcome, ManifestPlan, ManifestSigner,
+        SignedManifest,
     };
     use crate::{CoreDevice, HttpResponse};
     use sealbook_crypto::DeviceSigningSecrets;
@@ -721,7 +730,10 @@ pub mod ffi {
         }
     }
 
-    fn secrets(mldsa_seed_b64: &str, ed25519_sk_b64: &str) -> Result<DeviceSigningSecrets, CoreError> {
+    fn secrets(
+        mldsa_seed_b64: &str,
+        ed25519_sk_b64: &str,
+    ) -> Result<DeviceSigningSecrets, CoreError> {
         Ok(DeviceSigningSecrets {
             mldsa_seed: super::decode(mldsa_seed_b64, "ML-DSA seed")?,
             ed25519_sk: super::decode(ed25519_sk_b64, "Ed25519 secret key")?,

@@ -4,9 +4,7 @@
 //! shell around it. Core says what to ask for and what each page means, this
 //! moves the bytes and keeps the rows.
 
-use sealbook_core::{
-    changes_request, latest_revisions, walk_page, ChangesPage, RowRef, WalkStep,
-};
+use sealbook_core::{changes_request, latest_revisions, walk_page, ChangesPage, RowRef, WalkStep};
 use sealbook_protocol::{ChangesResponse, ObjectChange};
 
 use crate::{ClientError, SealbookClient};

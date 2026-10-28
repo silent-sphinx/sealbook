@@ -20,6 +20,9 @@
 
 use serde_json::{Map, Value};
 
+use crate::CoreError;
+use sealbook_protocol::payload_schema_readable;
+
 /// Serialises a payload: the owned fields this write names, over whatever of
 /// `previous` this build does not own.
 pub fn write_payload(previous: Option<&str>, fields: Value, owned: &[&str]) -> String {
@@ -77,6 +80,40 @@ pub(crate) fn as_object(raw: &str) -> Option<Map<String, Value>> {
         Ok(Value::Object(object)) => Some(object),
         _ => None,
     }
+}
+
+/// Whether this build reads the schema major a payload declares.
+///
+/// A payload with no `version` at all is read: the field was added after the
+/// first release, and absence means the generation this build speaks.
+pub(crate) fn declared_readable(object: &Map<String, Value>) -> bool {
+    match object.get("version").and_then(Value::as_str) {
+        Some(declared) => payload_schema_readable(declared),
+        None => true,
+    }
+}
+
+/// Refuses a write over a payload from a schema major this build does not read.
+///
+/// Carrying unknown keys through is enough for a field that was added; it is not
+/// enough for one whose meaning changed, which is the case this check exists
+/// for. Every payload type in core calls it before it writes, which is what
+/// gave the check a caller: all three clients carried a copy and none of them
+/// ran it.
+pub(crate) fn refuse_newer_major(previous: Option<&str>) -> Result<(), CoreError> {
+    let Some(object) = previous.and_then(as_object) else {
+        return Ok(());
+    };
+    if declared_readable(&object) {
+        return Ok(());
+    }
+    Err(CoreError::PayloadSchema {
+        declared: object
+            .get("version")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+    })
 }
 
 #[cfg(test)]

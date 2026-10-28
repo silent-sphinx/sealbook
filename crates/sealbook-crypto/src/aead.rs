@@ -140,8 +140,7 @@ pub fn attachment_chunk_aad(
     chunk_index: u32,
     chunk_count: u32,
 ) -> Vec<u8> {
-    let mut aad =
-        Vec::with_capacity(attachment_id.len() + collection_id.len() + 4 + 4);
+    let mut aad = Vec::with_capacity(attachment_id.len() + collection_id.len() + 4 + 4);
     aad.extend_from_slice(attachment_id);
     aad.extend_from_slice(collection_id);
     aad.extend_from_slice(&chunk_index.to_be_bytes());
@@ -164,7 +163,13 @@ pub fn encrypt_chunk(
     let cipher = XChaCha20Poly1305::new(Key::from_slice(&key.0));
     let nonce = XNonce::from_slice(&nonce_bytes);
     let ciphertext = cipher
-        .encrypt(nonce, Payload { msg: plaintext, aad })
+        .encrypt(
+            nonce,
+            Payload {
+                msg: plaintext,
+                aad,
+            },
+        )
         .map_err(|_| CryptoError::AeadEncrypt)?;
 
     Ok(EncryptedChunk {

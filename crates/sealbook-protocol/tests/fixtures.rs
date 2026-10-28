@@ -18,23 +18,20 @@ fn body(name: &str) -> Value {
     serde_json::from_str(&fixture(name)).expect("a fixture must be JSON")
 }
 
-/// Mirrors `CALENDAR_EVENT_KEYS` in `sealbook-web/src/lib/calendarApi.ts`.
-const CALENDAR_EVENT_KEYS: &[&str] = &[
-    "@type",
-    "version",
-    "title",
-    "start",
-    "end",
-    "notes",
-    "location",
-    "participants",
-    "timezone",
-    "calendarId",
-    "recurrence",
-];
-
-/// Mirrors `CALENDAR_KEYS` in `sealbook-web/src/lib/calendar.ts`.
-const CALENDAR_KEYS: &[&str] = &["@type", "version", "name", "color", "favorite", "archived"];
+/// The owned key sets, read from the shared calendar fixture rather than copied.
+///
+/// `sealbook_core::calendars` owns them, and this crate is below core rather
+/// than above it, so a constant here would be a third copy of a list whose
+/// whole point is that there is one. `payloads/calendars.json` holds core's
+/// own, checked against the constants by `sealbook-core`'s calendar tests.
+fn owned_keys(of: &str) -> Vec<String> {
+    body("payloads/calendars.json")["constants"][of]
+        .as_array()
+        .unwrap_or_else(|| panic!("the calendar fixture states {of}"))
+        .iter()
+        .map(|key| key.as_str().expect("a key is a string").to_string())
+        .collect()
+}
 
 #[test]
 fn every_payload_fixture_declares_its_type_and_a_version_this_build_speaks() {
@@ -52,15 +49,16 @@ fn every_payload_fixture_declares_its_type_and_a_version_this_build_speaks() {
 #[test]
 fn no_payload_fixture_carries_a_key_outside_its_owned_set() {
     for (name, owned) in [
-        ("payloads/calendar-event.json", CALENDAR_EVENT_KEYS),
-        ("payloads/calendar.json", CALENDAR_KEYS),
-        ("payloads/calendar-archived.json", CALENDAR_KEYS),
+        ("payloads/calendar-event.json", "calendar_event_keys"),
+        ("payloads/calendar.json", "calendar_keys"),
+        ("payloads/calendar-archived.json", "calendar_keys"),
     ] {
+        let owned = owned_keys(owned);
         let unknown: Vec<String> = body(name)
             .as_object()
             .expect("an object")
             .keys()
-            .filter(|key| !owned.contains(&key.as_str()))
+            .filter(|key| !owned.contains(key))
             .cloned()
             .collect();
         assert!(unknown.is_empty(), "{name} carries {unknown:?}");
@@ -80,7 +78,10 @@ fn an_edit_through_merge_payload_keeps_a_field_this_build_does_not_own() {
             "version": PAYLOAD_SCHEMA_VERSION,
             "title": "Renamed",
         }),
-        CALENDAR_EVENT_KEYS,
+        &owned_keys("calendar_event_keys")
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
     );
 
     assert_eq!(edited["title"], "Renamed");

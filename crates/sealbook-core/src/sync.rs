@@ -18,7 +18,7 @@ use sealbook_protocol::{ManifestBody, DEFAULT_CHANGES_LIMIT};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{CoreError, HttpRequest, Header, Method};
+use crate::{CoreError, Header, HttpRequest, Method};
 
 /// Rows a walk asks for per page. The server clamps above its own maximum.
 pub const CHANGES_PAGE_LIMIT: usize = DEFAULT_CHANGES_LIMIT;
@@ -176,11 +176,16 @@ impl UnreadableReason {
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum RowOutcome {
-    Object { content_type: String, payload: String },
+    Object {
+        content_type: String,
+        payload: String,
+    },
     /// A delete, with nothing to read. Either the row-level flag or a sealed
     /// tombstone inside the envelope, which the web client writes.
     Deleted,
-    Unreadable { reason: UnreadableReason },
+    Unreadable {
+        reason: UnreadableReason,
+    },
 }
 
 /// A walk that starts after `after`, or from nothing when that is 0.
@@ -204,7 +209,11 @@ pub fn walk_start(after: u64) -> WalkCursor {
 
 /// The request for the next page of a walk.
 pub fn changes_request(collection_id: Uuid, cursor: &WalkCursor) -> HttpRequest {
-    let snapshot = if cursor.snapshot { "&snapshot=true" } else { "" };
+    let snapshot = if cursor.snapshot {
+        "&snapshot=true"
+    } else {
+        ""
+    };
     HttpRequest {
         method: Method::Get,
         path: format!(
@@ -348,11 +357,7 @@ pub fn open_row(
 }
 
 /// [`open_row`] for a host that holds the row's bytes already.
-pub fn open_stored(
-    key: &CollectionKey,
-    collection_id: Uuid,
-    row: &StoredRow<'_>,
-) -> RowOutcome {
+pub fn open_stored(key: &CollectionKey, collection_id: Uuid, row: &StoredRow<'_>) -> RowOutcome {
     if row.tombstone {
         return RowOutcome::Deleted;
     }
@@ -413,7 +418,6 @@ fn page_seq(page: &ChangesPage) -> Result<Option<u64>, CoreError> {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -454,7 +458,9 @@ mod tests {
         let request = changes_request(Uuid::from_u128(2), &walk_start(0));
         assert!(request.path.ends_with("&snapshot=true"), "{}", request.path);
         assert!(request.path.contains("after=0"));
-        assert!(request.path.contains(&format!("limit={CHANGES_PAGE_LIMIT}")));
+        assert!(request
+            .path
+            .contains(&format!("limit={CHANGES_PAGE_LIMIT}")));
     }
 
     /// An incremental walk needs the revision log, which is the one thing a
@@ -515,7 +521,10 @@ mod tests {
         let WalkStep::Restart { cursor } = step else {
             panic!("{step:?}");
         };
-        assert_eq!(cursor.after, 40, "an incremental walk restarts incrementally");
+        assert_eq!(
+            cursor.after, 40,
+            "an incremental walk restarts incrementally"
+        );
         assert_eq!(cursor.origin, 40);
         assert_eq!(cursor.restarts, 1);
         assert!(!cursor.seen_page);
@@ -690,7 +699,8 @@ mod tests {
         let id = Uuid::from_u128(11);
         let collection = Uuid::from_u128(2);
         let aad = object_aad(id.as_bytes(), collection.as_bytes());
-        let plain = sealbook_protocol::envelope::seal_tombstone_envelope("application/sealbook.note+json");
+        let plain =
+            sealbook_protocol::envelope::seal_tombstone_envelope("application/sealbook.note+json");
         let enc = encrypt_object(&CollectionKey::from_bytes(KEY), &plain, &aad).unwrap();
         let row = CoreSealedRow {
             id,

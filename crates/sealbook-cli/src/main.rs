@@ -16,11 +16,12 @@ use rand::RngCore;
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::CertificateDer;
 use sealbook_client::{
-    merge_payload, note_parse, note_write, CoreNoteDraft, ExportedObject, LocalState,
-    SealbookClient, ACCOUNT_EXPORT_TYPE,
-    ACCOUNT_EXPORT_VERSION, ADDRESS_BOOK_ID_PROP, DEFAULT_ADDRESS_BOOK_ID,
+    contact_parse, contact_write, event_parse, merge_payload, note_parse, note_write,
+    CoreAddressBookDraft, CoreCalendarDraft, CoreCalendarEventDraft, CoreChannelKind,
+    CoreContactChannel, CoreContactDraft, CoreNoteDraft, ExportedObject, LocalState,
+    SealbookClient, ACCOUNT_EXPORT_TYPE, ACCOUNT_EXPORT_VERSION, DEFAULT_ADDRESS_BOOK_ID,
     DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_BOOKMARK_COLLECTION_NAME, DEFAULT_CALENDAR_COLOR,
-    DEFAULT_CALENDAR_ID, DEFAULT_NOTEBOOK_NAME, PAYLOAD_SCHEMA_VERSION,
+    DEFAULT_CALENDAR_ID, DEFAULT_CALENDAR_NAME, DEFAULT_NOTEBOOK_NAME, PAYLOAD_SCHEMA_VERSION,
 };
 use sha2::{Digest, Sha256};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
@@ -526,7 +527,7 @@ async fn main() -> Result<()> {
                 let books = client.list_address_books().await.context("books")?;
                 let book_id =
                     resolve_book(&books, book.as_deref())?.unwrap_or(DEFAULT_ADDRESS_BOOK_ID);
-                let contact = jscontact(&name, email.as_deref(), book_id, None);
+                let contact = jscontact(&name, email.as_deref(), book_id, None)?;
                 let id = Uuid::new_v4();
                 let revision = client.put_contact(id, &contact).await.context("put")?;
                 println!("stored encrypted contact {id} at revision {revision}");
@@ -555,7 +556,7 @@ async fn main() -> Result<()> {
                 // not take are kept. Rebuilding from the three it does took a
                 // card with a job, an address and a photo down to a name.
                 let existing = find_contact(&mut client, id).await?;
-                let contact = jscontact(&name, email.as_deref(), book_id, Some(&existing));
+                let contact = jscontact(&name, email.as_deref(), book_id, Some(&existing))?;
                 let revision = client.put_contact(id, &contact).await.context("update")?;
                 println!("updated encrypted contact {id} at revision {revision}");
                 save_state(&cli.state, client.state.as_ref().unwrap())?;
@@ -623,7 +624,13 @@ async fn main() -> Result<()> {
                 BookCommand::Create { name } => {
                     let id = Uuid::new_v4();
                     client
-                        .put_address_book(id, &name)
+                        .put_address_book(
+                            id,
+                            &CoreAddressBookDraft {
+                                name: name.clone(),
+                                raw: None,
+                            },
+                        )
                         .await
                         .context("create address book")?;
                     println!("created address book {id} {name}");
@@ -831,12 +838,21 @@ async fn main() -> Result<()> {
             match command {
                 CalendarCommand::Create { name, color } => {
                     let id = Uuid::new_v4();
-                    let revision = client.put_calendar(id, &name, &color).await?;
+                    let revision = client
+                        .put_calendar(
+                            id,
+                            &CoreCalendarDraft {
+                                name,
+                                color,
+                                ..Default::default()
+                            },
+                        )
+                        .await?;
                     println!("stored encrypted calendar {id} at revision {revision}");
                 }
                 CalendarCommand::ListCalendars => {
-                    for (id, calendar) in client.list_calendars().await? {
-                        println!("{id} {calendar}");
+                    for (id, name) in client.list_calendars().await? {
+                        println!("{id} {name}");
                     }
                 }
                 CalendarCommand::Add {
@@ -846,18 +862,45 @@ async fn main() -> Result<()> {
                     notes,
                     calendar,
                 } => {
-                    let event = serde_json::json!({
-                        "@type": "CalendarEvent", "version": PAYLOAD_SCHEMA_VERSION, "title": title,
-                        "start": start, "end": end, "notes": notes,
-                        "calendarId": calendar.unwrap_or(DEFAULT_CALENDAR_ID),
-                    });
                     let id = Uuid::new_v4();
-                    let revision = client.put_calendar_event(id, &event.to_string()).await?;
+                    let revision = client
+                        .put_calendar_event(
+                            id,
+                            &CoreCalendarEventDraft {
+                                title,
+                                start,
+                                end,
+                                notes,
+                                // The other clients leave a missing calendar
+                                // absent, which their grids read as "in no
+                                // calendar". This command has no picker, so it
+                                // names the default one rather than writing an
+                                // event no calendar owns.
+                                calendar_id: Some(
+                                    calendar.unwrap_or(DEFAULT_CALENDAR_ID).to_string(),
+                                ),
+                                ..Default::default()
+                            },
+                        )
+                        .await?;
                     println!("stored encrypted calendar event {id} at revision {revision}");
                 }
                 CalendarCommand::List => {
-                    for (id, event) in client.list_calendar_events().await? {
-                        println!("{id} {event}");
+                    let calendars = client.list_calendars().await?;
+                    for (id, json) in client.list_calendar_events().await? {
+                        let event = event_parse(&id.to_string(), &json);
+                        let name = event
+                            .calendar_id
+                            .as_deref()
+                            .map(|calendar_id| {
+                                calendars
+                                    .iter()
+                                    .find(|(candidate, _)| candidate.to_string() == calendar_id)
+                                    .map(|(_, name)| name.as_str())
+                                    .unwrap_or(DEFAULT_CALENDAR_NAME)
+                            })
+                            .unwrap_or("no calendar");
+                        println!("{id} [{name}] {} {}", event.start, event.title);
                     }
                 }
             }
@@ -1204,24 +1247,36 @@ fn now_rfc3339() -> String {
         .unwrap_or_default()
 }
 
-/// Every key this CLI writes for a card.
+/// A card for `contacts put` and `contacts update`.
 ///
-/// Far shorter than the web client's: everything else a card can hold is the
-/// web's to manage, and leaving it out of this set is what stops an update from
-/// here flattening a card down to the three fields this command takes.
-const CARD_KEYS: &[&str] = &["@type", "version", "name", ADDRESS_BOOK_ID_PROP, "emails"];
-
-fn jscontact(name: &str, email: Option<&str>, book_id: Uuid, previous: Option<&str>) -> String {
-    let mut card = serde_json::json!({
-        "@type": "Card",
-        "version": PAYLOAD_SCHEMA_VERSION,
-        "name": { "full": name },
-    });
-    card[ADDRESS_BOOK_ID_PROP] = serde_json::Value::String(book_id.to_string());
+/// Built from the stored card when there is one, so the fields this command does
+/// not take are kept, and written through core like every other client's. The
+/// email replaces the first one the card has and leaves the rest: this used to
+/// replace the whole map, which dropped every other address and the context each
+/// one carried.
+fn jscontact(
+    name: &str,
+    email: Option<&str>,
+    book_id: Uuid,
+    previous: Option<&str>,
+) -> Result<String> {
+    let mut draft = match previous {
+        Some(raw) => contact_parse(&Uuid::nil().to_string(), raw).draft(),
+        None => CoreContactDraft::default(),
+    };
+    draft.name = name.to_string();
+    draft.address_book_id = book_id.to_string();
     if let Some(email) = email {
-        card["emails"] = serde_json::json!({ "e1": { "address": email } });
+        match draft.emails.first_mut() {
+            Some(first) => first.value = email.to_string(),
+            None => draft.emails.push(CoreContactChannel {
+                kind: CoreChannelKind::Home,
+                label: None,
+                value: email.to_string(),
+            }),
+        }
     }
-    merge_payload(previous, card, CARD_KEYS).to_string()
+    Ok(contact_write(&draft, &now_rfc3339())?)
 }
 
 /// The whole vault as one JSON document.
@@ -1357,15 +1412,7 @@ fn parse_account_export(document: &str) -> Result<AccountImport> {
 }
 
 fn contact_book_id(json: &str) -> Uuid {
-    serde_json::from_str::<serde_json::Value>(json)
-        .ok()
-        .and_then(|value| {
-            value
-                .get(ADDRESS_BOOK_ID_PROP)
-                .and_then(|id| id.as_str())
-                .and_then(|id| Uuid::parse_str(id).ok())
-        })
-        .unwrap_or(DEFAULT_ADDRESS_BOOK_ID)
+    Uuid::parse_str(&contact_parse("", json).address_book_id).unwrap_or(DEFAULT_ADDRESS_BOOK_ID)
 }
 
 fn book_name_for(books: &[(Uuid, String)], id: Uuid) -> String {
@@ -1798,9 +1845,19 @@ mod tests {
             "@type": "Card",
             "version": "1.0",
             "name": { "full": "Ada Lovelace" },
-            "titles": { "t1": { "name": "Mathematician" } },
+            "emails": {
+                "e1": { "address": "old@example.com", "contexts": { "work": true } },
+                "e2": { "address": "other@example.com" }
+            },
+            "organizations": { "o1": { "name": "Analytical Engines" } },
+            "titles": { "t1": { "name": "Mathematician", "organization": "o1" } },
+            "addresses": {
+                "a1": { "locality": "London" },
+                "a2": { "locality": "Paris" }
+            },
             "media": { "avatar": { "kind": "photo", "uri": "data:," } },
-            "sealbook:profile": { "note": "kept" },
+            "sealbook:profile": { "colleagues": [{ "name": "Charles" }] },
+            "ranking": 9,
         })
         .to_string();
 
@@ -1809,14 +1866,23 @@ mod tests {
             Some("ada@example.com"),
             DEFAULT_ADDRESS_BOOK_ID,
             Some(&stored),
-        );
+        )
+        .unwrap();
         let value: serde_json::Value = serde_json::from_str(&card).unwrap();
         assert_eq!(value["name"]["full"], "Ada King");
         assert_eq!(value["emails"]["e1"]["address"], "ada@example.com");
+        assert_eq!(value["emails"]["e1"]["contexts"]["work"], true);
+        assert_eq!(value["emails"]["e2"]["address"], "other@example.com");
         // Everything this command cannot express survives it.
         assert_eq!(value["titles"]["t1"]["name"], "Mathematician");
+        assert_eq!(value["addresses"]["a2"]["locality"], "Paris");
         assert_eq!(value["media"]["avatar"]["kind"], "photo");
-        assert_eq!(value["sealbook:profile"]["note"], "kept");
+        assert_eq!(
+            value["sealbook:profile"]["colleagues"][0]["name"],
+            "Charles"
+        );
+        assert_eq!(value["ranking"], 9);
+        assert!(value["updated"].is_string());
     }
 
     /// The lenient read lives in core now, and the shared fixture pins it. What
@@ -1944,9 +2010,15 @@ mod tests {
             })
             .collect();
         assert_eq!(read[0].0, "application/sealbook.task+json");
-        assert_eq!(read[0].1, serde_json::from_str::<serde_json::Value>(task).unwrap());
+        assert_eq!(
+            read[0].1,
+            serde_json::from_str::<serde_json::Value>(task).unwrap()
+        );
         assert_eq!(read[1].0, "application/sealbook.task-list+json");
-        assert_eq!(read[1].1, serde_json::from_str::<serde_json::Value>(list).unwrap());
+        assert_eq!(
+            read[1].1,
+            serde_json::from_str::<serde_json::Value>(list).unwrap()
+        );
     }
 
     #[test]

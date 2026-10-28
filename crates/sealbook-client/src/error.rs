@@ -125,9 +125,7 @@ impl From<sealbook_core::CoreError> for ClientError {
             CoreError::Attachment { refusal } => ClientError::Server(refusal.to_string()),
             // Not a server fault: the stored payload is from a newer client. The
             // error states which schema it declared and what this build reads.
-            ref schema @ CoreError::PayloadSchema { .. } => {
-                ClientError::Server(schema.to_string())
-            }
+            ref schema @ CoreError::PayloadSchema { .. } => ClientError::Server(schema.to_string()),
         }
     }
 }
