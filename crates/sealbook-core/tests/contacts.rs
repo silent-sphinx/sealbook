@@ -107,6 +107,7 @@ fn channel(kind: CoreChannelKind, value: &str) -> CoreContactChannel {
         kind,
         label: None,
         value: value.into(),
+        extra: None,
     }
 }
 
@@ -202,6 +203,7 @@ fn contact_write_cases() -> Vec<(String, CoreContactDraft)> {
                 socials: vec![CoreContactSocial {
                     platform: "  ".into(),
                     handle: " @grace ".into(),
+                    extra: None,
                 }],
                 ..blank()
             },
@@ -218,6 +220,7 @@ fn contact_write_cases() -> Vec<(String, CoreContactDraft)> {
                         kind: CoreChannelKind::Custom,
                         label: Some(" Lists ".into()),
                         value: "c@example.com".into(),
+                        extra: None,
                     },
                 ],
                 phones: vec![
@@ -237,18 +240,22 @@ fn contact_write_cases() -> Vec<(String, CoreContactDraft)> {
                     CoreContactWork {
                         organization: "Navy".into(),
                         title: Some("Rear Admiral".into()),
+                        extra: None,
                     },
                     CoreContactWork {
                         organization: "Navy".into(),
                         title: Some("Programmer".into()),
+                        extra: None,
                     },
                     CoreContactWork {
                         organization: "Navy".into(),
                         title: None,
+                        extra: None,
                     },
                     CoreContactWork {
                         organization: "  ".into(),
                         title: Some("orphan".into()),
+                        extra: None,
                     },
                 ],
                 ..blank()
@@ -263,21 +270,25 @@ fn contact_write_cases() -> Vec<(String, CoreContactDraft)> {
                         kind: CoreContactDateKind::Birthday,
                         label: Some("ignored".into()),
                         date: " 1906-12-09 ".into(),
+                        extra: None,
                     },
                     CoreContactDate {
                         kind: CoreContactDateKind::Anniversary,
                         label: None,
                         date: "1930-01-01".into(),
+                        extra: None,
                     },
                     CoreContactDate {
                         kind: CoreContactDateKind::Custom,
                         label: Some(" Graduated ".into()),
                         date: "1928".into(),
+                        extra: None,
                     },
                     CoreContactDate {
                         kind: CoreContactDateKind::Custom,
                         label: None,
                         date: "  ".into(),
+                        extra: None,
                     },
                 ],
                 ..blank()
@@ -821,4 +832,30 @@ fn regenerate() {
         format!("{}\n", serde_json::to_string_pretty(&fixture).unwrap()),
     )
     .unwrap();
+}
+
+#[test]
+fn keys_this_build_does_not_write_survive_an_edit() {
+    let raw = json!({
+        "@type": "Card",
+        "version": "1",
+        "name": { "full": "Ada" },
+        "emails": { "e1": { "address": "a@b.c", "pref": 1, "contexts": { "work": true } } },
+        "organizations": { "o1": { "name": "Acme", "sortName": "ACME" } },
+        "anniversaries": { "a1": { "date": "2000-01-01", "kind": "birth", "calendarScale": "gregorian" } },
+        "onlineServices": { "os1": { "service": "mastodon", "user": "ada", "vendorName": "x" } },
+    })
+    .to_string();
+    let mut draft = contact_parse(CARD, &raw).draft();
+    assert_eq!(draft.emails[0].extra.as_deref(), Some(r#"{"pref":1}"#));
+    draft.emails[0].value = "b@b.c".to_string();
+    draft.emails[0].kind = CoreChannelKind::Home;
+    let written: serde_json::Value =
+        serde_json::from_str(&contact_write(&draft, NOW).unwrap()).unwrap();
+    assert_eq!(written["emails"]["e1"]["pref"], 1);
+    assert_eq!(written["emails"]["e1"]["address"], "b@b.c");
+    assert!(written["emails"]["e1"]["contexts"].get("work").is_none());
+    assert_eq!(written["organizations"]["o1"]["sortName"], "ACME");
+    assert_eq!(written["anniversaries"]["a1"]["calendarScale"], "gregorian");
+    assert_eq!(written["onlineServices"]["os1"]["vendorName"], "x");
 }

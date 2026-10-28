@@ -122,6 +122,10 @@ pub struct CoreContactChannel {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     pub value: String,
+    /// Keys of the stored entry this build does not write, as a JSON object.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "uniffi", uniffi(default = None))]
+    pub extra: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -150,6 +154,10 @@ pub struct CoreContactWork {
     pub organization: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Keys of the stored entry this build does not write, as a JSON object.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "uniffi", uniffi(default = None))]
+    pub extra: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -171,6 +179,10 @@ pub struct CoreContactDate {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     pub date: String,
+    /// Keys of the stored entry this build does not write, as a JSON object.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "uniffi", uniffi(default = None))]
+    pub extra: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -179,6 +191,10 @@ pub struct CoreContactDate {
 pub struct CoreContactSocial {
     pub platform: String,
     pub handle: String,
+    /// Keys of the stored entry this build does not write, as a JSON object.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "uniffi", uniffi(default = None))]
+    pub extra: Option<String>,
 }
 
 /// One card as it is drafted, before it is written.
@@ -343,6 +359,21 @@ fn objects<'a>(
         .unwrap_or_default()
 }
 
+/// The entry's keys outside `known`, as a JSON object, or `None` when there are none.
+fn extra_of(entry: &Map<String, Value>, known: &[&str]) -> Option<String> {
+    let extra: Map<String, Value> = entry
+        .iter()
+        .filter(|(key, _)| !known.contains(&key.as_str()))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    (!extra.is_empty()).then(|| Value::Object(extra).to_string())
+}
+
+/// A new entry seeded with the keys `extra` carried, for the writer to set its own over.
+fn entry_with(extra: &Option<String>) -> Map<String, Value> {
+    extra.as_deref().and_then(as_object).unwrap_or_default()
+}
+
 fn flag(object: Option<&Value>, key: &str) -> bool {
     object
         .and_then(|value| value.get(key))
@@ -404,12 +435,22 @@ fn parse_channels(
     value_keys: &[&str],
     fallback: CoreChannelKind,
 ) -> Vec<CoreContactChannel> {
+    let known: Vec<&str> = value_keys
+        .iter()
+        .copied()
+        .chain(["contexts", "features", "label"])
+        .collect();
     objects(card, key)
         .into_iter()
         .filter_map(|(_, entry)| {
             let value = first_of(entry, value_keys)?;
             let (kind, label) = channel_kind(entry, fallback);
-            Some(CoreContactChannel { kind, label, value })
+            Some(CoreContactChannel {
+                kind,
+                label,
+                value,
+                extra: extra_of(entry, &known),
+            })
         })
         .collect()
 }
@@ -457,12 +498,14 @@ fn parse_work(card: &Map<String, Value>) -> Vec<CoreContactWork> {
             work.push(CoreContactWork {
                 organization: organization.clone(),
                 title: None,
+                extra: extra_of(org, &["name"]),
             });
         }
         for title in linked {
             work.push(CoreContactWork {
                 organization: organization.clone(),
                 title: Some(title),
+                extra: extra_of(org, &["name"]),
             });
         }
     }
@@ -486,6 +529,7 @@ fn parse_dates(card: &Map<String, Value>) -> Vec<CoreContactDate> {
                 kind,
                 label: trimmed(entry, "label"),
                 date,
+                extra: extra_of(entry, &["date", "kind", "label"]),
             })
         })
         .collect()
@@ -498,6 +542,7 @@ fn parse_socials(card: &Map<String, Value>) -> Vec<CoreContactSocial> {
             Some(CoreContactSocial {
                 platform: trimmed(entry, "service").unwrap_or_else(|| "custom".to_string()),
                 handle: first_of(entry, &["user", "uri"])?,
+                extra: extra_of(entry, &["service", "user", "uri"]),
             })
         })
         .collect()
@@ -682,7 +727,7 @@ fn channel_entries(
             continue;
         };
         index += 1;
-        let mut entry = Map::new();
+        let mut entry = entry_with(&channel.extra);
         entry.insert(value_key.into(), json!(value));
         match channel.kind {
             CoreChannelKind::Work => {
@@ -777,7 +822,9 @@ fn work_entries(work: &[CoreContactWork]) -> (Option<Value>, Option<Value>) {
             continue;
         };
         let org_id = format!("o{}", organizations.len() + 1);
-        organizations.insert(org_id.clone(), json!({ "name": organization }));
+        let mut org = entry_with(&row.extra);
+        org.insert("name".into(), json!(organization));
+        organizations.insert(org_id.clone(), Value::Object(org));
         if let Some(title) = present(&row.title) {
             titles.insert(
                 format!("t{}", titles.len() + 1),
@@ -797,7 +844,7 @@ fn date_entries(dates: &[CoreContactDate]) -> Option<Value> {
         let Some(value) = present(&Some(date.date.clone())) else {
             continue;
         };
-        let mut entry = Map::new();
+        let mut entry = entry_with(&date.extra);
         entry.insert("date".into(), json!(value));
         match date.kind {
             CoreContactDateKind::Birthday => entry.insert("kind".into(), json!("birth")),
@@ -821,10 +868,10 @@ fn social_entries(socials: &[CoreContactSocial]) -> Option<Value> {
             continue;
         };
         let service = present(&Some(social.platform.clone())).unwrap_or_else(|| "custom".into());
-        out.insert(
-            format!("os{}", out.len() + 1),
-            json!({ "service": service, "user": handle }),
-        );
+        let mut entry = entry_with(&social.extra);
+        entry.insert("service".into(), json!(service));
+        entry.insert("user".into(), json!(handle));
+        out.insert(format!("os{}", out.len() + 1), Value::Object(entry));
     }
     (!out.is_empty()).then_some(Value::Object(out))
 }
