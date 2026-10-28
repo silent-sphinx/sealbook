@@ -16,12 +16,12 @@ use rand::RngCore;
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::CertificateDer;
 use sealbook_client::{
-    contact_parse, contact_write, event_parse, note_parse, note_write, CoreAddressBookDraft,
-    CoreCalendarDraft, CoreCalendarEventDraft, CoreChannelKind, CoreContactChannel,
-    CoreContactDraft, CoreNoteDraft, ExportedObject, LocalState, SealbookClient,
-    ACCOUNT_EXPORT_TYPE, ACCOUNT_EXPORT_VERSION, DEFAULT_ADDRESS_BOOK_ID,
-    DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_BOOKMARK_COLLECTION_NAME, DEFAULT_CALENDAR_COLOR,
-    DEFAULT_CALENDAR_ID, DEFAULT_CALENDAR_NAME, DEFAULT_NOTEBOOK_NAME,
+    account_export_parse, account_export_write, contact_parse, contact_write, event_parse,
+    note_parse, note_write, CoreAddressBookDraft, CoreCalendarDraft, CoreCalendarEventDraft,
+    CoreChannelKind, CoreContactChannel, CoreContactDraft, CoreNoteDraft, ExportedObject,
+    LocalState, SealbookClient, DEFAULT_ADDRESS_BOOK_ID, DEFAULT_ADDRESS_BOOK_NAME,
+    DEFAULT_BOOKMARK_COLLECTION_NAME, DEFAULT_CALENDAR_COLOR, DEFAULT_CALENDAR_ID,
+    DEFAULT_CALENDAR_NAME, DEFAULT_NOTEBOOK_NAME,
 };
 use sha2::{Digest, Sha256};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
@@ -445,12 +445,13 @@ async fn main() -> Result<()> {
                     exported.unreadable
                 );
             }
-            let document = account_export(
+            let json = account_export(
                 client.state.as_ref().unwrap(),
                 exported.objects,
+                exported.unreadable,
                 &OffsetDateTime::now_utc().format(&Rfc3339)?,
-            );
-            let json = serde_json::to_vec_pretty(&document)?;
+            )
+            .into_bytes();
             save_state(&cli.state, client.state.as_ref().unwrap())?;
             match out {
                 Some(path) => {
@@ -505,6 +506,13 @@ async fn main() -> Result<()> {
                 if writes.len() == 1 { "" } else { "s" },
                 import.source
             );
+            if import.unreadable > 0 {
+                eprintln!(
+                    "warning: the exporting device could not read {} object(s), so this file is \
+                     not a complete copy of that vault",
+                    import.unreadable
+                );
+            }
             if !skipped.is_empty() {
                 println!(
                     "left {} already in the vault alone; pass --overwrite to replace them",
@@ -1251,44 +1259,34 @@ fn jscontact(
     Ok(contact_write(&draft, &now_rfc3339())?)
 }
 
-/// The whole vault as one JSON document.
-///
-/// Payloads go out as stored, not as the fields this build reads, so one written
-/// by a newer client is in the backup intact. A payload that is not JSON is
-/// carried as `text` rather than dropped.
+/// The whole vault as one JSON document, written by core.
 fn account_export(
     state: &LocalState,
     objects: Vec<ExportedObject>,
+    unreadable: u64,
     exported_at: &str,
-) -> serde_json::Value {
-    let objects: Vec<serde_json::Value> = objects
+) -> String {
+    let account = sealbook_client::CoreExportAccount {
+        server: state.server.clone(),
+        username: state.username.clone(),
+        account_id: state.account_id.to_string(),
+        collection_id: state.collection_id.to_string(),
+        device_id: state.device_id.to_string(),
+    };
+    let objects: Vec<sealbook_client::CoreExportObject> = objects
         .into_iter()
-        .map(|object| {
-            let mut entry = serde_json::Map::new();
-            entry.insert("id".to_string(), object.id.to_string().into());
-            entry.insert("contentType".to_string(), object.content_type.into());
-            match serde_json::from_str::<serde_json::Value>(&object.payload) {
-                Ok(payload) => entry.insert("payload".to_string(), payload),
-                Err(_) => entry.insert("text".to_string(), object.payload.into()),
-            };
-            serde_json::Value::Object(entry)
+        .map(|object| sealbook_client::CoreExportObject {
+            id: object.id.to_string(),
+            content_type: object.content_type,
+            payload: object.payload,
         })
         .collect();
-    let object_count = objects.len();
-    serde_json::json!({
-        "@type": ACCOUNT_EXPORT_TYPE,
-        "version": ACCOUNT_EXPORT_VERSION,
-        "exportedAt": exported_at,
-        "account": {
-            "server": state.server,
-            "username": state.username,
-            "accountId": state.account_id.to_string(),
-            "collectionId": state.collection_id.to_string(),
-            "deviceId": state.device_id.to_string(),
-        },
-        "objectCount": object_count,
-        "objects": objects,
-    })
+    account_export_write(
+        &account,
+        &objects,
+        u32::try_from(unreadable).unwrap_or(u32::MAX),
+        exported_at,
+    )
 }
 
 /// Splits a file's objects into the ones to write and the ones to leave.
@@ -1312,75 +1310,28 @@ struct AccountImport {
     objects: Vec<ExportedObject>,
     /// The account the file was written from, for the line the import prints.
     source: String,
+    /// Objects the exporting device could not open.
+    unreadable: u32,
 }
 
-/// Reads an export document, refusing one this build cannot be trusted to
-/// restore.
-///
-/// A payload is carried as it is written in the file, so a field this build does
-/// not know survives the round trip. `text` is the escape hatch `account_export`
-/// uses for a payload that was not JSON, and is restored as those same bytes.
-/// A newer minor version is accepted: the format only ever gains fields, and
-/// objects go back untouched whether or not this build understands them. A newer
-/// major version is refused, because the meaning of what is already there may
-/// have changed.
 fn parse_account_export(document: &str) -> Result<AccountImport> {
-    let document: serde_json::Value =
-        serde_json::from_str(document).context("this is not a JSON document")?;
-    let document_type = document["@type"].as_str().unwrap_or_default();
-    if document_type != ACCOUNT_EXPORT_TYPE {
-        anyhow::bail!("not a {ACCOUNT_EXPORT_TYPE} file (@type is {document_type:?})");
-    }
-    let version = document["version"]
-        .as_str()
-        .context("the file has no version")?;
-    let major = |value: &str| value.split('.').next().unwrap_or_default().to_string();
-    if major(version) != major(ACCOUNT_EXPORT_VERSION) {
-        anyhow::bail!(
-            "the file is version {version} and this build reads \
-             {ACCOUNT_EXPORT_VERSION}; update whichever is older"
-        );
-    }
-
-    let entries = document["objects"]
-        .as_array()
-        .context("the file has no objects")?;
-    let mut objects = Vec::with_capacity(entries.len());
-    let mut seen = std::collections::HashSet::new();
-    for (index, entry) in entries.iter().enumerate() {
-        let position = index + 1;
-        let id = entry["id"]
-            .as_str()
-            .with_context(|| format!("object {position} has no id"))?;
-        let id = Uuid::parse_str(id)
-            .with_context(|| format!("object {position} has an id that is not a UUID: {id}"))?;
-        if !seen.insert(id) {
-            anyhow::bail!("object {position} repeats id {id}");
-        }
-        let content_type = entry["contentType"]
-            .as_str()
-            .with_context(|| format!("object {id} has no contentType"))?
-            .to_string();
-        let payload = match (&entry["payload"], entry["text"].as_str()) {
-            (serde_json::Value::Null, Some(text)) => text.to_string(),
-            (serde_json::Value::Null, None) => {
-                anyhow::bail!("object {id} has neither a payload nor text")
-            }
-            (payload, _) => serde_json::to_string(payload)?,
-        };
-        objects.push(ExportedObject {
-            id,
-            content_type,
-            payload,
-        });
-    }
-
-    let account = &document["account"];
-    let source = match (account["username"].as_str(), account["server"].as_str()) {
-        (Some(username), Some(server)) => format!("{username} at {server}"),
-        _ => "an export with no account block".to_string(),
-    };
-    Ok(AccountImport { objects, source })
+    let import = account_export_parse(document)?;
+    let objects = import
+        .objects
+        .into_iter()
+        .map(|object| {
+            Ok(ExportedObject {
+                id: Uuid::parse_str(&object.id)?,
+                content_type: object.content_type,
+                payload: object.payload,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(AccountImport {
+        objects,
+        source: import.source,
+        unreadable: import.unreadable,
+    })
 }
 
 fn contact_book_id(json: &str) -> Uuid {
@@ -1907,6 +1858,11 @@ mod tests {
         }
     }
 
+    fn export_value(objects: Vec<ExportedObject>, exported_at: &str) -> serde_json::Value {
+        let document = account_export(&export_state(), objects, 0, exported_at);
+        serde_json::from_str(&document).unwrap()
+    }
+
     #[test]
     fn an_export_carries_every_object_including_a_type_this_build_cannot_read() {
         let objects = vec![
@@ -1918,10 +1874,10 @@ mod tests {
             ),
             exported(3, "application/sealbook.future+json", r#"{"keep":"me"}"#),
         ];
-        let document = account_export(&export_state(), objects, "2026-10-10T00:00:00Z");
+        let document = export_value(objects, "2026-10-10T00:00:00Z");
 
-        assert_eq!(document["@type"], ACCOUNT_EXPORT_TYPE);
-        assert_eq!(document["version"], ACCOUNT_EXPORT_VERSION);
+        assert_eq!(document["@type"], "SealbookAccountExport");
+        assert_eq!(document["version"], "1.0");
         assert_eq!(document["exportedAt"], "2026-10-10T00:00:00Z");
         assert_eq!(document["account"]["username"], "alice");
         assert_eq!(document["account"]["server"], "https://vault.example");
@@ -1933,17 +1889,24 @@ mod tests {
 
         let objects = document["objects"].as_array().expect("objects");
         assert_eq!(objects.len(), 3);
-        assert_eq!(objects[1]["id"], Uuid::from_u128(2).to_string());
-        assert_eq!(objects[1]["contentType"], "application/sealbook.note+json");
+        let note = objects
+            .iter()
+            .find(|object| object["id"] == Uuid::from_u128(2).to_string())
+            .expect("the note");
+        assert_eq!(note["contentType"], "application/sealbook.note+json");
         // Stored fields the CLI itself never writes are in the backup.
-        assert_eq!(objects[1]["payload"]["pinned"], true);
-        assert_eq!(objects[2]["payload"]["keep"], "me");
+        assert_eq!(note["payload"]["pinned"], true);
+        let future = objects
+            .iter()
+            .find(|object| object["id"] == Uuid::from_u128(3).to_string())
+            .expect("the future type");
+        assert_eq!(future["payload"]["keep"], "me");
     }
 
     #[test]
     fn an_export_keeps_a_payload_that_is_not_json_rather_than_dropping_it() {
         let objects = vec![exported(1, "application/octet-stream", "not json at all")];
-        let document = account_export(&export_state(), objects, "2026-10-10T00:00:00Z");
+        let document = export_value(objects, "2026-10-10T00:00:00Z");
         let entry = &document["objects"][0];
         assert_eq!(entry["text"], "not json at all");
         assert!(entry["payload"].is_null());
@@ -1957,7 +1920,7 @@ mod tests {
             exported(1, sealbook_client::TASK_CONTENT_TYPE, task),
             exported(2, sealbook_client::TASK_LIST_CONTENT_TYPE, list),
         ];
-        let document = account_export(&export_state(), objects, "2026-10-22T00:00:00Z");
+        let document = export_value(objects, "2026-10-22T00:00:00Z");
 
         let exported_task = &document["objects"][0]["payload"];
         assert_eq!(exported_task["priority"], 7);
@@ -1994,7 +1957,7 @@ mod tests {
             exported(2, "application/sealbook.future+json", r#"{"keep":"me"}"#),
             exported(3, "application/octet-stream", "not json at all"),
         ];
-        let document = account_export(&export_state(), objects, "2026-10-10T00:00:00Z");
+        let document = export_value(objects, "2026-10-10T00:00:00Z");
         let import = parse_account_export(&document.to_string()).unwrap();
 
         assert_eq!(import.source, "alice at https://vault.example");
@@ -2011,16 +1974,16 @@ mod tests {
                     "application/jscontact+json".to_string(),
                     r#"{"@type":"Card"}"#.to_string()
                 ),
-                (
-                    Uuid::from_u128(2),
-                    "application/sealbook.future+json".to_string(),
-                    r#"{"keep":"me"}"#.to_string()
-                ),
                 // The `text` escape hatch comes back as those bytes, not as JSON.
                 (
                     Uuid::from_u128(3),
                     "application/octet-stream".to_string(),
                     "not json at all".to_string()
+                ),
+                (
+                    Uuid::from_u128(2),
+                    "application/sealbook.future+json".to_string(),
+                    r#"{"keep":"me"}"#.to_string()
                 ),
             ]
         );

@@ -17,6 +17,7 @@
 //! rather than in each binding crate because three copies of "what a new device
 //! is" is how two hosts came to choose the collection id and one did not.
 
+mod account_export;
 mod attachments;
 mod auth;
 mod bookmarks;
@@ -51,6 +52,10 @@ uniffi::custom_type!(Uuid, String, {
     try_lift: |s| Ok(s.parse::<Uuid>()?),
 });
 
+pub use account_export::{
+    account_export_filename, account_export_parse, account_export_write, CoreAccountImport,
+    CoreExportAccount, CoreExportObject,
+};
 pub use attachments::{
     attachment_chunk_digest, attachment_chunk_nonce, attachment_chunk_path,
     attachment_commit_accept, attachment_commit_request, attachment_content_hash,

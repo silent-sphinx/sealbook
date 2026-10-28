@@ -2,19 +2,19 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sealbook_core::{
     AppliedManifest, AttachmentLimits, AttachmentPlan, AttachmentRow, AuthRequest,
-    BucketedManifest, BucketsOutcome, ChangesPage, ChunkRange, CoreAccountSettings,
-    CoreAccountSettingsDraft, CoreAddressBook, CoreAddressBookDraft, CoreBookmark,
-    CoreBookmarkCollection, CoreBookmarkCollectionDraft, CoreBookmarkDraft, CoreBuild,
-    CoreCalendar, CoreCalendarDraft, CoreCalendarEvent, CoreCalendarEventDraft, CoreContact,
-    CoreContactDraft, CoreContactProfile, CoreDevice, CoreDeviceSecrets, CoreDeviceState,
-    CoreManifestEntry, CoreNote, CoreNoteDraft, CoreNotebook, CorePairPreview, CoreRecurrence,
-    CoreRoster, CoreRosterPin, CoreSealedRow, CoreSession, CoreTask, CoreTaskDraft, CoreTaskList,
-    CoreTaskListDraft, HttpRequest, HttpResponse, LoggedIn, LoginStarting, ManifestContext,
-    ManifestOutcome, ManifestPlan, ManifestSigner, OpaqueStart, PairApproval, PairJoined,
-    PairStatus, PasswordChange, PasswordChangeStarted, RecoverStarted, Recovering,
-    RegisterIdentity, Registering, ResealRow, RosterContext, RotationPlan, RotationState,
-    RowOutcome, RowRef, SignedManifest, SweepCursor, SweepPage, VerifiedRoster, WalkCursor,
-    WalkStep,
+    BucketedManifest, BucketsOutcome, ChangesPage, ChunkRange, CoreAccountImport,
+    CoreAccountSettings, CoreAccountSettingsDraft, CoreAddressBook, CoreAddressBookDraft,
+    CoreBookmark, CoreBookmarkCollection, CoreBookmarkCollectionDraft, CoreBookmarkDraft,
+    CoreBuild, CoreCalendar, CoreCalendarDraft, CoreCalendarEvent, CoreCalendarEventDraft,
+    CoreContact, CoreContactDraft, CoreContactProfile, CoreDevice, CoreDeviceSecrets,
+    CoreDeviceState, CoreExportAccount, CoreExportObject, CoreManifestEntry, CoreNote,
+    CoreNoteDraft, CoreNotebook, CorePairPreview, CoreRecurrence, CoreRoster, CoreRosterPin,
+    CoreSealedRow, CoreSession, CoreTask, CoreTaskDraft, CoreTaskList, CoreTaskListDraft,
+    HttpRequest, HttpResponse, LoggedIn, LoginStarting, ManifestContext, ManifestOutcome,
+    ManifestPlan, ManifestSigner, OpaqueStart, PairApproval, PairJoined, PairStatus,
+    PasswordChange, PasswordChangeStarted, RecoverStarted, Recovering, RegisterIdentity,
+    Registering, ResealRow, RosterContext, RotationPlan, RotationState, RowOutcome, RowRef,
+    SignedManifest, SweepCursor, SweepPage, VerifiedRoster, WalkCursor, WalkStep,
 };
 use sealbook_crypto::RosterPin;
 use sealbook_crypto::{
@@ -2533,4 +2533,37 @@ pub fn core_can_disable_feature(
         &settings.to_rust()?,
         feature,
     ))
+}
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct ExportObjectList(pub Vec<CoreExportObject>);
+
+/// The account export document for a vault.
+#[wasm_bindgen]
+pub fn core_account_export_write(
+    account: Ts<CoreExportAccount>,
+    objects: Ts<ExportObjectList>,
+    unreadable: u32,
+    exported_at: &str,
+) -> Result<String, JsError> {
+    Ok(sealbook_core::account_export_write(
+        &account.to_rust()?,
+        &objects.to_rust()?.0,
+        unreadable,
+        exported_at,
+    ))
+}
+
+/// Reads an export document. Throws with a sentence fit to show the user.
+#[wasm_bindgen]
+pub fn core_account_export_parse(document: &str) -> Result<Ts<CoreAccountImport>, JsError> {
+    Ok(sealbook_core::account_export_parse(document)
+        .map_err(core_err)?
+        .into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_account_export_filename(username: &str, day: &str) -> String {
+    sealbook_core::account_export_filename(username, day)
 }
