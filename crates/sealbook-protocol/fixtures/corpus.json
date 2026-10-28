@@ -1,0 +1,254 @@
+{
+  "about": "Case tables every client runs. Each table lists the fixture field names passed to the operation, in order, and the field holding the expected result. An arg of $now is the fixture's own clock, and an object {\"value\": x} is the literal x.",
+  "fixtures": [
+    {
+      "file": "payloads/tasks.json",
+      "tables": [
+        {
+          "table": "writes",
+          "op": "task.write",
+          "args": [
+            "draft",
+            "$now"
+          ],
+          "expect": "payload"
+        },
+        {
+          "table": "parses",
+          "op": "task.parse",
+          "args": [
+            "id",
+            "raw"
+          ],
+          "expect": "task"
+        },
+        {
+          "table": "due_dates",
+          "op": "task.normalize_due",
+          "args": [
+            "value"
+          ],
+          "expect": "normalized"
+        },
+        {
+          "table": "list_writes",
+          "op": "task_list.write",
+          "args": [
+            "draft"
+          ],
+          "expect": "payload"
+        },
+        {
+          "table": "list_parses",
+          "op": "task_list.parse",
+          "args": [
+            "id",
+            "raw"
+          ],
+          "expect": "list"
+        },
+        {
+          "table": "tones",
+          "op": "task_list.tone",
+          "args": [
+            "lists",
+            "id"
+          ],
+          "expect": "tone"
+        }
+      ]
+    },
+    {
+      "file": "payloads/bookmarks.json",
+      "tables": [
+        {
+          "table": "writes",
+          "op": "bookmark.write",
+          "args": [
+            "draft",
+            "$now"
+          ],
+          "expect": "payload"
+        },
+        {
+          "table": "parses",
+          "op": "bookmark.parse",
+          "args": [
+            "id",
+            "raw"
+          ],
+          "expect": "bookmark"
+        },
+        {
+          "table": "collection_writes",
+          "op": "bookmark_collection.write",
+          "args": [
+            "draft"
+          ],
+          "expect": "payload"
+        },
+        {
+          "table": "collection_parses",
+          "op": "bookmark_collection.parse",
+          "args": [
+            "id",
+            "raw"
+          ],
+          "expect": "collection"
+        },
+        {
+          "table": "tones",
+          "op": "bookmark_collection.tone",
+          "args": [
+            "collections",
+            "id"
+          ],
+          "expect": "tone"
+        }
+      ]
+    },
+    {
+      "file": "payloads/notes.json",
+      "tables": [
+        {
+          "table": "writes",
+          "op": "note.write",
+          "args": [
+            "draft",
+            "$now"
+          ],
+          "expect": "payload"
+        },
+        {
+          "table": "parses",
+          "op": "note.parse",
+          "args": [
+            "id",
+            "raw"
+          ],
+          "expect": "note"
+        },
+        {
+          "table": "notebook_writes",
+          "op": "notebook.write",
+          "args": [
+            "name",
+            "previous"
+          ],
+          "expect": "payload"
+        },
+        {
+          "table": "notebook_parses",
+          "op": "notebook.parse",
+          "args": [
+            "id",
+            "raw"
+          ],
+          "expect": "notebook"
+        }
+      ]
+    },
+    {
+      "file": "payloads/calendars.json",
+      "tables": [
+        {
+          "table": "calendar_writes",
+          "op": "calendar.write",
+          "args": [
+            "draft"
+          ],
+          "expect": "payload"
+        },
+        {
+          "table": "calendar_parses",
+          "op": "calendar.parse",
+          "args": [
+            "id",
+            "raw"
+          ],
+          "expect": "calendar"
+        },
+        {
+          "table": "event_writes",
+          "op": "event.write",
+          "args": [
+            "draft"
+          ],
+          "expect": "payload"
+        },
+        {
+          "table": "event_parses",
+          "op": "event.parse",
+          "args": [
+            "id",
+            "raw"
+          ],
+          "expect": "event"
+        }
+      ]
+    },
+    {
+      "file": "payloads/contacts.json",
+      "tables": [
+        {
+          "table": "contact_writes",
+          "op": "contact.write",
+          "args": [
+            "draft",
+            {
+              "value": "2026-10-28T12:00:00.000Z"
+            }
+          ],
+          "expect": "payload"
+        },
+        {
+          "table": "contact_parses",
+          "op": "contact.parse",
+          "args": [
+            "id",
+            "raw"
+          ],
+          "expect": "contact"
+        },
+        {
+          "table": "address_book_writes",
+          "op": "address_book.write",
+          "args": [
+            "draft"
+          ],
+          "expect": "payload"
+        },
+        {
+          "table": "address_book_parses",
+          "op": "address_book.parse",
+          "args": [
+            "id",
+            "raw"
+          ],
+          "expect": "address_book"
+        }
+      ]
+    },
+    {
+      "file": "payloads/settings.json",
+      "tables": [
+        {
+          "table": "writes",
+          "op": "settings.write",
+          "args": [
+            "draft"
+          ],
+          "expect": "payload"
+        },
+        {
+          "table": "parses",
+          "op": "settings.parse",
+          "args": [
+            "raw"
+          ],
+          "expect": "settings"
+        }
+      ]
+    }
+  ]
+}
