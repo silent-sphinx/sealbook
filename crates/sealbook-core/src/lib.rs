@@ -33,6 +33,7 @@ mod roster;
 mod rotation;
 mod state;
 mod sync;
+mod tasks;
 
 // uniffi's scaffolding and custom types have to sit in the crate root.
 #[cfg(feature = "uniffi")]
@@ -136,6 +137,13 @@ pub use sync::{
     changes_request, latest_revisions, open_row, open_stored, require_key_epoch, walk_page,
     walk_start, ChangesPage, CoreSealedRow, RowOutcome, RowRef, StoredRow, UnreadableReason,
     WalkCursor, WalkOutcome, WalkStep, CHANGES_PAGE_LIMIT, SYNC_RESTART_LIMIT,
+};
+pub use tasks::{
+    default_task_list_id, normalize_due_date, resolve_task_list_id, task_list_name_by_id,
+    task_list_parse, task_list_tone, task_list_write, task_parse, task_write, CoreTask,
+    CoreTaskDraft, CoreTaskList, CoreTaskListDraft, DEFAULT_TASK_LIST_NAME, MAX_TASK_COMPLETIONS,
+    TASK_CONTENT_TYPE, TASK_KEYS, TASK_LIST_CONTENT_TYPE, TASK_LIST_KEYS, UNREADABLE_TASK_TITLE,
+    UNTITLED_TASK_LIST_NAME, UNTITLED_TASK_TITLE,
 };
 
 pub use sealbook_protocol::{PAYLOAD_SCHEMA_VERSION, PROTOCOL_VERSION};

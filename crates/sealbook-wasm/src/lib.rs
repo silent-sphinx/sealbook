@@ -7,12 +7,13 @@ use sealbook_core::{
     CoreBookmarkDraft, CoreBuild, CoreCalendar, CoreCalendarDraft, CoreCalendarEvent,
     CoreCalendarEventDraft, CoreContact, CoreContactDraft, CoreContactProfile, CoreDevice,
     CoreDeviceSecrets, CoreDeviceState, CoreManifestEntry, CoreNote, CoreNoteDraft, CoreNotebook,
-    CorePairPreview, CoreRoster, CoreRosterPin, CoreSealedRow, CoreSession, HttpRequest,
-    HttpResponse, LoggedIn, LoginStarting, ManifestContext, ManifestOutcome, ManifestPlan,
-    ManifestSigner, OpaqueStart, PairApproval, PairJoined, PairStatus, PasswordChange,
-    PasswordChangeStarted, RecoverStarted, Recovering, RegisterIdentity, Registering, ResealRow,
-    RosterContext, RotationPlan, RotationState, RowOutcome, RowRef, SignedManifest, SweepCursor,
-    SweepPage, VerifiedRoster, WalkCursor, WalkStep,
+    CorePairPreview, CoreRoster, CoreRosterPin, CoreSealedRow, CoreSession, CoreTask,
+    CoreTaskDraft, CoreTaskList, CoreTaskListDraft, HttpRequest, HttpResponse, LoggedIn,
+    LoginStarting, ManifestContext, ManifestOutcome, ManifestPlan, ManifestSigner, OpaqueStart,
+    PairApproval, PairJoined, PairStatus, PasswordChange, PasswordChangeStarted, RecoverStarted,
+    Recovering, RegisterIdentity, Registering, ResealRow, RosterContext, RotationPlan,
+    RotationState, RowOutcome, RowRef, SignedManifest, SweepCursor, SweepPage, VerifiedRoster,
+    WalkCursor, WalkStep,
 };
 use sealbook_crypto::RosterPin;
 use sealbook_crypto::{
@@ -2201,6 +2202,88 @@ pub fn core_bookmark_collection_tone(
         &collections.to_rust()?.0,
         id,
     ))
+}
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct CoreTaskListList(pub Vec<CoreTaskList>);
+
+/// Every key a task writer owns.
+#[wasm_bindgen]
+pub fn core_task_keys() -> Vec<String> {
+    sealbook_core::TASK_KEYS
+        .iter()
+        .map(|key| key.to_string())
+        .collect()
+}
+
+#[wasm_bindgen]
+pub fn core_task_list_keys() -> Vec<String> {
+    sealbook_core::TASK_LIST_KEYS
+        .iter()
+        .map(|key| key.to_string())
+        .collect()
+}
+
+#[wasm_bindgen]
+pub fn core_default_task_list_id() -> String {
+    sealbook_core::default_task_list_id()
+}
+
+#[wasm_bindgen]
+pub fn core_resolve_task_list_id(task_list_id: Option<String>) -> String {
+    sealbook_core::resolve_task_list_id(task_list_id)
+}
+
+/// A due value as it should be stored, or `undefined` where it names no real
+/// moment.
+#[wasm_bindgen]
+pub fn core_normalize_due_date(value: &str) -> Option<String> {
+    sealbook_core::normalize_due_date(value)
+}
+
+/// Reads a stored task payload. Lenient throughout: a payload that will not
+/// parse comes back as a row the user can still find and delete.
+#[wasm_bindgen]
+pub fn core_task_parse(id: &str, raw: &str) -> Result<Ts<CoreTask>, JsError> {
+    Ok(sealbook_core::task_parse(id, raw).into_ts()?)
+}
+
+/// Serialises a task onto `draft.raw`. `now` is the caller's clock. Throws on a
+/// payload from a newer schema major.
+#[wasm_bindgen]
+pub fn core_task_write(draft: Ts<CoreTaskDraft>, now: &str) -> Result<String, JsError> {
+    sealbook_core::task_write(&draft.to_rust()?, now).map_err(core_err)
+}
+
+#[wasm_bindgen]
+pub fn core_task_list_parse(id: &str, raw: &str) -> Result<Ts<CoreTaskList>, JsError> {
+    Ok(sealbook_core::task_list_parse(id, raw).into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_task_list_write(draft: Ts<CoreTaskListDraft>) -> Result<String, JsError> {
+    sealbook_core::task_list_write(&draft.to_rust()?).map_err(core_err)
+}
+
+/// The name to show for a task's list. One that is gone shows the default
+/// list's name rather than nothing.
+#[wasm_bindgen]
+pub fn core_task_list_name_by_id(
+    lists: Ts<CoreTaskListList>,
+    task_list_id: Option<String>,
+) -> Result<String, JsError> {
+    Ok(sealbook_core::task_list_name_by_id(
+        &lists.to_rust()?.0,
+        task_list_id,
+    ))
+}
+
+/// A list's colour: its root's explicit colour, else one hashed from the root's
+/// id.
+#[wasm_bindgen]
+pub fn core_task_list_tone(lists: Ts<CoreTaskListList>, id: &str) -> Result<String, JsError> {
+    Ok(sealbook_core::task_list_tone(&lists.to_rust()?.0, id))
 }
 
 #[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]

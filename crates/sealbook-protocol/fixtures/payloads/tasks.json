@@ -1,0 +1,1026 @@
+{
+  "now": "2026-10-28T12:00:00Z",
+  "constants": {
+    "task_content_type": "application/sealbook.task+json",
+    "list_content_type": "application/sealbook.task-list+json",
+    "task_keys": [
+      "@type",
+      "version",
+      "title",
+      "notes",
+      "done",
+      "completedAt",
+      "completions",
+      "dueDate",
+      "priority",
+      "tags",
+      "taskListId",
+      "parentId",
+      "recurrence",
+      "recurrenceAnchor",
+      "createdAt",
+      "updatedAt"
+    ],
+    "list_keys": [
+      "@type",
+      "version",
+      "name",
+      "parentId",
+      "color"
+    ],
+    "default_list_id": "00000000-0000-0000-0000-000000000006",
+    "default_list_name": "Default Task List",
+    "untitled_task_title": "Untitled task",
+    "unreadable_task_title": "Unreadable task",
+    "untitled_list_name": "Untitled",
+    "max_completions": 50
+  },
+  "writes": [
+    {
+      "case": "an open task written from scratch",
+      "draft": {
+        "title": "Pay rent",
+        "notes": "",
+        "done": false,
+        "completions": [],
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006"
+      },
+      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a title and notes are trimmed",
+      "draft": {
+        "title": "  Pay rent  ",
+        "notes": "  before the 1st  ",
+        "done": false,
+        "completions": [],
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006"
+      },
+      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"notes\":\"before the 1st\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a blank list resolves to the default",
+      "draft": {
+        "title": "Pay rent",
+        "notes": "",
+        "done": false,
+        "completions": [],
+        "tags": [],
+        "task_list_id": "   "
+      },
+      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a due day, a priority, tags trimmed and de-duplicated",
+      "draft": {
+        "title": "Pay rent",
+        "notes": "",
+        "done": false,
+        "completions": [],
+        "due_date": "2026-11-01",
+        "priority": 2,
+        "tags": [
+          "Home",
+          " home ",
+          "",
+          "money"
+        ],
+        "task_list_id": "00000000-0000-0000-0000-000000000006"
+      },
+      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"dueDate\":\"2026-11-01\",\"priority\":2,\"tags\":[\"Home\",\"money\"],\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a due value that names no day writes no key",
+      "draft": {
+        "title": "Pay rent",
+        "notes": "",
+        "done": false,
+        "completions": [],
+        "due_date": "2026-02-30",
+        "priority": 0,
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006"
+      },
+      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a completion time is written only on a done task",
+      "draft": {
+        "title": "Pay rent",
+        "notes": "",
+        "done": false,
+        "completed_at": "2026-10-27T08:00:00.000Z",
+        "completions": [],
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006"
+      },
+      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a done task keeps its completion time",
+      "draft": {
+        "title": "Pay rent",
+        "notes": "",
+        "done": true,
+        "completed_at": "2026-10-27T08:00:00.000Z",
+        "completions": [],
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006"
+      },
+      "payload": "{\"@type\":\"Task\",\"completedAt\":\"2026-10-27T08:00:00.000Z\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"done\":true,\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a recurring task with its anchor",
+      "draft": {
+        "title": "Pay rent",
+        "notes": "",
+        "done": false,
+        "completions": [],
+        "due_date": "2026-11-03T09:00:00.000Z",
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006",
+        "recurrence": {
+          "frequency": "weekly",
+          "interval": 2,
+          "weekdays": [
+            1,
+            3
+          ]
+        },
+        "recurrence_anchor": "2026-10-20T09:00:00.000Z"
+      },
+      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"dueDate\":\"2026-11-03T09:00:00.000Z\",\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"weekdays\":[1,3]},\"recurrenceAnchor\":\"2026-10-20T09:00:00.000Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "an anchor without a rule is not written",
+      "draft": {
+        "title": "Pay rent",
+        "notes": "",
+        "done": false,
+        "completions": [],
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006",
+        "recurrence_anchor": "2026-10-20"
+      },
+      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "completions are trimmed and kept newest first",
+      "draft": {
+        "title": "Pay rent",
+        "notes": "",
+        "done": false,
+        "completions": [
+          " 2026-10-20T09:00:00.000Z ",
+          "",
+          "b"
+        ],
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006",
+        "recurrence": {
+          "frequency": "weekly",
+          "interval": 2,
+          "weekdays": [
+            1,
+            3
+          ]
+        }
+      },
+      "payload": "{\"@type\":\"Task\",\"completions\":[\"2026-10-20T09:00:00.000Z\",\"b\"],\"createdAt\":\"2026-10-28T12:00:00Z\",\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"weekdays\":[1,3]},\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "an edit keeps a key a later build added",
+      "draft": {
+        "title": "Renamed",
+        "notes": "before the 1st",
+        "done": true,
+        "completed_at": "2026-10-27T08:00:00.000Z",
+        "completions": [
+          "2026-09-27T08:00:00.000Z",
+          "2026-08-27T08:00:00.000Z"
+        ],
+        "due_date": "2026-11-01",
+        "priority": 3,
+        "tags": [
+          "home",
+          "money"
+        ],
+        "task_list_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "parent_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "recurrence": {
+          "frequency": "monthly",
+          "weekdays": [],
+          "day_of_month": 1
+        },
+        "recurrence_anchor": "2026-09-01",
+        "created_at": "2026-01-01T00:00:00Z",
+        "raw": "{\"@type\":\"Task\",\"completedAt\":\"2026-10-27T08:00:00.000Z\",\"completions\":[\"2026-09-27T08:00:00.000Z\",\"2026-08-27T08:00:00.000Z\"],\"createdAt\":\"2026-01-01T00:00:00Z\",\"done\":true,\"dueDate\":\"2026-11-01\",\"notes\":\"before the 1st\",\"parentId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"priority\":3,\"recurrence\":{\"dayOfMonth\":1,\"frequency\":\"monthly\"},\"recurrenceAnchor\":\"2026-09-01\",\"somethingNewer\":{\"from\":\"a later build\"},\"tags\":[\"home\",\"money\"],\"taskListId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-02-02T00:00:00Z\",\"version\":\"1.0\"}"
+      },
+      "payload": "{\"@type\":\"Task\",\"completedAt\":\"2026-10-27T08:00:00.000Z\",\"completions\":[\"2026-09-27T08:00:00.000Z\",\"2026-08-27T08:00:00.000Z\"],\"createdAt\":\"2026-01-01T00:00:00Z\",\"done\":true,\"dueDate\":\"2026-11-01\",\"notes\":\"before the 1st\",\"parentId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"priority\":3,\"recurrence\":{\"dayOfMonth\":1,\"frequency\":\"monthly\"},\"recurrenceAnchor\":\"2026-09-01\",\"somethingNewer\":{\"from\":\"a later build\"},\"tags\":[\"home\",\"money\"],\"taskListId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"title\":\"Renamed\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "an edit that reopens the task",
+      "draft": {
+        "title": "Pay rent",
+        "notes": "before the 1st",
+        "done": false,
+        "completions": [
+          "2026-09-27T08:00:00.000Z",
+          "2026-08-27T08:00:00.000Z"
+        ],
+        "due_date": "2026-11-01",
+        "priority": 3,
+        "tags": [
+          "home",
+          "money"
+        ],
+        "task_list_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "parent_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "recurrence": {
+          "frequency": "monthly",
+          "weekdays": [],
+          "day_of_month": 1
+        },
+        "recurrence_anchor": "2026-09-01",
+        "created_at": "2026-01-01T00:00:00Z",
+        "raw": "{\"@type\":\"Task\",\"completedAt\":\"2026-10-27T08:00:00.000Z\",\"completions\":[\"2026-09-27T08:00:00.000Z\",\"2026-08-27T08:00:00.000Z\"],\"createdAt\":\"2026-01-01T00:00:00Z\",\"done\":true,\"dueDate\":\"2026-11-01\",\"notes\":\"before the 1st\",\"parentId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"priority\":3,\"recurrence\":{\"dayOfMonth\":1,\"frequency\":\"monthly\"},\"recurrenceAnchor\":\"2026-09-01\",\"somethingNewer\":{\"from\":\"a later build\"},\"tags\":[\"home\",\"money\"],\"taskListId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-02-02T00:00:00Z\",\"version\":\"1.0\"}"
+      },
+      "payload": "{\"@type\":\"Task\",\"completions\":[\"2026-09-27T08:00:00.000Z\",\"2026-08-27T08:00:00.000Z\"],\"createdAt\":\"2026-01-01T00:00:00Z\",\"dueDate\":\"2026-11-01\",\"notes\":\"before the 1st\",\"parentId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"priority\":3,\"recurrence\":{\"dayOfMonth\":1,\"frequency\":\"monthly\"},\"recurrenceAnchor\":\"2026-09-01\",\"somethingNewer\":{\"from\":\"a later build\"},\"tags\":[\"home\",\"money\"],\"taskListId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "an untitled task saved unchanged stays untitled",
+      "draft": {
+        "title": "",
+        "notes": "",
+        "done": false,
+        "completions": [],
+        "due_date": "2026-11-01",
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006",
+        "created_at": "2026-01-01T00:00:00Z",
+        "raw": "{\"@type\":\"Task\",\"dueDate\":\"2026-11-01\",\"createdAt\":\"2026-01-01T00:00:00Z\"}"
+      },
+      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"dueDate\":\"2026-11-01\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a repeat rule from a newer build is put back",
+      "draft": {
+        "title": "t",
+        "notes": "",
+        "done": false,
+        "completions": [],
+        "due_date": "2026-11-01",
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006",
+        "unreadable_recurrence": "{\"frequency\":\"hourly\",\"interval\":3}",
+        "recurrence_anchor": "2026-11-01",
+        "raw": "{\"@type\":\"Task\",\"title\":\"t\",\"dueDate\":\"2026-11-01\",\"recurrence\":{\"frequency\":\"hourly\",\"interval\":3},\"recurrenceAnchor\":\"2026-11-01\"}"
+      },
+      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"dueDate\":\"2026-11-01\",\"recurrence\":{\"frequency\":\"hourly\",\"interval\":3},\"recurrenceAnchor\":\"2026-11-01\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"t\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+    }
+  ],
+  "parses": [
+    {
+      "case": "the richest payload any client writes",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{\"@type\":\"Task\",\"completedAt\":\"2026-10-27T08:00:00.000Z\",\"completions\":[\"2026-09-27T08:00:00.000Z\",\"2026-08-27T08:00:00.000Z\"],\"createdAt\":\"2026-01-01T00:00:00Z\",\"done\":true,\"dueDate\":\"2026-11-01\",\"notes\":\"before the 1st\",\"parentId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"priority\":3,\"recurrence\":{\"dayOfMonth\":1,\"frequency\":\"monthly\"},\"recurrenceAnchor\":\"2026-09-01\",\"somethingNewer\":{\"from\":\"a later build\"},\"tags\":[\"home\",\"money\"],\"taskListId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-02-02T00:00:00Z\",\"version\":\"1.0\"}",
+      "task": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "title": "Pay rent",
+        "derived_title": false,
+        "notes": "before the 1st",
+        "done": true,
+        "completed_at": "2026-10-27T08:00:00.000Z",
+        "completions": [
+          "2026-09-27T08:00:00.000Z",
+          "2026-08-27T08:00:00.000Z"
+        ],
+        "due_date": "2026-11-01",
+        "priority": 3,
+        "tags": [
+          "home",
+          "money"
+        ],
+        "task_list_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "parent_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "recurrence": {
+          "frequency": "monthly",
+          "weekdays": [],
+          "day_of_month": 1
+        },
+        "recurrence_anchor": "2026-09-01",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-02-02T00:00:00Z",
+        "readable": true,
+        "raw": "{\"@type\":\"Task\",\"completedAt\":\"2026-10-27T08:00:00.000Z\",\"completions\":[\"2026-09-27T08:00:00.000Z\",\"2026-08-27T08:00:00.000Z\"],\"createdAt\":\"2026-01-01T00:00:00Z\",\"done\":true,\"dueDate\":\"2026-11-01\",\"notes\":\"before the 1st\",\"parentId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"priority\":3,\"recurrence\":{\"dayOfMonth\":1,\"frequency\":\"monthly\"},\"recurrenceAnchor\":\"2026-09-01\",\"somethingNewer\":{\"from\":\"a later build\"},\"tags\":[\"home\",\"money\"],\"taskListId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-02-02T00:00:00Z\",\"version\":\"1.0\"}"
+      }
+    },
+    {
+      "case": "an empty object",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{}",
+      "task": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "title": "Untitled task",
+        "derived_title": true,
+        "notes": "",
+        "done": false,
+        "completions": [],
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006",
+        "readable": true,
+        "raw": "{}"
+      }
+    },
+    {
+      "case": "a title that is only space",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{\"title\":\"   \",\"dueDate\":\"2026-11-01\"}",
+      "task": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "title": "Untitled task",
+        "derived_title": true,
+        "notes": "",
+        "done": false,
+        "completions": [],
+        "due_date": "2026-11-01",
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006",
+        "readable": true,
+        "raw": "{\"title\":\"   \",\"dueDate\":\"2026-11-01\"}"
+      }
+    },
+    {
+      "case": "a payload that is not JSON at all",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "never a task",
+      "task": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "title": "Unreadable task",
+        "derived_title": true,
+        "notes": "",
+        "done": false,
+        "completions": [],
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006",
+        "readable": true,
+        "raw": "never a task"
+      }
+    },
+    {
+      "case": "a payload that is JSON but not an object",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "[1,2]",
+      "task": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "title": "Unreadable task",
+        "derived_title": true,
+        "notes": "",
+        "done": false,
+        "completions": [],
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006",
+        "readable": true,
+        "raw": "[1,2]"
+      }
+    },
+    {
+      "case": "a completion time on a task that is open",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{\"title\":\"t\",\"completedAt\":\"2026-10-27T08:00:00.000Z\"}",
+      "task": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "title": "t",
+        "derived_title": false,
+        "notes": "",
+        "done": false,
+        "completions": [],
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006",
+        "readable": true,
+        "raw": "{\"title\":\"t\",\"completedAt\":\"2026-10-27T08:00:00.000Z\"}"
+      }
+    },
+    {
+      "case": "done as a string is not done",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{\"title\":\"t\",\"done\":\"true\"}",
+      "task": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "title": "t",
+        "derived_title": false,
+        "notes": "",
+        "done": false,
+        "completions": [],
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006",
+        "readable": true,
+        "raw": "{\"title\":\"t\",\"done\":\"true\"}"
+      }
+    },
+    {
+      "case": "due values that name no moment",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{\"title\":\"t\",\"dueDate\":\"2026-02-30\",\"recurrenceAnchor\":\"soon\"}",
+      "task": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "title": "t",
+        "derived_title": false,
+        "notes": "",
+        "done": false,
+        "completions": [],
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006",
+        "readable": true,
+        "raw": "{\"title\":\"t\",\"dueDate\":\"2026-02-30\",\"recurrenceAnchor\":\"soon\"}"
+      }
+    },
+    {
+      "case": "a priority that is not a whole number",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{\"title\":\"t\",\"priority\":1.5}",
+      "task": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "title": "t",
+        "derived_title": false,
+        "notes": "",
+        "done": false,
+        "completions": [],
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006",
+        "readable": true,
+        "raw": "{\"title\":\"t\",\"priority\":1.5}"
+      }
+    },
+    {
+      "case": "a priority above the named ones",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{\"title\":\"t\",\"priority\":7}",
+      "task": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "title": "t",
+        "derived_title": false,
+        "notes": "",
+        "done": false,
+        "completions": [],
+        "priority": 7,
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006",
+        "readable": true,
+        "raw": "{\"title\":\"t\",\"priority\":7}"
+      }
+    },
+    {
+      "case": "tags and completions that are not all strings",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{\"title\":\"t\",\"tags\":[\"a\",{\"x\":1},3,\"A\"],\"completions\":[\"x\",4,\"  \",\"y\"]}",
+      "task": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "title": "t",
+        "derived_title": false,
+        "notes": "",
+        "done": false,
+        "completions": [
+          "x",
+          "y"
+        ],
+        "tags": [
+          "a"
+        ],
+        "task_list_id": "00000000-0000-0000-0000-000000000006",
+        "readable": true,
+        "raw": "{\"title\":\"t\",\"tags\":[\"a\",{\"x\":1},3,\"A\"],\"completions\":[\"x\",4,\"  \",\"y\"]}"
+      }
+    },
+    {
+      "case": "a repeat rule with a frequency this build does not know",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{\"title\":\"t\",\"dueDate\":\"2026-11-01\",\"recurrence\":{\"frequency\":\"hourly\"}}",
+      "task": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "title": "t",
+        "derived_title": false,
+        "notes": "",
+        "done": false,
+        "completions": [],
+        "due_date": "2026-11-01",
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006",
+        "unreadable_recurrence": "{\"frequency\":\"hourly\"}",
+        "readable": true,
+        "raw": "{\"title\":\"t\",\"dueDate\":\"2026-11-01\",\"recurrence\":{\"frequency\":\"hourly\"}}"
+      }
+    },
+    {
+      "case": "a repeat rule with fields out of range",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{\"title\":\"t\",\"recurrence\":{\"frequency\":\"weekly\",\"weekdays\":[1,9],\"dayOfMonth\":40}}",
+      "task": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "title": "t",
+        "derived_title": false,
+        "notes": "",
+        "done": false,
+        "completions": [],
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006",
+        "recurrence": {
+          "frequency": "weekly",
+          "weekdays": [
+            1
+          ]
+        },
+        "readable": true,
+        "raw": "{\"title\":\"t\",\"recurrence\":{\"frequency\":\"weekly\",\"weekdays\":[1,9],\"dayOfMonth\":40}}"
+      }
+    },
+    {
+      "case": "a payload from a newer schema major",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{\"@type\":\"Task\",\"version\":\"2.0\",\"title\":\"t\"}",
+      "task": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "title": "t",
+        "derived_title": false,
+        "notes": "",
+        "done": false,
+        "completions": [],
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006",
+        "readable": false,
+        "raw": "{\"@type\":\"Task\",\"version\":\"2.0\",\"title\":\"t\"}"
+      }
+    }
+  ],
+  "due_dates": [
+    {
+      "case": "a day",
+      "value": "2026-10-28",
+      "normalized": "2026-10-28"
+    },
+    {
+      "case": "a day with space around it",
+      "value": "  2026-10-28  ",
+      "normalized": "2026-10-28"
+    },
+    {
+      "case": "the last day of a leap February",
+      "value": "2024-02-29",
+      "normalized": "2024-02-29"
+    },
+    {
+      "case": "the 29th of a February that is not a leap one",
+      "value": "2025-02-29",
+      "normalized": null
+    },
+    {
+      "case": "the 30th of February",
+      "value": "2026-02-30",
+      "normalized": null
+    },
+    {
+      "case": "a month past twelve",
+      "value": "2026-13-01",
+      "normalized": null
+    },
+    {
+      "case": "a time with no zone",
+      "value": "2026-10-28T09:30",
+      "normalized": "2026-10-28T09:30"
+    },
+    {
+      "case": "a time in UTC with milliseconds",
+      "value": "2026-10-28T09:30:15.250Z",
+      "normalized": "2026-10-28T09:30:15.250Z"
+    },
+    {
+      "case": "a time with an offset",
+      "value": "2026-10-28T09:30:00+01:00",
+      "normalized": "2026-10-28T09:30:00+01:00"
+    },
+    {
+      "case": "an hour past the day",
+      "value": "2026-10-28T25:00",
+      "normalized": null
+    },
+    {
+      "case": "a time with no minutes",
+      "value": "2026-10-28T09",
+      "normalized": null
+    },
+    {
+      "case": "a space where the T goes",
+      "value": "2026-10-28 09:30",
+      "normalized": null
+    },
+    {
+      "case": "an offset with no colon",
+      "value": "2026-10-28T09:30:00+0100",
+      "normalized": null
+    },
+    {
+      "case": "words",
+      "value": "tomorrow",
+      "normalized": null
+    },
+    {
+      "case": "nothing",
+      "value": "",
+      "normalized": null
+    }
+  ],
+  "list_writes": [
+    {
+      "case": "a list created from scratch",
+      "draft": {
+        "name": "Home"
+      },
+      "payload": "{\"@type\":\"TaskList\",\"name\":\"Home\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a name with surrounding space, under another list",
+      "draft": {
+        "name": "  Home  ",
+        "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+      },
+      "payload": "{\"@type\":\"TaskList\",\"name\":\"Home\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a coloured top-level list",
+      "draft": {
+        "name": "Home",
+        "color": "#112233"
+      },
+      "payload": "{\"@type\":\"TaskList\",\"color\":\"#112233\",\"name\":\"Home\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a rename keeps the parent, the colour and a later build's key",
+      "draft": {
+        "name": "Renamed",
+        "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "color": "#112233",
+        "raw": "{\"@type\":\"TaskList\",\"color\":\"#112233\",\"name\":\"Home\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sortKey\":\"from a later build\",\"version\":\"1.0\"}"
+      },
+      "payload": "{\"@type\":\"TaskList\",\"color\":\"#112233\",\"name\":\"Renamed\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sortKey\":\"from a later build\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "moving to the top level clears the parent",
+      "draft": {
+        "name": "Home",
+        "color": "#112233",
+        "raw": "{\"@type\":\"TaskList\",\"color\":\"#112233\",\"name\":\"Home\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sortKey\":\"from a later build\",\"version\":\"1.0\"}"
+      },
+      "payload": "{\"@type\":\"TaskList\",\"color\":\"#112233\",\"name\":\"Home\",\"sortKey\":\"from a later build\",\"version\":\"1.0\"}"
+    }
+  ],
+  "list_parses": [
+    {
+      "case": "a named, nested, coloured list",
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "raw": "{\"name\":\"  Home  \",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"color\":\"#112233\"}",
+      "list": {
+        "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "name": "Home",
+        "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "color": "#112233",
+        "readable": true,
+        "raw": "{\"name\":\"  Home  \",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"color\":\"#112233\"}"
+      }
+    },
+    {
+      "case": "the default list, unnamed",
+      "id": "00000000-0000-0000-0000-000000000006",
+      "raw": "{}",
+      "list": {
+        "id": "00000000-0000-0000-0000-000000000006",
+        "name": "Default Task List",
+        "readable": true,
+        "raw": "{}"
+      }
+    },
+    {
+      "case": "any other list, not JSON",
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "raw": "not json",
+      "list": {
+        "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "name": "Untitled",
+        "readable": true,
+        "raw": "not json"
+      }
+    },
+    {
+      "case": "an empty parent and colour read as none",
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "raw": "{\"name\":\"Home\",\"parentId\":\"  \",\"color\":\"\"}",
+      "list": {
+        "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "name": "Home",
+        "readable": true,
+        "raw": "{\"name\":\"Home\",\"parentId\":\"  \",\"color\":\"\"}"
+      }
+    }
+  ],
+  "tones": [
+    {
+      "case": "a root with an explicit colour",
+      "lists": [
+        {
+          "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "name": "Root",
+          "color": "#112233",
+          "readable": true,
+          "raw": "{\"name\":\"Root\",\"color\":\"#112233\"}"
+        },
+        {
+          "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "name": "Child",
+          "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "readable": true,
+          "raw": "{\"name\":\"Child\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"
+        },
+        {
+          "id": "plain",
+          "name": "Plain",
+          "readable": true,
+          "raw": "{\"name\":\"Plain\"}"
+        },
+        {
+          "id": "orphan",
+          "name": "Orphan",
+          "parent_id": "missing",
+          "readable": true,
+          "raw": "{\"name\":\"Orphan\",\"parentId\":\"missing\"}"
+        },
+        {
+          "id": "loop-a",
+          "name": "A",
+          "parent_id": "loop-b",
+          "readable": true,
+          "raw": "{\"name\":\"A\",\"parentId\":\"loop-b\"}"
+        },
+        {
+          "id": "loop-b",
+          "name": "B",
+          "parent_id": "loop-a",
+          "readable": true,
+          "raw": "{\"name\":\"B\",\"parentId\":\"loop-a\"}"
+        }
+      ],
+      "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "tone": "#112233"
+    },
+    {
+      "case": "a child takes its root's colour",
+      "lists": [
+        {
+          "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "name": "Root",
+          "color": "#112233",
+          "readable": true,
+          "raw": "{\"name\":\"Root\",\"color\":\"#112233\"}"
+        },
+        {
+          "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "name": "Child",
+          "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "readable": true,
+          "raw": "{\"name\":\"Child\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"
+        },
+        {
+          "id": "plain",
+          "name": "Plain",
+          "readable": true,
+          "raw": "{\"name\":\"Plain\"}"
+        },
+        {
+          "id": "orphan",
+          "name": "Orphan",
+          "parent_id": "missing",
+          "readable": true,
+          "raw": "{\"name\":\"Orphan\",\"parentId\":\"missing\"}"
+        },
+        {
+          "id": "loop-a",
+          "name": "A",
+          "parent_id": "loop-b",
+          "readable": true,
+          "raw": "{\"name\":\"A\",\"parentId\":\"loop-b\"}"
+        },
+        {
+          "id": "loop-b",
+          "name": "B",
+          "parent_id": "loop-a",
+          "readable": true,
+          "raw": "{\"name\":\"B\",\"parentId\":\"loop-a\"}"
+        }
+      ],
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "tone": "#112233"
+    },
+    {
+      "case": "a root with none is hashed from its id",
+      "lists": [
+        {
+          "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "name": "Root",
+          "color": "#112233",
+          "readable": true,
+          "raw": "{\"name\":\"Root\",\"color\":\"#112233\"}"
+        },
+        {
+          "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "name": "Child",
+          "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "readable": true,
+          "raw": "{\"name\":\"Child\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"
+        },
+        {
+          "id": "plain",
+          "name": "Plain",
+          "readable": true,
+          "raw": "{\"name\":\"Plain\"}"
+        },
+        {
+          "id": "orphan",
+          "name": "Orphan",
+          "parent_id": "missing",
+          "readable": true,
+          "raw": "{\"name\":\"Orphan\",\"parentId\":\"missing\"}"
+        },
+        {
+          "id": "loop-a",
+          "name": "A",
+          "parent_id": "loop-b",
+          "readable": true,
+          "raw": "{\"name\":\"A\",\"parentId\":\"loop-b\"}"
+        },
+        {
+          "id": "loop-b",
+          "name": "B",
+          "parent_id": "loop-a",
+          "readable": true,
+          "raw": "{\"name\":\"B\",\"parentId\":\"loop-a\"}"
+        }
+      ],
+      "id": "plain",
+      "tone": "#bb9af7"
+    },
+    {
+      "case": "a list whose parent is gone is its own root",
+      "lists": [
+        {
+          "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "name": "Root",
+          "color": "#112233",
+          "readable": true,
+          "raw": "{\"name\":\"Root\",\"color\":\"#112233\"}"
+        },
+        {
+          "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "name": "Child",
+          "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "readable": true,
+          "raw": "{\"name\":\"Child\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"
+        },
+        {
+          "id": "plain",
+          "name": "Plain",
+          "readable": true,
+          "raw": "{\"name\":\"Plain\"}"
+        },
+        {
+          "id": "orphan",
+          "name": "Orphan",
+          "parent_id": "missing",
+          "readable": true,
+          "raw": "{\"name\":\"Orphan\",\"parentId\":\"missing\"}"
+        },
+        {
+          "id": "loop-a",
+          "name": "A",
+          "parent_id": "loop-b",
+          "readable": true,
+          "raw": "{\"name\":\"A\",\"parentId\":\"loop-b\"}"
+        },
+        {
+          "id": "loop-b",
+          "name": "B",
+          "parent_id": "loop-a",
+          "readable": true,
+          "raw": "{\"name\":\"B\",\"parentId\":\"loop-a\"}"
+        }
+      ],
+      "id": "orphan",
+      "tone": "#7aa2f7"
+    },
+    {
+      "case": "a loop ends the walk",
+      "lists": [
+        {
+          "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "name": "Root",
+          "color": "#112233",
+          "readable": true,
+          "raw": "{\"name\":\"Root\",\"color\":\"#112233\"}"
+        },
+        {
+          "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "name": "Child",
+          "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "readable": true,
+          "raw": "{\"name\":\"Child\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"
+        },
+        {
+          "id": "plain",
+          "name": "Plain",
+          "readable": true,
+          "raw": "{\"name\":\"Plain\"}"
+        },
+        {
+          "id": "orphan",
+          "name": "Orphan",
+          "parent_id": "missing",
+          "readable": true,
+          "raw": "{\"name\":\"Orphan\",\"parentId\":\"missing\"}"
+        },
+        {
+          "id": "loop-a",
+          "name": "A",
+          "parent_id": "loop-b",
+          "readable": true,
+          "raw": "{\"name\":\"A\",\"parentId\":\"loop-b\"}"
+        },
+        {
+          "id": "loop-b",
+          "name": "B",
+          "parent_id": "loop-a",
+          "readable": true,
+          "raw": "{\"name\":\"B\",\"parentId\":\"loop-a\"}"
+        }
+      ],
+      "id": "loop-a",
+      "tone": "#9ece6a"
+    },
+    {
+      "case": "an id in no list is hashed",
+      "lists": [
+        {
+          "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "name": "Root",
+          "color": "#112233",
+          "readable": true,
+          "raw": "{\"name\":\"Root\",\"color\":\"#112233\"}"
+        },
+        {
+          "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "name": "Child",
+          "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "readable": true,
+          "raw": "{\"name\":\"Child\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"
+        },
+        {
+          "id": "plain",
+          "name": "Plain",
+          "readable": true,
+          "raw": "{\"name\":\"Plain\"}"
+        },
+        {
+          "id": "orphan",
+          "name": "Orphan",
+          "parent_id": "missing",
+          "readable": true,
+          "raw": "{\"name\":\"Orphan\",\"parentId\":\"missing\"}"
+        },
+        {
+          "id": "loop-a",
+          "name": "A",
+          "parent_id": "loop-b",
+          "readable": true,
+          "raw": "{\"name\":\"A\",\"parentId\":\"loop-b\"}"
+        },
+        {
+          "id": "loop-b",
+          "name": "B",
+          "parent_id": "loop-a",
+          "readable": true,
+          "raw": "{\"name\":\"B\",\"parentId\":\"loop-a\"}"
+        }
+      ],
+      "id": "unknown",
+      "tone": "#bb9af7"
+    }
+  ],
+  "refusals": [
+    {
+      "case": "editing a task from a newer schema major",
+      "error": "PayloadSchema"
+    },
+    {
+      "case": "renaming a list from a newer schema major",
+      "error": "PayloadSchema"
+    }
+  ]
+}

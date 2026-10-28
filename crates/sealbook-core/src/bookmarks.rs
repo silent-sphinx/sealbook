@@ -411,13 +411,34 @@ pub fn bookmark_collection_name_by_id(
 /// under it resolves to the same value. The hash is over UTF-16 units, so every
 /// client lands an uncoloured collection on the same tone.
 pub fn bookmark_collection_tone(collections: &[CoreBookmarkCollection], id: &str) -> String {
-    let root = collection_root_id(collections, id);
-    if let Some(explicit) = collections
+    let nodes: Vec<ToneNode> = collections
         .iter()
-        .find(|collection| collection.id == root)
-        .and_then(|collection| collection.color.clone())
+        .map(|collection| ToneNode {
+            id: &collection.id,
+            parent_id: collection.parent_id.as_deref(),
+            color: collection.color.as_deref(),
+        })
+        .collect();
+    tone(&nodes, id)
+}
+
+/// One entry of a tree whose branches are coloured by their root.
+pub(crate) struct ToneNode<'a> {
+    pub id: &'a str,
+    pub parent_id: Option<&'a str>,
+    pub color: Option<&'a str>,
+}
+
+/// The shared colour rule for every nested list: bookmark collections and task
+/// lists resolve a colour the same way.
+pub(crate) fn tone(nodes: &[ToneNode], id: &str) -> String {
+    let root = root_id(nodes, id);
+    if let Some(explicit) = nodes
+        .iter()
+        .find(|node| node.id == root)
+        .and_then(|node| node.color)
     {
-        return explicit;
+        return explicit.to_string();
     }
     let hash = root.encode_utf16().fold(0u32, |hash, unit| {
         hash.wrapping_mul(31).wrapping_add(u32::from(unit))
@@ -425,22 +446,20 @@ pub fn bookmark_collection_tone(collections: &[CoreBookmarkCollection], id: &str
     COLLECTION_TONES[hash as usize % COLLECTION_TONES.len()].to_string()
 }
 
-/// The top-level collection `id` sits under: itself, if it is already one. A
-/// parent that is missing, or a loop, ends the walk where it stands.
-fn collection_root_id(collections: &[CoreBookmarkCollection], id: &str) -> String {
-    let mut seen = vec![id.to_string()];
-    let mut cursor = id.to_string();
+/// The top-level entry `id` sits under: itself, if it is already one. A parent
+/// that is missing, or a loop, ends the walk where it stands.
+fn root_id<'a>(nodes: &[ToneNode<'a>], id: &'a str) -> &'a str {
+    let mut seen = vec![id];
+    let mut cursor = id;
     loop {
-        let parent = collections
+        let parent = nodes
             .iter()
-            .find(|collection| collection.id == cursor)
-            .and_then(|collection| collection.parent_id.clone())
-            .filter(|parent| {
-                !seen.contains(parent) && collections.iter().any(|other| other.id == *parent)
-            });
+            .find(|node| node.id == cursor)
+            .and_then(|node| node.parent_id)
+            .filter(|parent| !seen.contains(parent) && nodes.iter().any(|n| n.id == *parent));
         match parent {
             Some(parent) => {
-                seen.push(parent.clone());
+                seen.push(parent);
                 cursor = parent;
             }
             None => return cursor,

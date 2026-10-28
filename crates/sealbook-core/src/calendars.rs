@@ -418,7 +418,7 @@ fn calendar_color(color: &str) -> String {
     }
 }
 
-fn present(value: &Option<String>) -> Option<String> {
+pub(crate) fn present(value: &Option<String>) -> Option<String> {
     value
         .as_deref()
         .map(str::trim)
@@ -454,7 +454,7 @@ fn parse_participants(value: Option<&Value>) -> Vec<String> {
 /// weekday of 9 or a 40th of the month is a rule no client can expand, and
 /// keeping the rest of a rule is closer to what was meant than guessing at the
 /// part that will not read.
-fn parse_recurrence(object: &Map<String, Value>) -> Option<CoreRecurrence> {
+pub(crate) fn parse_recurrence(object: &Map<String, Value>) -> Option<CoreRecurrence> {
     let frequency = object
         .get("frequency")
         .and_then(Value::as_str)
@@ -500,11 +500,11 @@ fn parse_recurrence(object: &Map<String, Value>) -> Option<CoreRecurrence> {
     })
 }
 
-fn stored_rule(object: &Map<String, Value>) -> Option<&Map<String, Value>> {
+pub(crate) fn stored_rule(object: &Map<String, Value>) -> Option<&Map<String, Value>> {
     object.get("recurrence").and_then(Value::as_object)
 }
 
-fn recurrence_json(rule: &CoreRecurrence) -> Value {
+pub(crate) fn recurrence_json(rule: &CoreRecurrence) -> Value {
     let mut object = Map::new();
     object.insert("frequency".into(), json!(rule.frequency.wire()));
     if let Some(interval) = rule.interval.filter(|interval| *interval > 1) {
