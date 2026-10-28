@@ -32,7 +32,9 @@ use serde_json::{json, Map, Value};
 
 use crate::contact_profile::{parse_profile, profile_json, CoreContactProfile};
 use crate::notes::{attachment_json, parse_attachments, CoreNoteAttachment};
-use crate::payload::{as_object, declared_readable, refuse_newer_major, trimmed, write_payload};
+use crate::payload::{
+    as_object, declared_readable, entry_with, extra_of, refuse_newer_major, trimmed, write_payload,
+};
 use crate::CoreError;
 use sealbook_protocol::PAYLOAD_SCHEMA_VERSION;
 
@@ -357,21 +359,6 @@ fn objects<'a>(
                 .collect()
         })
         .unwrap_or_default()
-}
-
-/// The entry's keys outside `known`, as a JSON object, or `None` when there are none.
-fn extra_of(entry: &Map<String, Value>, known: &[&str]) -> Option<String> {
-    let extra: Map<String, Value> = entry
-        .iter()
-        .filter(|(key, _)| !known.contains(&key.as_str()))
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect();
-    (!extra.is_empty()).then(|| Value::Object(extra).to_string())
-}
-
-/// A new entry seeded with the keys `extra` carried, for the writer to set its own over.
-fn entry_with(extra: &Option<String>) -> Map<String, Value> {
-    extra.as_deref().and_then(as_object).unwrap_or_default()
 }
 
 fn flag(object: Option<&Value>, key: &str) -> bool {

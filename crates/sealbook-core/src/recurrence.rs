@@ -336,6 +336,7 @@ mod tests {
             weekdays: Vec::new(),
             day_of_month: None,
             nth_weekday: None,
+            extra: None,
         }
     }
 

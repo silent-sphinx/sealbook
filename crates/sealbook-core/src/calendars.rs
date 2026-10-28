@@ -34,7 +34,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use crate::payload::{as_object, declared_readable, refuse_newer_major, trimmed, write_payload};
+use crate::payload::{
+    as_object, declared_readable, entry_with, extra_of, refuse_newer_major, trimmed, write_payload,
+};
 use crate::CoreError;
 use sealbook_protocol::PAYLOAD_SCHEMA_VERSION;
 
@@ -145,6 +147,10 @@ pub struct CoreRecurrence {
     pub day_of_month: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nth_weekday: Option<CoreNthWeekday>,
+    /// Keys of the stored rule this build does not write, as a JSON object.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "uniffi", uniffi(default = None))]
+    pub extra: Option<String>,
 }
 
 /// One calendar as it is drafted, before it is written.
@@ -454,6 +460,16 @@ fn parse_participants(value: Option<&Value>) -> Vec<String> {
 /// weekday of 9 or a 40th of the month is a rule no client can expand, and
 /// keeping the rest of a rule is closer to what was meant than guessing at the
 /// part that will not read.
+const RECURRENCE_KEYS: &[&str] = &[
+    "frequency",
+    "interval",
+    "until",
+    "count",
+    "weekdays",
+    "dayOfMonth",
+    "nthWeekday",
+];
+
 pub(crate) fn parse_recurrence(object: &Map<String, Value>) -> Option<CoreRecurrence> {
     let frequency = object
         .get("frequency")
@@ -497,6 +513,7 @@ pub(crate) fn parse_recurrence(object: &Map<String, Value>) -> Option<CoreRecurr
             .filter(|day| (1..=31).contains(day))
             .map(|day| day as u32),
         nth_weekday,
+        extra: extra_of(object, RECURRENCE_KEYS),
     })
 }
 
@@ -505,7 +522,7 @@ pub(crate) fn stored_rule(object: &Map<String, Value>) -> Option<&Map<String, Va
 }
 
 pub(crate) fn recurrence_json(rule: &CoreRecurrence) -> Value {
-    let mut object = Map::new();
+    let mut object = entry_with(&rule.extra);
     object.insert("frequency".into(), json!(rule.frequency.wire()));
     if let Some(interval) = rule.interval.filter(|interval| *interval > 1) {
         object.insert("interval".into(), json!(interval));

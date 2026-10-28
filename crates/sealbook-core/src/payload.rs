@@ -34,7 +34,23 @@ pub fn write_payload(previous: Option<&str>, fields: Value, owned: &[&str]) -> S
             }
         }
     }
+    if let Some(previous) = higher_version(previous, &merged) {
+        merged.insert("version".into(), Value::String(previous));
+    }
     Value::Object(merged).to_string()
+}
+
+/// The version `previous` declares, when it is a later minor of the major this
+/// write stamps: a save must not claim an older schema than the keys it carries.
+fn higher_version(previous: Option<&str>, merged: &Map<String, Value>) -> Option<String> {
+    let declared = as_object(previous?)?.get("version")?.as_str()?.to_string();
+    let stamped = merged.get("version")?.as_str()?;
+    let pair = |text: &str| -> Option<(u32, u32)> {
+        let (major, minor) = text.split_once('.')?;
+        Some((major.parse().ok()?, minor.parse().ok()?))
+    };
+    let (declared_pair, stamped_pair) = (pair(&declared)?, pair(stamped)?);
+    (declared_pair.0 == stamped_pair.0 && declared_pair.1 > stamped_pair.1).then_some(declared)
 }
 
 fn carried(previous: Option<&str>, owned: &[&str]) -> Map<String, Value> {
@@ -73,6 +89,21 @@ pub(crate) fn text(object: &Map<String, Value>, key: &str) -> String {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string()
+}
+
+/// The entry's keys outside `known`, as a JSON object, or `None` when there are none.
+pub(crate) fn extra_of(entry: &Map<String, Value>, known: &[&str]) -> Option<String> {
+    let extra: Map<String, Value> = entry
+        .iter()
+        .filter(|(key, _)| !known.contains(&key.as_str()))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    (!extra.is_empty()).then(|| Value::Object(extra).to_string())
+}
+
+/// A new entry seeded with the keys `extra` carried, for the writer to set its own over.
+pub(crate) fn entry_with(extra: &Option<String>) -> Map<String, Value> {
+    extra.as_deref().and_then(as_object).unwrap_or_default()
 }
 
 pub(crate) fn as_object(raw: &str) -> Option<Map<String, Value>> {
@@ -139,6 +170,24 @@ mod tests {
         ));
         assert_eq!(written["title"], "new");
         assert_eq!(written["pinned"], true);
+    }
+
+    #[test]
+    fn a_save_keeps_a_later_minor_and_never_lowers_a_version() {
+        let fields = |version: &str| serde_json::json!({ "@type": "Note", "version": version });
+        let written = |previous: &str, stamped: &str| {
+            parsed(&write_payload(
+                Some(previous),
+                fields(stamped),
+                &["@type", "version"],
+            ))["version"]
+                .clone()
+        };
+        assert_eq!(written(r#"{"version":"1.7"}"#, "1.0"), "1.7");
+        assert_eq!(written(r#"{"version":"1.0"}"#, "1.2"), "1.2");
+        assert_eq!(written(r#"{"version":"0.9"}"#, "1.0"), "1.0");
+        assert_eq!(written(r#"{"version":"junk"}"#, "1.0"), "1.0");
+        assert_eq!(written(r#"{}"#, "1.0"), "1.0");
     }
 
     #[test]

@@ -265,6 +265,27 @@
       "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"dueDate\":\"2026-11-01\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
     },
     {
+      "case": "a newer minor keeps its version, its keys and the keys inside its repeat rule",
+      "draft": {
+        "title": "t",
+        "notes": "",
+        "done": false,
+        "completions": [],
+        "due_date": "2026-11-01",
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006",
+        "recurrence": {
+          "frequency": "weekly",
+          "interval": 2,
+          "weekdays": [],
+          "extra": "{\"futureRule\":{\"n\":1}}"
+        },
+        "recurrence_anchor": "2026-11-01",
+        "raw": "{\"@type\":\"Task\",\"version\":\"1.7\",\"title\":\"t\",\"dueDate\":\"2026-11-01\",\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"futureRule\":{\"n\":1}},\"recurrenceAnchor\":\"2026-11-01\",\"futureKey\":[1]}"
+      },
+      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"dueDate\":\"2026-11-01\",\"futureKey\":[1],\"recurrence\":{\"frequency\":\"weekly\",\"futureRule\":{\"n\":1},\"interval\":2},\"recurrenceAnchor\":\"2026-11-01\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"t\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.7\"}"
+    },
+    {
       "case": "a repeat rule from a newer build is put back",
       "draft": {
         "title": "t",
@@ -534,6 +555,29 @@
         },
         "readable": true,
         "raw": "{\"title\":\"t\",\"recurrence\":{\"frequency\":\"weekly\",\"weekdays\":[1,9],\"dayOfMonth\":40}}"
+      }
+    },
+    {
+      "case": "a newer minor with keys unknown at the top and inside the repeat rule",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{\"@type\":\"Task\",\"version\":\"1.7\",\"title\":\"t\",\"dueDate\":\"2026-11-01\",\"recurrence\":{\"frequency\":\"weekly\",\"futureRule\":{\"n\":1}},\"futureKey\":[1]}",
+      "task": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "title": "t",
+        "derived_title": false,
+        "notes": "",
+        "done": false,
+        "completions": [],
+        "due_date": "2026-11-01",
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006",
+        "recurrence": {
+          "frequency": "weekly",
+          "weekdays": [],
+          "extra": "{\"futureRule\":{\"n\":1}}"
+        },
+        "readable": true,
+        "raw": "{\"@type\":\"Task\",\"version\":\"1.7\",\"title\":\"t\",\"dueDate\":\"2026-11-01\",\"recurrence\":{\"frequency\":\"weekly\",\"futureRule\":{\"n\":1}},\"futureKey\":[1]}"
       }
     },
     {

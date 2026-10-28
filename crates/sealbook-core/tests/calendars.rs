@@ -331,6 +331,7 @@ fn event_write_cases() -> Vec<(String, CoreCalendarEventDraft)> {
                         ordinal: 3,
                         weekday: 2,
                     }),
+                    extra: None,
                 }),
                 ..blank_event()
             },

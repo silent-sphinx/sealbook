@@ -122,6 +122,7 @@ fn weekly() -> CoreRecurrence {
         weekdays: vec![1, 3],
         day_of_month: None,
         nth_weekday: None,
+        extra: None,
     }
 }
 
@@ -247,6 +248,14 @@ fn write_cases() -> Vec<(String, CoreTaskDraft)> {
             .draft(),
         ),
         (
+            "a newer minor keeps its version, its keys and the keys inside its repeat rule".into(),
+            task_parse(
+                TASK,
+                r#"{"@type":"Task","version":"1.7","title":"t","dueDate":"2026-11-01","recurrence":{"frequency":"weekly","interval":2,"futureRule":{"n":1}},"recurrenceAnchor":"2026-11-01","futureKey":[1]}"#,
+            )
+            .draft(),
+        ),
+        (
             "a repeat rule from a newer build is put back".into(),
             task_parse(
                 TASK,
@@ -303,6 +312,10 @@ fn parse_cases() -> Vec<(String, String, String)> {
             "a repeat rule with fields out of range",
             r#"{"title":"t","recurrence":{"frequency":"weekly","weekdays":[1,9],"dayOfMonth":40}}"#
                 .into(),
+        ),
+        case(
+            "a newer minor with keys unknown at the top and inside the repeat rule",
+            r#"{"@type":"Task","version":"1.7","title":"t","dueDate":"2026-11-01","recurrence":{"frequency":"weekly","futureRule":{"n":1}},"futureKey":[1]}"#.into(),
         ),
         case(
             "a payload from a newer schema major",
