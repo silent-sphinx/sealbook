@@ -123,6 +123,11 @@ impl From<sealbook_core::CoreError> for ClientError {
             // As above: the refusal states why the attachment was not sent or
             // not trusted, and the CLI prints it.
             CoreError::Attachment { refusal } => ClientError::Server(refusal.to_string()),
+            // Not a server fault: the stored payload is from a newer client. The
+            // error states which schema it declared and what this build reads.
+            ref schema @ CoreError::PayloadSchema { .. } => {
+                ClientError::Server(schema.to_string())
+            }
         }
     }
 }

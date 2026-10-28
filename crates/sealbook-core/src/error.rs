@@ -84,6 +84,15 @@ pub enum CoreError {
     Pair {
         refusal: crate::pairing::PairRefusal,
     },
+    /// A payload declaring a schema major this build does not read. Carrying
+    /// unknown keys through is enough for a field that was added; it is not
+    /// enough for one whose meaning changed, which is the case this refuses.
+    #[error(
+        "this note was written by a newer client (payload schema {declared}, this build reads \
+         {expected}); update this client before editing it",
+        expected = sealbook_protocol::PAYLOAD_SCHEMA_VERSION
+    )]
+    PayloadSchema { declared: String },
     /// A core function called out of order by its host, not a server fault.
     #[error("core state machine misuse: {detail}")]
     Misuse { detail: String },
@@ -140,6 +149,7 @@ impl CoreError {
             CoreError::Auth { .. } => "Auth",
             CoreError::Attachment { .. } => "Attachment",
             CoreError::Pair { .. } => "Pair",
+            CoreError::PayloadSchema { .. } => "PayloadSchema",
             CoreError::Misuse { .. } => "Misuse",
         }
     }

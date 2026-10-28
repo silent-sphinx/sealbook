@@ -518,15 +518,19 @@ fn note_body(notes: &[(Uuid, String)], id: Uuid) -> String {
         .to_string()
 }
 
+/// Through core's writer, not a hand-built payload, so what travels the wire in
+/// this suite is what the clients actually write.
 fn note_json(title: &str, body: &str, notebook: Uuid) -> String {
-    serde_json::json!({
-        "@type": "Note",
-        "version": "1.0",
-        "title": title,
-        "body": body,
-        "notebookId": notebook.to_string(),
-    })
-    .to_string()
+    sealbook_client::note_write(
+        &sealbook_client::CoreNoteDraft {
+            title: title.to_string(),
+            body: body.to_string(),
+            notebook_id: notebook.to_string(),
+            ..Default::default()
+        },
+        "2026-10-28T12:00:00Z",
+    )
+    .expect("writes")
 }
 
 #[tokio::test]
@@ -550,7 +554,7 @@ async fn notes_and_notebooks_are_encrypted_and_hidden_from_the_contact_list() {
 
     let work_id = Uuid::new_v4();
     client
-        .put_notebook(work_id, "Field Notes")
+        .put_notebook(work_id, "Field Notes", None)
         .await
         .expect("work notebook");
 

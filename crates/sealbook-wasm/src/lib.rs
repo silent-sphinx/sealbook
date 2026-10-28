@@ -4,7 +4,8 @@ use sealbook_core::{
     AppliedManifest, AttachmentLimits, AttachmentPlan, AttachmentRow, AuthRequest,
     BucketedManifest, BucketsOutcome, ChangesPage, ChunkRange, CoreBuild, CoreDevice,
     CoreDeviceSecrets, CoreDeviceState, CoreManifestEntry, CorePairPreview, CoreRoster,
-    CoreRosterPin, CoreSealedRow, CoreSession, HttpRequest, HttpResponse, LoggedIn, LoginStarting,
+    CoreNote, CoreNoteDraft, CoreNotebook, CoreRosterPin, CoreSealedRow, CoreSession, HttpRequest,
+    HttpResponse, LoggedIn, LoginStarting,
     ManifestContext, ManifestOutcome, ManifestPlan, ManifestSigner, OpaqueStart, PairApproval,
     PairJoined, PairStatus, PasswordChange, PasswordChangeStarted, RecoverStarted, Recovering,
     RegisterIdentity, Registering, ResealRow, RosterContext, RotationPlan, RotationState,
@@ -2023,4 +2024,81 @@ pub fn core_attachment_sweep_orphans(
         now_secs,
     ))
     .into_ts()?)
+}
+
+// ── Core: payload schemas ──
+//
+// The one layer with no server check behind it: objects are sealed before they
+// leave, so a client writing a key the others do not read is caught by the
+// shared fixture or by nothing. Core owns the key list, the writer and the
+// lenient reader; this client keeps its own view models.
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct CoreNotebookList(pub Vec<CoreNotebook>);
+
+/// Every key a note writer owns, which is the union across all four clients
+/// rather than the subset this one's editor can show.
+#[wasm_bindgen]
+pub fn core_note_keys() -> Vec<String> {
+    sealbook_core::NOTE_KEYS
+        .iter()
+        .map(|key| key.to_string())
+        .collect()
+}
+
+#[wasm_bindgen]
+pub fn core_notebook_keys() -> Vec<String> {
+    sealbook_core::NOTEBOOK_KEYS
+        .iter()
+        .map(|key| key.to_string())
+        .collect()
+}
+
+#[wasm_bindgen]
+pub fn core_default_notebook_id() -> String {
+    sealbook_core::default_notebook_id()
+}
+
+#[wasm_bindgen]
+pub fn core_resolve_notebook_id(notebook_id: Option<String>) -> String {
+    sealbook_core::resolve_notebook_id(notebook_id)
+}
+
+/// Reads a stored note payload. Lenient throughout: a payload that will not
+/// parse comes back as a row the user can still find and delete.
+#[wasm_bindgen]
+pub fn core_note_parse(id: &str, raw: &str) -> Result<Ts<CoreNote>, JsError> {
+    Ok(sealbook_core::note_parse(id, raw).into_ts()?)
+}
+
+/// Serialises a note onto `draft.raw`. `now` is the caller's clock: core has
+/// none. Throws on a payload from a newer schema major, which this build may
+/// read but must not write over.
+#[wasm_bindgen]
+pub fn core_note_write(draft: Ts<CoreNoteDraft>, now: &str) -> Result<String, JsError> {
+    sealbook_core::note_write(&draft.to_rust()?, now).map_err(core_err)
+}
+
+#[wasm_bindgen]
+pub fn core_notebook_parse(id: &str, raw: &str) -> Result<Ts<CoreNotebook>, JsError> {
+    Ok(sealbook_core::notebook_parse(id, raw).into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_notebook_write(name: &str, previous_raw: Option<String>) -> Result<String, JsError> {
+    sealbook_core::notebook_write(name, previous_raw.as_deref()).map_err(core_err)
+}
+
+/// The name to show for a note's notebook. A notebook that is gone shows the
+/// default notebook's name rather than nothing.
+#[wasm_bindgen]
+pub fn core_notebook_name_by_id(
+    notebooks: Ts<CoreNotebookList>,
+    notebook_id: Option<String>,
+) -> Result<String, JsError> {
+    Ok(sealbook_core::notebook_name_by_id(
+        &notebooks.to_rust()?.0,
+        notebook_id,
+    ))
 }

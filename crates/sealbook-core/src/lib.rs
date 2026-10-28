@@ -22,7 +22,9 @@ mod auth;
 mod error;
 mod http;
 mod manifest;
+mod notes;
 mod pairing;
+mod payload;
 mod roster;
 mod rotation;
 mod state;
@@ -73,6 +75,13 @@ pub use manifest::{
     CoreManifestEntry, ManifestContext, ManifestOutcome, ManifestPlan, ManifestSigner,
     SignedManifest,
 };
+pub use notes::{
+    default_notebook_id, note_parse, note_write, notebook_name_by_id, notebook_parse,
+    notebook_write, resolve_notebook_id, CoreNote, CoreNoteAttachment, CoreNoteDraft, CoreNotebook,
+    DEFAULT_NOTEBOOK_NAME, NOTEBOOK_CONTENT_TYPE, NOTEBOOK_KEYS, NOTE_CONTENT_TYPE, NOTE_KEYS,
+    UNREADABLE_NOTE_TITLE, UNTITLED_NOTEBOOK_NAME, UNTITLED_NOTE_TITLE,
+};
+pub use payload::write_payload;
 pub use pairing::{
     confirmation_groups, format_confirmation, normalize_confirmation, pair_approve,
     pair_approve_path, pair_join_accept, pair_join_body, pair_path, pair_preview, pair_status,

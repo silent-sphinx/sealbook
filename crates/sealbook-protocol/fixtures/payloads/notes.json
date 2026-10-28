@@ -1,0 +1,333 @@
+{
+  "now": "2026-10-28T12:00:00Z",
+  "constants": {
+    "note_content_type": "application/sealbook.note+json",
+    "notebook_content_type": "application/sealbook.notebook+json",
+    "note_keys": [
+      "@type",
+      "version",
+      "title",
+      "body",
+      "notebookId",
+      "parentId",
+      "createdAt",
+      "updatedAt",
+      "attachments"
+    ],
+    "notebook_keys": [
+      "@type",
+      "version",
+      "name"
+    ],
+    "default_notebook_id": "00000000-0000-0000-0000-000000000002",
+    "default_notebook_name": "Default Notebook",
+    "untitled_note_title": "Untitled note",
+    "unreadable_note_title": "Unreadable note",
+    "untitled_notebook_name": "Untitled"
+  },
+  "writes": [
+    {
+      "case": "a note written from scratch",
+      "draft": {
+        "title": "Plan",
+        "body": "first line\nsecond line\n",
+        "notebook_id": "00000000-0000-0000-0000-000000000002",
+        "attachments": []
+      },
+      "payload": "{\"@type\":\"Note\",\"body\":\"first line\\nsecond line\\n\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"notebookId\":\"00000000-0000-0000-0000-000000000002\",\"title\":\"Plan\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a title with surrounding space, and a body whose space is the user's",
+      "draft": {
+        "title": "  Plan  ",
+        "body": "  kept as typed  ",
+        "notebook_id": "00000000-0000-0000-0000-000000000002",
+        "attachments": []
+      },
+      "payload": "{\"@type\":\"Note\",\"body\":\"  kept as typed  \",\"createdAt\":\"2026-10-28T12:00:00Z\",\"notebookId\":\"00000000-0000-0000-0000-000000000002\",\"title\":\"Plan\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a blank notebook resolves to the one every account has",
+      "draft": {
+        "title": "Loose",
+        "body": "",
+        "notebook_id": "   ",
+        "attachments": []
+      },
+      "payload": "{\"@type\":\"Note\",\"body\":\"\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"notebookId\":\"00000000-0000-0000-0000-000000000002\",\"title\":\"Loose\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a note under another note, in a notebook of its own",
+      "draft": {
+        "title": "Child",
+        "body": "",
+        "notebook_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "parent_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "attachments": [],
+        "created_at": "2026-01-01T00:00:00Z"
+      },
+      "payload": "{\"@type\":\"Note\",\"body\":\"\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"notebookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"parentId\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"title\":\"Child\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a host that manages pinning says so",
+      "draft": {
+        "title": "Pinned",
+        "body": "",
+        "notebook_id": "00000000-0000-0000-0000-000000000002",
+        "attachments": [],
+        "pinned": true
+      },
+      "payload": "{\"@type\":\"Note\",\"body\":\"\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"notebookId\":\"00000000-0000-0000-0000-000000000002\",\"pinned\":true,\"title\":\"Pinned\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a host that does not manage pinning leaves the stored value alone",
+      "draft": {
+        "title": "Trip",
+        "body": "![photo](attachment:a1)\n",
+        "notebook_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "parent_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "attachments": [
+          {
+            "id": "a1",
+            "filename": "photo.jpg",
+            "mime_type": "image/jpeg",
+            "byte_size": 2097152,
+            "width": 4032,
+            "height": 3024,
+            "adk": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+            "content_hash": "ZGlnZXN0",
+            "chunk_size": 4194304,
+            "chunk_count": 1,
+            "display_width": 480,
+            "thumbnail": "data:image/jpeg;base64,/9j/",
+            "extra": "{\"caption\":\"also from a later build\"}"
+          }
+        ],
+        "created_at": "2026-01-01T00:00:00Z",
+        "raw": "{\"@type\":\"Note\",\"attachments\":[{\"adk\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"byteSize\":2097152,\"caption\":\"also from a later build\",\"chunkCount\":1,\"chunkSize\":4194304,\"contentHash\":\"ZGlnZXN0\",\"displayWidth\":480,\"filename\":\"photo.jpg\",\"height\":3024,\"id\":\"a1\",\"mimeType\":\"image/jpeg\",\"thumbnail\":\"data:image/jpeg;base64,/9j/\",\"width\":4032}],\"body\":\"![photo](attachment:a1)\\n\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"notebookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"parentId\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"pinned\":true,\"somethingNewer\":{\"from\":\"a later build\"},\"title\":\"Trip\",\"updatedAt\":\"2026-02-02T00:00:00Z\",\"version\":\"1.0\"}"
+      },
+      "payload": "{\"@type\":\"Note\",\"attachments\":[{\"adk\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"byteSize\":2097152,\"caption\":\"also from a later build\",\"chunkCount\":1,\"chunkSize\":4194304,\"contentHash\":\"ZGlnZXN0\",\"displayWidth\":480,\"filename\":\"photo.jpg\",\"height\":3024,\"id\":\"a1\",\"mimeType\":\"image/jpeg\",\"thumbnail\":\"data:image/jpeg;base64,/9j/\",\"width\":4032}],\"body\":\"![photo](attachment:a1)\\n\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"notebookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"parentId\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"pinned\":true,\"somethingNewer\":{\"from\":\"a later build\"},\"title\":\"Trip\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "an edit that clears the parent and the photos",
+      "draft": {
+        "title": "Trip",
+        "body": "no photo now\n",
+        "notebook_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "attachments": [],
+        "created_at": "2026-01-01T00:00:00Z",
+        "raw": "{\"@type\":\"Note\",\"attachments\":[{\"adk\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"byteSize\":2097152,\"caption\":\"also from a later build\",\"chunkCount\":1,\"chunkSize\":4194304,\"contentHash\":\"ZGlnZXN0\",\"displayWidth\":480,\"filename\":\"photo.jpg\",\"height\":3024,\"id\":\"a1\",\"mimeType\":\"image/jpeg\",\"thumbnail\":\"data:image/jpeg;base64,/9j/\",\"width\":4032}],\"body\":\"![photo](attachment:a1)\\n\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"notebookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"parentId\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"pinned\":true,\"somethingNewer\":{\"from\":\"a later build\"},\"title\":\"Trip\",\"updatedAt\":\"2026-02-02T00:00:00Z\",\"version\":\"1.0\"}"
+      },
+      "payload": "{\"@type\":\"Note\",\"body\":\"no photo now\\n\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"notebookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"pinned\":true,\"somethingNewer\":{\"from\":\"a later build\"},\"title\":\"Trip\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+    }
+  ],
+  "parses": [
+    {
+      "case": "the richest payload any client writes",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{\"@type\":\"Note\",\"attachments\":[{\"adk\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"byteSize\":2097152,\"caption\":\"also from a later build\",\"chunkCount\":1,\"chunkSize\":4194304,\"contentHash\":\"ZGlnZXN0\",\"displayWidth\":480,\"filename\":\"photo.jpg\",\"height\":3024,\"id\":\"a1\",\"mimeType\":\"image/jpeg\",\"thumbnail\":\"data:image/jpeg;base64,/9j/\",\"width\":4032}],\"body\":\"![photo](attachment:a1)\\n\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"notebookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"parentId\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"pinned\":true,\"somethingNewer\":{\"from\":\"a later build\"},\"title\":\"Trip\",\"updatedAt\":\"2026-02-02T00:00:00Z\",\"version\":\"1.0\"}",
+      "note": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "title": "Trip",
+        "body": "![photo](attachment:a1)\n",
+        "notebook_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "parent_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "attachments": [
+          {
+            "id": "a1",
+            "filename": "photo.jpg",
+            "mime_type": "image/jpeg",
+            "byte_size": 2097152,
+            "width": 4032,
+            "height": 3024,
+            "adk": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+            "content_hash": "ZGlnZXN0",
+            "chunk_size": 4194304,
+            "chunk_count": 1,
+            "display_width": 480,
+            "thumbnail": "data:image/jpeg;base64,/9j/",
+            "extra": "{\"caption\":\"also from a later build\"}"
+          }
+        ],
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-02-02T00:00:00Z",
+        "pinned": true,
+        "readable": true,
+        "raw": "{\"@type\":\"Note\",\"attachments\":[{\"adk\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"byteSize\":2097152,\"caption\":\"also from a later build\",\"chunkCount\":1,\"chunkSize\":4194304,\"contentHash\":\"ZGlnZXN0\",\"displayWidth\":480,\"filename\":\"photo.jpg\",\"height\":3024,\"id\":\"a1\",\"mimeType\":\"image/jpeg\",\"thumbnail\":\"data:image/jpeg;base64,/9j/\",\"width\":4032}],\"body\":\"![photo](attachment:a1)\\n\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"notebookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"parentId\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"pinned\":true,\"somethingNewer\":{\"from\":\"a later build\"},\"title\":\"Trip\",\"updatedAt\":\"2026-02-02T00:00:00Z\",\"version\":\"1.0\"}"
+      }
+    },
+    {
+      "case": "an empty object",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{}",
+      "note": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "title": "Untitled note",
+        "body": "",
+        "notebook_id": "00000000-0000-0000-0000-000000000002",
+        "attachments": [],
+        "readable": true,
+        "raw": "{}"
+      }
+    },
+    {
+      "case": "a title that is only space",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{\"title\":\"   \"}",
+      "note": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "title": "Untitled note",
+        "body": "",
+        "notebook_id": "00000000-0000-0000-0000-000000000002",
+        "attachments": [],
+        "readable": true,
+        "raw": "{\"title\":\"   \"}"
+      }
+    },
+    {
+      "case": "a payload that is not JSON at all",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "this was never a note",
+      "note": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "title": "Unreadable note",
+        "body": "this was never a note",
+        "notebook_id": "00000000-0000-0000-0000-000000000002",
+        "attachments": [],
+        "readable": true,
+        "raw": "this was never a note"
+      }
+    },
+    {
+      "case": "a payload that is JSON but not an object",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "[1,2,3]",
+      "note": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "title": "Unreadable note",
+        "body": "[1,2,3]",
+        "notebook_id": "00000000-0000-0000-0000-000000000002",
+        "attachments": [],
+        "readable": true,
+        "raw": "[1,2,3]"
+      }
+    },
+    {
+      "case": "a body that is not a string",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{\"title\":\"t\",\"body\":42}",
+      "note": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "title": "t",
+        "body": "",
+        "notebook_id": "00000000-0000-0000-0000-000000000002",
+        "attachments": [],
+        "readable": true,
+        "raw": "{\"title\":\"t\",\"body\":42}"
+      }
+    },
+    {
+      "case": "an attachment entry that cannot name its own bytes",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{\"attachments\":[{\"filename\":\"half.jpg\",\"id\":\"a1\"},{\"adk\":\"QUJD\",\"byteSize\":10,\"chunkCount\":1,\"chunkSize\":4194304,\"contentHash\":\"REVG\",\"filename\":\"whole.jpg\",\"id\":\"a2\",\"mimeType\":\"image/jpeg\"}],\"title\":\"t\"}",
+      "note": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "title": "t",
+        "body": "",
+        "notebook_id": "00000000-0000-0000-0000-000000000002",
+        "attachments": [
+          {
+            "id": "a2",
+            "filename": "whole.jpg",
+            "mime_type": "image/jpeg",
+            "byte_size": 10,
+            "adk": "QUJD",
+            "content_hash": "REVG",
+            "chunk_size": 4194304,
+            "chunk_count": 1,
+            "extra": "{}"
+          }
+        ],
+        "readable": true,
+        "raw": "{\"attachments\":[{\"filename\":\"half.jpg\",\"id\":\"a1\"},{\"adk\":\"QUJD\",\"byteSize\":10,\"chunkCount\":1,\"chunkSize\":4194304,\"contentHash\":\"REVG\",\"filename\":\"whole.jpg\",\"id\":\"a2\",\"mimeType\":\"image/jpeg\"}],\"title\":\"t\"}"
+      }
+    },
+    {
+      "case": "a payload from a newer schema major",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{\"@type\":\"Note\",\"version\":\"2.0\",\"title\":\"future\"}",
+      "note": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "title": "future",
+        "body": "",
+        "notebook_id": "00000000-0000-0000-0000-000000000002",
+        "attachments": [],
+        "readable": false,
+        "raw": "{\"@type\":\"Note\",\"version\":\"2.0\",\"title\":\"future\"}"
+      }
+    }
+  ],
+  "notebook_writes": [
+    {
+      "case": "a notebook created from scratch",
+      "name": "Work",
+      "payload": "{\"@type\":\"Notebook\",\"name\":\"Work\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a name with surrounding space",
+      "name": "  Work  ",
+      "payload": "{\"@type\":\"Notebook\",\"name\":\"Work\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a rename that keeps what this build does not own",
+      "name": "Renamed",
+      "previous": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"Work\",\"colour\":\"amber\"}",
+      "payload": "{\"@type\":\"Notebook\",\"colour\":\"amber\",\"name\":\"Renamed\",\"version\":\"1.0\"}"
+    }
+  ],
+  "notebook_parses": [
+    {
+      "case": "a named notebook",
+      "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "raw": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"  Work  \"}",
+      "notebook": {
+        "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "name": "Work",
+        "readable": true,
+        "raw": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"  Work  \"}"
+      }
+    },
+    {
+      "case": "the default notebook, unnamed",
+      "id": "00000000-0000-0000-0000-000000000002",
+      "raw": "{}",
+      "notebook": {
+        "id": "00000000-0000-0000-0000-000000000002",
+        "name": "Default Notebook",
+        "readable": true,
+        "raw": "{}"
+      }
+    },
+    {
+      "case": "any other notebook, unnamed",
+      "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "raw": "not json",
+      "notebook": {
+        "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "name": "Untitled",
+        "readable": true,
+        "raw": "not json"
+      }
+    }
+  ],
+  "refusals": [
+    {
+      "case": "editing a note from a newer schema major",
+      "error": "PayloadSchema"
+    },
+    {
+      "case": "renaming a notebook from a newer schema major",
+      "error": "PayloadSchema"
+    }
+  ]
+}

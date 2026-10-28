@@ -29,6 +29,13 @@ pub use pairing::{format_confirmation, normalize_confirmation};
 pub use state::LocalState;
 pub use tls::{certificate_from_pem, pq_tls_config, TrustAnchors};
 
+/// The content-payload decisions, straight from core: every client writes a
+/// note through these, so the CLI has no key list of its own.
+pub use sealbook_core::{
+    note_parse, note_write, notebook_name_by_id, notebook_parse, notebook_write, CoreNote,
+    CoreNoteAttachment, CoreNoteDraft, CoreNotebook,
+};
+
 pub use sealbook_protocol::{
     merge_payload, ACCOUNT_EXPORT_TYPE, ACCOUNT_EXPORT_VERSION, ADDRESS_BOOK_CONTENT_TYPE,
     ADDRESS_BOOK_ID_PROP, BOOKMARK_COLLECTION_CONTENT_TYPE, BOOKMARK_CONTENT_TYPE,

@@ -289,13 +289,16 @@ impl SealbookClient {
             .await
     }
 
-    pub async fn put_notebook(&mut self, object_id: Uuid, name: &str) -> Result<u64, ClientError> {
-        let plaintext = serde_json::json!({
-            "@type": "Notebook",
-            "version": "1.0",
-            "name": name,
-        })
-        .to_string();
+    /// `previous` is the stored payload when this is a rename, so a key a
+    /// notebook carries that this build does not own survives it. Before core
+    /// owned the writer this rebuilt the record and dropped every such key.
+    pub async fn put_notebook(
+        &mut self,
+        object_id: Uuid,
+        name: &str,
+        previous: Option<&str>,
+    ) -> Result<u64, ClientError> {
+        let plaintext = sealbook_core::notebook_write(name, previous)?;
         self.put_sealed(object_id, plaintext.as_bytes(), NOTEBOOK_CONTENT_TYPE)
             .await
     }
@@ -310,7 +313,7 @@ impl SealbookClient {
         if notebooks.iter().any(|(id, _)| *id == DEFAULT_NOTEBOOK_ID) {
             return Ok(DEFAULT_NOTEBOOK_ID);
         }
-        self.put_notebook(DEFAULT_NOTEBOOK_ID, DEFAULT_NOTEBOOK_NAME)
+        self.put_notebook(DEFAULT_NOTEBOOK_ID, DEFAULT_NOTEBOOK_NAME, None)
             .await?;
         Ok(DEFAULT_NOTEBOOK_ID)
     }
@@ -321,7 +324,10 @@ impl SealbookClient {
             if obj.content_type != NOTEBOOK_CONTENT_TYPE {
                 continue;
             }
-            out.push((obj.id, container_name(&obj.plaintext)));
+            out.push((
+                obj.id,
+                sealbook_core::notebook_parse(&obj.id.to_string(), &obj.plaintext).name,
+            ));
         }
         out.sort_by(|a, b| {
             if a.0 == DEFAULT_NOTEBOOK_ID {

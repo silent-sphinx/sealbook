@@ -16,7 +16,8 @@ use rand::RngCore;
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::CertificateDer;
 use sealbook_client::{
-    merge_payload, ExportedObject, LocalState, SealbookClient, ACCOUNT_EXPORT_TYPE,
+    merge_payload, note_parse, note_write, CoreNoteDraft, ExportedObject, LocalState,
+    SealbookClient, ACCOUNT_EXPORT_TYPE,
     ACCOUNT_EXPORT_VERSION, ADDRESS_BOOK_ID_PROP, DEFAULT_ADDRESS_BOOK_ID,
     DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_BOOKMARK_COLLECTION_NAME, DEFAULT_CALENDAR_COLOR,
     DEFAULT_CALENDAR_ID, DEFAULT_NOTEBOOK_NAME, PAYLOAD_SCHEMA_VERSION,
@@ -882,7 +883,7 @@ async fn main() -> Result<()> {
                 NotebookCommand::Create { name } => {
                     let id = Uuid::new_v4();
                     client
-                        .put_notebook(id, &name)
+                        .put_notebook(id, &name, None)
                         .await
                         .context("create notebook")?;
                     println!("created notebook {id} {name}");
@@ -917,13 +918,15 @@ async fn main() -> Result<()> {
                 } => {
                     let body = read_note_body(body, file)?;
                     let id = Uuid::new_v4();
-                    let note = note_json(
-                        &title,
-                        &body,
-                        notebook.unwrap_or(default_notebook),
-                        None,
-                        None,
-                    );
+                    let note = note_write(
+                        &CoreNoteDraft {
+                            title,
+                            body,
+                            notebook_id: notebook.unwrap_or(default_notebook).to_string(),
+                            ..Default::default()
+                        },
+                        &now_rfc3339(),
+                    )?;
                     let revision = client.put_note(id, &note).await.context("add note")?;
                     println!("stored encrypted note {id} at revision {revision}");
                 }
@@ -935,21 +938,11 @@ async fn main() -> Result<()> {
                     notebook,
                 } => {
                     let body = read_note_body(body, file)?;
-                    // Only a client knows when a note was created: the server keeps
-                    // no user timestamps, so an update that does not carry the
-                    // original forward loses it.
                     let existing = find_note(&mut client, id).await?;
-                    let created = note_created_at(&existing);
-                    // Merged onto the stored note, so a field this build does
-                    // not write — `pinned`, `parentId`, anything newer — survives
-                    // an edit made from here rather than being dropped.
-                    let note = note_json(
-                        &title,
-                        &body,
-                        notebook.unwrap_or_else(|| note_notebook_id(&existing, default_notebook)),
-                        created.as_deref(),
-                        Some(&existing),
-                    );
+                    let note = note_write(
+                        &note_update_draft(&existing, id, title, body, notebook),
+                        &now_rfc3339(),
+                    )?;
                     let revision = client.put_note(id, &note).await.context("update note")?;
                     println!("updated encrypted note {id} at revision {revision}");
                 }
@@ -958,16 +951,16 @@ async fn main() -> Result<()> {
                     let notes = client.list_notes().await.context("notes")?;
                     let mut shown = 0;
                     for (id, json) in notes {
-                        let book = note_notebook_id(&json, default_notebook);
-                        if notebook.is_some_and(|want| want != book) {
+                        let note = note_parse(&id.to_string(), &json);
+                        if notebook.is_some_and(|want| want.to_string() != note.notebook_id) {
                             continue;
                         }
                         let name = notebooks
                             .iter()
-                            .find(|(candidate, _)| *candidate == book)
+                            .find(|(candidate, _)| candidate.to_string() == note.notebook_id)
                             .map(|(_, name)| name.as_str())
                             .unwrap_or(DEFAULT_NOTEBOOK_NAME);
-                        println!("{id} [{name}] {}", note_title(&json));
+                        println!("{id} [{name}] {}", note.title);
                         shown += 1;
                     }
                     if shown == 0 {
@@ -976,7 +969,7 @@ async fn main() -> Result<()> {
                 }
                 NotesCommand::Show { id } => {
                     let note = find_note(&mut client, id).await?;
-                    print!("{}", note_body(&note));
+                    print!("{}", note_parse(&id.to_string(), &note).body);
                 }
                 NotesCommand::Delete { id } => {
                     let revision = client.delete_note(id).await.context("delete note")?;
@@ -1170,81 +1163,45 @@ fn bookmark_collection_id(json: &str, fallback: Uuid) -> Uuid {
         .unwrap_or(fallback)
 }
 
-/// Every key this CLI writes for a note.
+/// The draft a `notes update` writes, built from the stored note.
 ///
-/// Shorter than the web client's list: `pinned`, `parentId` and `attachments`
-/// are the web's to manage, and leaving them out of this set is what carries
-/// them through an edit made here. `attachments` in particular must never be
-/// added: `merge_payload` overwrites only the keys named here and preserves the
-/// rest, so naming it would make the next CLI edit drop every photo reference in
-/// the note (the same silent loss `pinned` and `parentId` would suffer). This is
-/// pinned by `note_edit_preserves_unknown_web_fields`.
-const NOTE_KEYS: &[&str] = &[
-    "@type",
-    "version",
-    "title",
-    "body",
-    "notebookId",
-    "createdAt",
-    "updatedAt",
-];
+/// The note is read into core's record first and handed back whole, so a field
+/// this CLI has no flag for travels through the edit: its place in the note
+/// tree, its photo references, whether it is pinned, and anything a newer
+/// client has since added. Before core owned the writer this command rebuilt
+/// the payload from the three fields it takes and dropped the rest, which is
+/// data loss with nothing on screen to show for it.
+///
+/// `pinned` is left as `None` rather than carried on the record: the CLI has no
+/// opinion about pinning, so core leaves whatever is stored alone. Only the
+/// creation time is read back deliberately — the server keeps no user
+/// timestamps, so an update that does not carry it forward loses it.
+fn note_update_draft(
+    stored: &str,
+    id: Uuid,
+    title: String,
+    body: String,
+    notebook: Option<Uuid>,
+) -> CoreNoteDraft {
+    let note = note_parse(&id.to_string(), stored);
+    CoreNoteDraft {
+        title,
+        body,
+        notebook_id: notebook
+            .map(|notebook| notebook.to_string())
+            .unwrap_or(note.notebook_id),
+        parent_id: note.parent_id,
+        attachments: note.attachments,
+        created_at: note.created_at,
+        pinned: None,
+        raw: Some(stored.to_string()),
+    }
+}
 
-fn note_json(
-    title: &str,
-    body: &str,
-    notebook_id: Uuid,
-    created_at: Option<&str>,
-    previous: Option<&str>,
-) -> String {
-    let now = OffsetDateTime::now_utc()
+fn now_rfc3339() -> String {
+    OffsetDateTime::now_utc()
         .format(&Rfc3339)
-        .unwrap_or_default();
-    merge_payload(
-        previous,
-        serde_json::json!({
-            "@type": "Note",
-            "version": PAYLOAD_SCHEMA_VERSION,
-            "title": title,
-            "body": body,
-            "notebookId": notebook_id.to_string(),
-            "createdAt": created_at.unwrap_or(&now),
-            "updatedAt": now,
-        }),
-        NOTE_KEYS,
-    )
-    .to_string()
-}
-
-fn note_field(json: &str, field: &str) -> Option<String> {
-    serde_json::from_str::<serde_json::Value>(json)
-        .ok()
-        .and_then(|value| {
-            value
-                .get(field)
-                .and_then(|found| found.as_str())
-                .map(ToOwned::to_owned)
-        })
-}
-
-fn note_title(json: &str) -> String {
-    note_field(json, "title")
-        .map(|title| title.trim().to_string())
-        .filter(|title| !title.is_empty())
-        .unwrap_or_else(|| "Untitled".to_string())
-}
-
-fn note_body(json: &str) -> String {
-    note_field(json, "body").unwrap_or_default()
-}
-
-fn note_created_at(json: &str) -> Option<String> {
-    note_field(json, "createdAt")
-}
-
-fn note_notebook_id(json: &str, fallback: Uuid) -> Uuid {
-    note_field(json, "notebookId")
-        .and_then(|id| Uuid::parse_str(&id).ok())
-        .unwrap_or(fallback)
+        .unwrap_or_default()
 }
 
 /// Every key this CLI writes for a card.
@@ -1658,78 +1615,13 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// The CLI writes a note through core now, so what is worth testing here is
+    /// the CLI's own half of the agreement: that the draft it builds for an
+    /// update hands back every field it read. Forgetting one is the way a field
+    /// still gets dropped, and it is how `parentId` was lost before.
     #[test]
-    fn a_note_payload_carries_every_field_exactly_once() {
+    fn an_update_hands_back_every_field_it_read() {
         let notebook = Uuid::from_u128(2);
-        let json = note_json(
-            "  Weekly plan  ",
-            "# Monday\n\n- ship\n",
-            notebook,
-            None,
-            None,
-        );
-        let value: serde_json::Value = serde_json::from_str(&json).expect("valid json");
-        assert_eq!(value["@type"], "Note");
-        assert_eq!(value["version"], "1.0");
-        assert_eq!(value["body"], "# Monday\n\n- ship\n");
-        assert_eq!(value["notebookId"], notebook.to_string());
-        assert_eq!(value["createdAt"], value["updatedAt"]);
-        // One key per field. The calendar event payload once listed `calendarId`
-        // twice, which `json!` accepts silently.
-        assert_eq!(json.matches("\"notebookId\"").count(), 1);
-        assert_eq!(json.matches("\"createdAt\"").count(), 1);
-    }
-
-    #[test]
-    fn an_update_keeps_the_original_creation_time() {
-        let created = "2020-05-04T03:02:01Z";
-        let json = note_json("t", "b", Uuid::from_u128(2), Some(created), None);
-        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(value["createdAt"], created);
-        assert_ne!(value["updatedAt"], created);
-        assert_eq!(note_created_at(&json).as_deref(), Some(created));
-    }
-
-    #[test]
-    fn an_update_keeps_the_fields_this_cli_does_not_write() {
-        // `pinned` and `parentId` are the web client's, and a newer build may add
-        // more. Rebuilding the payload from the fields this command takes used to
-        // drop all of them, which is data loss with nothing to show for it.
-        let stored = serde_json::json!({
-            "@type": "Note",
-            "version": "1.0",
-            "title": "old",
-            "body": "old body",
-            "notebookId": Uuid::from_u128(2).to_string(),
-            "createdAt": "2020-05-04T03:02:01Z",
-            "updatedAt": "2020-05-04T03:02:01Z",
-            "pinned": true,
-            "parentId": Uuid::from_u128(9).to_string(),
-            "tableOfContents": true,
-        })
-        .to_string();
-
-        let json = note_json(
-            "new",
-            "new body",
-            Uuid::from_u128(2),
-            Some("2020-05-04T03:02:01Z"),
-            Some(&stored),
-        );
-        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(value["title"], "new");
-        assert_eq!(value["body"], "new body");
-        assert_eq!(value["pinned"], true);
-        assert_eq!(value["parentId"], Uuid::from_u128(9).to_string());
-        assert_eq!(value["tableOfContents"], true);
-    }
-
-    #[test]
-    fn note_edit_preserves_unknown_web_fields() {
-        // Photo attachments are written only by sealbook-web, as an `attachments`
-        // array the CLI never touches. An edit here must carry it through intact:
-        // if `attachments` were ever added to NOTE_KEYS, this rebuild would drop
-        // every photo reference in the note.
         let attachments = serde_json::json!([
             {
                 "id": Uuid::from_u128(42).to_string(),
@@ -1746,27 +1638,58 @@ mod tests {
             "@type": "Note",
             "version": "1.0",
             "title": "old",
-            "body": "see photo",
-            "notebookId": Uuid::from_u128(2).to_string(),
+            "body": "old body",
+            "notebookId": notebook.to_string(),
             "createdAt": "2020-05-04T03:02:01Z",
             "updatedAt": "2020-05-04T03:02:01Z",
+            "pinned": true,
+            "parentId": Uuid::from_u128(9).to_string(),
+            "tableOfContents": true,
             "attachments": attachments.clone(),
         })
         .to_string();
 
-        let json = note_json(
-            "new title",
-            "see photo, edited",
-            Uuid::from_u128(2),
-            Some("2020-05-04T03:02:01Z"),
-            Some(&stored),
+        let draft = note_update_draft(
+            &stored,
+            Uuid::from_u128(7),
+            "new".into(),
+            "new body".into(),
+            None,
         );
+        let json = note_write(&draft, "2026-10-28T12:00:00Z").expect("writes");
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(value["title"], "new title");
+
+        assert_eq!(value["title"], "new");
+        assert_eq!(value["body"], "new body");
+        assert_eq!(value["notebookId"], notebook.to_string());
+        // The server keeps no user timestamps, so this is the client's to carry.
+        assert_eq!(value["createdAt"], "2020-05-04T03:02:01Z");
+        assert_eq!(value["updatedAt"], "2026-10-28T12:00:00Z");
+        assert_eq!(value["parentId"], Uuid::from_u128(9).to_string());
+        assert_eq!(value["pinned"], true);
+        assert_eq!(value["tableOfContents"], true);
         assert_eq!(
             value["attachments"], attachments,
             "editing a note through the CLI dropped its photo attachments"
         );
+    }
+
+    #[test]
+    fn an_update_can_move_a_note_to_another_notebook() {
+        let stored = serde_json::json!({
+            "@type": "Note",
+            "notebookId": Uuid::from_u128(2).to_string(),
+        })
+        .to_string();
+        let moved = Uuid::from_u128(11);
+        let draft = note_update_draft(
+            &stored,
+            Uuid::from_u128(7),
+            "t".into(),
+            "b".into(),
+            Some(moved),
+        );
+        assert_eq!(draft.notebook_id, moved.to_string());
     }
 
     #[test]
@@ -1896,26 +1819,15 @@ mod tests {
         assert_eq!(value["sealbook:profile"]["note"], "kept");
     }
 
+    /// The lenient read lives in core now, and the shared fixture pins it. What
+    /// this keeps is the one place the CLI still turns a payload into a row:
+    /// a note whose notebook is gone is still listed, under the default
+    /// notebook's name rather than nothing.
     #[test]
-    fn note_fields_fall_back_rather_than_panicking() {
-        let fallback = Uuid::from_u128(7);
-        assert_eq!(note_title("not json"), "Untitled");
-        assert_eq!(note_title(r#"{"title":"   "}"#), "Untitled");
-        assert_eq!(note_title(r#"{"title":"  Plan "}"#), "Plan");
-        assert_eq!(note_body("not json"), "");
-        assert_eq!(note_created_at("not json"), None);
-        assert_eq!(note_notebook_id("not json", fallback), fallback);
-        assert_eq!(
-            note_notebook_id(r#"{"notebookId":"nope"}"#, fallback),
-            fallback
-        );
-        assert_eq!(
-            note_notebook_id(
-                r#"{"notebookId":"00000000-0000-0000-0000-000000000002"}"#,
-                fallback
-            ),
-            Uuid::from_u128(2)
-        );
+    fn a_note_that_will_not_parse_is_still_a_row_the_user_can_delete() {
+        let note = note_parse(&Uuid::from_u128(7).to_string(), "not json");
+        assert_eq!(note.title, "Unreadable note");
+        assert_eq!(note.notebook_id, Uuid::from_u128(2).to_string());
     }
 
     #[test]
