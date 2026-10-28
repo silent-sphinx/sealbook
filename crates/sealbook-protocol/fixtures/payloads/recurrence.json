@@ -1,0 +1,310 @@
+{
+  "cases": [
+    {
+      "name": "every third day",
+      "anchor": "2026-10-01",
+      "rule": {
+        "frequency": "daily",
+        "interval": 3,
+        "weekdays": []
+      },
+      "from": "2026-10-05",
+      "to": "2026-10-20",
+      "days": [
+        "2026-10-07",
+        "2026-10-10",
+        "2026-10-13",
+        "2026-10-16",
+        "2026-10-19"
+      ],
+      "after": "2026-10-07",
+      "next": "2026-10-10"
+    },
+    {
+      "name": "fortnightly on two days",
+      "anchor": "2026-10-07",
+      "rule": {
+        "frequency": "weekly",
+        "interval": 2,
+        "weekdays": [
+          5,
+          1
+        ]
+      },
+      "from": "2026-10-01",
+      "to": "2026-12-01",
+      "days": [
+        "2026-10-09",
+        "2026-10-12",
+        "2026-10-23",
+        "2026-10-26",
+        "2026-11-06",
+        "2026-11-09",
+        "2026-11-20",
+        "2026-11-23"
+      ],
+      "after": "2026-10-09",
+      "next": "2026-10-12"
+    },
+    {
+      "name": "the 31st skips short months",
+      "anchor": "2026-01-31",
+      "rule": {
+        "frequency": "monthly",
+        "weekdays": [],
+        "day_of_month": 31
+      },
+      "from": "2026-01-01",
+      "to": "2026-12-31",
+      "days": [
+        "2026-01-31",
+        "2026-03-31",
+        "2026-05-31",
+        "2026-07-31",
+        "2026-08-31",
+        "2026-10-31",
+        "2026-12-31"
+      ],
+      "after": "2026-02-01",
+      "next": "2026-03-31"
+    },
+    {
+      "name": "a fifth monday",
+      "anchor": "2026-01-01",
+      "rule": {
+        "frequency": "monthly",
+        "weekdays": [],
+        "nth_weekday": {
+          "ordinal": 5,
+          "weekday": 1
+        }
+      },
+      "from": "2026-01-01",
+      "to": "2026-12-31",
+      "days": [
+        "2026-03-30",
+        "2026-06-29",
+        "2026-08-31",
+        "2026-11-30"
+      ],
+      "after": "2026-03-31",
+      "next": "2026-06-29"
+    },
+    {
+      "name": "second tuesday, every other month",
+      "anchor": "2026-01-01",
+      "rule": {
+        "frequency": "monthly",
+        "interval": 2,
+        "weekdays": [],
+        "nth_weekday": {
+          "ordinal": 2,
+          "weekday": 2
+        }
+      },
+      "from": "2026-01-01",
+      "to": "2026-12-31",
+      "days": [
+        "2026-01-13",
+        "2026-03-10",
+        "2026-05-12",
+        "2026-07-14",
+        "2026-09-08",
+        "2026-11-10"
+      ],
+      "after": "2026-03-15",
+      "next": "2026-05-12"
+    },
+    {
+      "name": "count spent before the window",
+      "anchor": "2026-10-05",
+      "rule": {
+        "frequency": "weekly",
+        "count": 7,
+        "weekdays": [
+          1,
+          3,
+          5
+        ]
+      },
+      "from": "2026-10-12",
+      "to": "2027-01-01",
+      "days": [
+        "2026-10-12",
+        "2026-10-14",
+        "2026-10-16",
+        "2026-10-19"
+      ],
+      "after": "2026-10-12",
+      "next": "2026-10-14"
+    },
+    {
+      "name": "count whole",
+      "anchor": "2026-10-05",
+      "rule": {
+        "frequency": "weekly",
+        "count": 7,
+        "weekdays": [
+          1,
+          3,
+          5
+        ]
+      },
+      "from": "2026-10-01",
+      "to": "2027-01-01",
+      "days": [
+        "2026-10-05",
+        "2026-10-07",
+        "2026-10-09",
+        "2026-10-12",
+        "2026-10-14",
+        "2026-10-16",
+        "2026-10-19"
+      ],
+      "after": "2026-10-20",
+      "next": null
+    },
+    {
+      "name": "zero count is no limit",
+      "anchor": "2026-10-01",
+      "rule": {
+        "frequency": "daily",
+        "count": 0,
+        "weekdays": []
+      },
+      "from": "2026-10-01",
+      "to": "2026-10-05",
+      "days": [
+        "2026-10-01",
+        "2026-10-02",
+        "2026-10-03",
+        "2026-10-04",
+        "2026-10-05"
+      ],
+      "after": "2026-10-30",
+      "next": "2026-10-31"
+    },
+    {
+      "name": "until that is not a date is no limit",
+      "anchor": "2026-10-01",
+      "rule": {
+        "frequency": "daily",
+        "until": "not a date",
+        "weekdays": []
+      },
+      "from": "2026-10-01",
+      "to": "2026-10-04",
+      "days": [
+        "2026-10-01",
+        "2026-10-02",
+        "2026-10-03",
+        "2026-10-04"
+      ],
+      "after": "2026-10-01",
+      "next": "2026-10-02"
+    },
+    {
+      "name": "until given as an instant keeps its day",
+      "anchor": "2026-10-01",
+      "rule": {
+        "frequency": "daily",
+        "until": "2026-10-03T23:00:00.000Z",
+        "weekdays": []
+      },
+      "from": "2026-10-01",
+      "to": "2026-10-09",
+      "days": [
+        "2026-10-01",
+        "2026-10-02",
+        "2026-10-03"
+      ],
+      "after": "2026-10-03",
+      "next": null
+    },
+    {
+      "name": "leap day",
+      "anchor": "2024-02-29",
+      "rule": {
+        "frequency": "yearly",
+        "count": 3,
+        "weekdays": []
+      },
+      "from": "2024-01-01",
+      "to": "2040-01-01",
+      "days": [
+        "2024-02-29",
+        "2028-02-29",
+        "2032-02-29"
+      ],
+      "after": "2024-02-29",
+      "next": "2028-02-29"
+    },
+    {
+      "name": "day of month before the anchor",
+      "anchor": "2026-10-20",
+      "rule": {
+        "frequency": "monthly",
+        "weekdays": [],
+        "day_of_month": 5
+      },
+      "from": "2026-10-01",
+      "to": "2027-01-31",
+      "days": [
+        "2026-11-05",
+        "2026-12-05",
+        "2027-01-05"
+      ],
+      "after": "2026-10-20",
+      "next": "2026-11-05"
+    },
+    {
+      "name": "weekday out of range is dropped",
+      "anchor": "2026-10-07",
+      "rule": {
+        "frequency": "weekly",
+        "weekdays": [
+          9,
+          2
+        ]
+      },
+      "from": "2026-10-07",
+      "to": "2026-10-21",
+      "days": [
+        "2026-10-13",
+        "2026-10-20"
+      ],
+      "after": "2026-10-07",
+      "next": "2026-10-13"
+    }
+  ],
+  "calendar_days": [
+    {
+      "text": "2026-02-28",
+      "valid": true
+    },
+    {
+      "text": "2026-02-30",
+      "valid": false
+    },
+    {
+      "text": "2024-02-29",
+      "valid": true
+    },
+    {
+      "text": "2026-2-3",
+      "valid": false
+    },
+    {
+      "text": "2026-10-01T00:00",
+      "valid": false
+    },
+    {
+      "text": "",
+      "valid": false
+    },
+    {
+      "text": "abcd-ef-gh",
+      "valid": false
+    }
+  ]
+}

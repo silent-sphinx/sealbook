@@ -7,8 +7,8 @@ use sealbook_core::{
     CoreBookmarkCollection, CoreBookmarkCollectionDraft, CoreBookmarkDraft, CoreBuild,
     CoreCalendar, CoreCalendarDraft, CoreCalendarEvent, CoreCalendarEventDraft, CoreContact,
     CoreContactDraft, CoreContactProfile, CoreDevice, CoreDeviceSecrets, CoreDeviceState,
-    CoreManifestEntry, CoreNote, CoreNoteDraft, CoreNotebook, CorePairPreview, CoreRoster,
-    CoreRosterPin, CoreSealedRow, CoreSession, CoreTask, CoreTaskDraft, CoreTaskList,
+    CoreManifestEntry, CoreNote, CoreNoteDraft, CoreNotebook, CorePairPreview, CoreRecurrence,
+    CoreRoster, CoreRosterPin, CoreSealedRow, CoreSession, CoreTask, CoreTaskDraft, CoreTaskList,
     CoreTaskListDraft, HttpRequest, HttpResponse, LoggedIn, LoginStarting, ManifestContext,
     ManifestOutcome, ManifestPlan, ManifestSigner, OpaqueStart, PairApproval, PairJoined,
     PairStatus, PasswordChange, PasswordChangeStarted, RecoverStarted, Recovering,
@@ -2327,6 +2327,44 @@ pub fn core_calendar_parse(id: &str, raw: &str) -> Result<Ts<CoreCalendar>, JsEr
 #[wasm_bindgen]
 pub fn core_calendar_write(draft: Ts<CoreCalendarDraft>) -> Result<String, JsError> {
     sealbook_core::calendar_write(&draft.to_rust()?).map_err(core_err)
+}
+
+/// The days a repeat rule lands on between two dates, as `YYYY-MM-DD`. The
+/// host attaches the time of day and the zone.
+#[wasm_bindgen]
+pub fn core_recurrence_days(
+    anchor: &str,
+    rule: Ts<CoreRecurrence>,
+    from: &str,
+    to: &str,
+) -> Result<Vec<String>, JsError> {
+    Ok(sealbook_core::recurrence_days(
+        anchor,
+        &rule.to_rust()?,
+        from,
+        to,
+    ))
+}
+
+/// The first day of a repeat rule later than `after`, or `None` once spent.
+#[wasm_bindgen]
+pub fn core_recurrence_next(
+    anchor: &str,
+    rule: Ts<CoreRecurrence>,
+    after: &str,
+) -> Result<Option<String>, JsError> {
+    Ok(sealbook_core::recurrence_next(
+        anchor,
+        &rule.to_rust()?,
+        after,
+    ))
+}
+
+/// Whether the text is a real calendar day, which `Date.parse` is not strict
+/// enough to say.
+#[wasm_bindgen]
+pub fn core_is_calendar_day(text: &str) -> bool {
+    sealbook_core::is_calendar_day(text)
 }
 
 #[wasm_bindgen]

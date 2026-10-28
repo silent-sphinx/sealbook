@@ -29,6 +29,7 @@ mod manifest;
 mod notes;
 mod pairing;
 mod payload;
+mod recurrence;
 mod roster;
 mod rotation;
 mod settings;
@@ -124,6 +125,7 @@ pub use pairing::{
     CorePairPreview, PairApproval, PairJoined, PairRefusal, PairStatus,
 };
 pub use payload::write_payload;
+pub use recurrence::{is_calendar_day, recurrence_days, recurrence_next};
 pub use roster::{
     pin_roster, read_roster, roster_accept, roster_accept_sealed, roster_answers_for,
     roster_request, CoreDevice, CoreRoster, CoreRosterPin, CoreRosterSigner, RosterContext,
