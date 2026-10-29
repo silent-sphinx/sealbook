@@ -292,6 +292,38 @@
         "raw": "not json"
       },
       "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"amber\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":true,\"calendar\":true,\"contacts\":true,\"notes\":true,\"tasks\":true},\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a newer minor keeps its version and its keys",
+      "draft": {
+        "features": [
+          {
+            "key": "contacts",
+            "enabled": true
+          },
+          {
+            "key": "calendar",
+            "enabled": true
+          },
+          {
+            "key": "notes",
+            "enabled": true
+          },
+          {
+            "key": "bookmarks",
+            "enabled": true
+          },
+          {
+            "key": "tasks",
+            "enabled": true
+          }
+        ],
+        "unknown_features": [],
+        "contact_mode": "basic",
+        "accent": "blue",
+        "raw": "{\"@type\":\"AccountSettings\",\"version\":\"1.3\",\"features\":{\"contacts\":true},\"futureKey\":1}"
+      },
+      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"blue\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":true,\"calendar\":true,\"contacts\":true,\"notes\":true,\"tasks\":true},\"futureKey\":1,\"version\":\"1.3\"}"
     }
   ],
   "parses": [
