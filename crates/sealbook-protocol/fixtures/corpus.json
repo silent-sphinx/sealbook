@@ -145,6 +145,14 @@
             "raw"
           ],
           "expect": "notebook"
+        },
+        {
+          "table": "notebook_tones",
+          "op": "notebook.tone",
+          "args": [
+            "id"
+          ],
+          "expect": "tone"
         }
       ]
     },

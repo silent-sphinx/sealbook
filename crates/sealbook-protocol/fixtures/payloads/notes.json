@@ -320,6 +320,48 @@
       }
     }
   ],
+  "notebook_tones": [
+    {
+      "case": "the default notebook",
+      "id": "00000000-0000-0000-0000-000000000002",
+      "tone": "#bb9af7"
+    },
+    {
+      "case": "another notebook",
+      "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "tone": "#7dcfff"
+    },
+    {
+      "case": "an empty id",
+      "id": "",
+      "tone": "#7aa2f7"
+    },
+    {
+      "case": "a short id",
+      "id": "a",
+      "tone": "#9ece6a"
+    },
+    {
+      "case": "an id that is not a uuid",
+      "id": "not-a-uuid",
+      "tone": "#9ece6a"
+    },
+    {
+      "case": "an id with accents",
+      "id": "café-über",
+      "tone": "#73daca"
+    },
+    {
+      "case": "an id with an astral character",
+      "id": "book-📒",
+      "tone": "#9ece6a"
+    },
+    {
+      "case": "a long id",
+      "id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "tone": "#7aa2f7"
+    }
+  ],
   "refusals": [
     {
       "case": "editing a note from a newer schema major",

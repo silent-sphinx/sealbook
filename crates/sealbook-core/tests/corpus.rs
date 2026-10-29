@@ -62,6 +62,7 @@ fn call(op: &str, args: &[Value]) -> Value {
             &arg::<String>(args, 0),
             &arg::<String>(args, 1),
         ))),
+        "notebook.tone" => out::<_, String>(Ok(notebook_tone(&arg::<String>(args, 0)))),
         "notebook.write" => out(notebook_write(
             &arg::<String>(args, 0),
             arg::<Option<String>>(args, 1).as_deref(),
@@ -285,7 +286,9 @@ fn regenerate_the_fuzz_fixture() {
             continue;
         }
         let source = load(file);
-        let stem = file.trim_start_matches("payloads/").trim_end_matches(".json");
+        let stem = file
+            .trim_start_matches("payloads/")
+            .trim_end_matches(".json");
         for table in entry["tables"].as_array().expect("tables") {
             let op = table["op"].as_str().expect("op");
             let args = table["args"].as_array().expect("args");
@@ -308,7 +311,9 @@ fn regenerate_the_fuzz_fixture() {
                         }
                         next["now"] = source["now"].clone();
                         let call_args = row_args(args, &next, &source["now"]);
-                        let Some(result) = call_quietly(op, &call_args) else { continue };
+                        let Some(result) = call_quietly(op, &call_args) else {
+                            continue;
+                        };
                         next["case"] = Value::String(format!("{} (mutant {index})", row["case"]));
                         next[expect] = result;
                         rows.push(next);

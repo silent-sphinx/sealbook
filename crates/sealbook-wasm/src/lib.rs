@@ -2107,6 +2107,12 @@ pub fn core_notebook_name_by_id(
     ))
 }
 
+/// A notebook's colour, derived from its id.
+#[wasm_bindgen]
+pub fn core_notebook_tone(id: &str) -> String {
+    sealbook_core::notebook_tone(id)
+}
+
 #[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
 #[serde(transparent)]
 pub struct CoreBookmarkCollectionList(pub Vec<CoreBookmarkCollection>);

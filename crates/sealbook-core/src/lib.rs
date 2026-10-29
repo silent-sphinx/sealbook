@@ -120,9 +120,10 @@ pub use manifest::{
 };
 pub use notes::{
     default_notebook_id, note_parse, note_write, notebook_name_by_id, notebook_parse,
-    notebook_write, resolve_notebook_id, CoreNote, CoreNoteAttachment, CoreNoteDraft, CoreNotebook,
-    DEFAULT_NOTEBOOK_NAME, NOTEBOOK_CONTENT_TYPE, NOTEBOOK_KEYS, NOTE_CONTENT_TYPE, NOTE_KEYS,
-    UNREADABLE_NOTE_TITLE, UNTITLED_NOTEBOOK_NAME, UNTITLED_NOTE_TITLE,
+    notebook_tone, notebook_write, resolve_notebook_id, CoreNote, CoreNoteAttachment,
+    CoreNoteDraft, CoreNotebook, DEFAULT_NOTEBOOK_NAME, NOTEBOOK_CONTENT_TYPE, NOTEBOOK_KEYS,
+    NOTE_CONTENT_TYPE, NOTE_KEYS, UNREADABLE_NOTE_TITLE, UNTITLED_NOTEBOOK_NAME,
+    UNTITLED_NOTE_TITLE,
 };
 pub use pairing::{
     confirmation_groups, format_confirmation, normalize_confirmation, pair_approve,

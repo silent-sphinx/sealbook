@@ -340,6 +340,12 @@ pub fn notebook_name_by_id(notebooks: &[CoreNotebook], notebook_id: Option<Strin
         .unwrap_or_else(|| DEFAULT_NOTEBOOK_NAME.to_string())
 }
 
+/// A notebook stores no colour, so its dot is derived from its id by the same
+/// rule as an uncoloured collection: every client lands on the same tone.
+pub fn notebook_tone(id: &str) -> String {
+    crate::bookmarks::tone(&[], id)
+}
+
 /// The default notebook is the one container every client creates for itself, so
 /// an unnamed one is that name rather than `Untitled`: two clients that disagreed
 /// here showed the same notebook under two names.
@@ -494,6 +500,11 @@ pub mod ffi {
         notebook_id: Option<String>,
     ) -> String {
         super::notebook_name_by_id(&notebooks, notebook_id)
+    }
+
+    #[uniffi::export(name = "notebook_tone")]
+    pub fn notebook_tone(id: String) -> String {
+        super::notebook_tone(&id)
     }
 }
 
