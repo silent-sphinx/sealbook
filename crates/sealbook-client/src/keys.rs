@@ -6,20 +6,18 @@ use base64::Engine;
 use uuid::Uuid;
 
 use sealbook_crypto::{
-    generate_kdf_salt, generate_phrase, key_rotation_transcript, key_wraps_digest,
-    phrase_lookup_id, phrase_recovery_public, rotated_objects_digest, rotation_recovery_payload,
-    sign, unwrap_for_device, wrap_collection_key, wrap_for_device, wrap_for_phrase, CollectionKey,
-    DeviceHpkePublic, DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets, ObjectDigestEntry,
-    WrapDigestEntry, PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
+    key_rotation_transcript, key_wraps_digest, rotated_objects_digest, rotation_recovery_payload,
+    sign, unwrap_for_device, CollectionKey, DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets,
+    ObjectDigestEntry, WrapDigestEntry, XWING_CIPHERSUITE,
 };
 use sealbook_protocol::{
-    CollectionKeysResponse, DevicePublicKeys, DualSignatureBody, KeyWrapBody, PhraseRecoveryBody,
-    RosterBody, RosterSignerBody, RotateRequest, RotatedObject, SEALED_CONTENT_TYPE,
+    CollectionKeysResponse, DevicePublicKeys, DualSignatureBody, RosterBody, RosterSignerBody,
+    RotateRequest, RotatedObject, SEALED_CONTENT_TYPE,
 };
 
 use sealbook_core::{
-    reseal_row, rotation_entries, rotation_plan, rotation_recipients, CoreDevice, CoreSealedRow,
-    RotationState,
+    reseal_row, rotation_entries, rotation_plan, rotation_recipients, rotation_wraps_typed,
+    CoreDevice, CoreSealedRow, RotationState, RotationWraps,
 };
 
 use crate::{ClientError, SealbookClient};
@@ -135,11 +133,11 @@ impl SealbookClient {
         // does not read the whole vault first.
         let roster = self.verified_roster().await?;
         let devices: Vec<CoreDevice> = roster.devices.iter().map(CoreDevice::from).collect();
-        let remaining: Vec<DevicePublicKeys> =
-            rotation_recipients(self_device_id, revoke_device_id, &devices)?
-                .iter()
-                .map(DevicePublicKeys::try_from)
-                .collect::<Result<_, _>>()?;
+        let recipients = rotation_recipients(self_device_id, revoke_device_id, &devices)?;
+        let remaining: Vec<DevicePublicKeys> = recipients
+            .iter()
+            .map(DevicePublicKeys::try_from)
+            .collect::<Result<_, _>>()?;
 
         // Read everything under the current key before replacing it. The plan is
         // what says which rows are re-sealed and at which revision, which
@@ -159,36 +157,12 @@ impl SealbookClient {
         )?;
 
         let new_ck = CollectionKey::generate();
-        let salt = generate_kdf_salt();
-        let recovery = wrap_collection_key(password.as_bytes(), &salt, &new_ck)?;
-        let (phrase, phrase_entropy) = generate_phrase()?;
-        let phrase_wrap = wrap_for_phrase(&phrase_entropy, &new_ck)?;
-
-        let mut key_wraps = Vec::with_capacity(remaining.len() + 2);
-        for device in &remaining {
-            let wrap = wrap_for_device(&DeviceHpkePublic(device.xwing_hpke_pk.clone()), &new_ck)?;
-            key_wraps.push(KeyWrapBody {
-                recipient_kind: "device".into(),
-                recipient_id: device.device_id.to_string(),
-                hpke_enc: wrap.enc,
-                wrapped_ck: wrap.ciphertext,
-                ciphersuite: XWING_CIPHERSUITE.into(),
-            });
-        }
-        key_wraps.push(KeyWrapBody {
-            recipient_kind: "recovery".into(),
-            recipient_id: username.clone(),
-            hpke_enc: recovery.nonce.to_vec(),
-            wrapped_ck: recovery.ciphertext,
-            ciphersuite: RECOVERY_CIPHERSUITE.into(),
-        });
-        key_wraps.push(KeyWrapBody {
-            recipient_kind: "phrase".into(),
-            recipient_id: username,
-            hpke_enc: phrase_wrap.nonce.to_vec(),
-            wrapped_ck: phrase_wrap.ciphertext,
-            ciphersuite: PHRASE_CIPHERSUITE.into(),
-        });
+        let RotationWraps {
+            key_wraps,
+            kdf_salt: salt,
+            phrase,
+            phrase_recovery,
+        } = rotation_wraps_typed(&new_ck, &recipients, &username, password)?;
 
         let new_ck_b64 = URL_SAFE_NO_PAD.encode(new_ck.as_bytes());
         let mut objects = Vec::with_capacity(plan.reseal.len());
@@ -227,7 +201,6 @@ impl SealbookClient {
                 tombstone: object.tombstone,
             })
             .collect();
-        let phrase_recovery = phrase_recovery_body(&phrase_entropy)?;
         let new_roster = RosterBody::seal(
             collection_id,
             roster.roster_seq + 1,
@@ -352,16 +325,4 @@ impl SealbookClient {
         self.key_epoch = resp.key_epoch;
         Ok(resp.key_epoch)
     }
-}
-
-pub(crate) fn phrase_recovery_body(
-    entropy: &[u8; sealbook_crypto::PHRASE_ENTROPY_LEN],
-) -> Result<PhraseRecoveryBody, ClientError> {
-    let public = phrase_recovery_public(entropy)?;
-    Ok(PhraseRecoveryBody {
-        mldsa_pk: public.mldsa_pk,
-        ed25519_pk: public.ed25519_pk,
-        lookup_id: phrase_lookup_id(entropy)?.to_vec(),
-        scheme: PHRASE_SCHEME.to_string(),
-    })
 }

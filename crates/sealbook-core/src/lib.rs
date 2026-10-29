@@ -138,8 +138,9 @@ pub use roster::{
     VerifiedRoster,
 };
 pub use rotation::{
-    reseal_row, rotation_entries, rotation_plan, rotation_recipients, ResealRow, RotationPlan,
-    RotationRefusal, RotationState,
+    reseal_row, rotation_entries, rotation_plan, rotation_recipients, rotation_wraps,
+    rotation_wraps_typed, CoreKeyWrap, CoreRotationWraps, ResealRow, RotationPlan, RotationRefusal,
+    RotationState, RotationWraps,
 };
 pub use settings::{
     can_disable_feature, default_account_settings, normalize_accent, normalize_contact_mode,

@@ -9,8 +9,14 @@
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use sealbook_crypto::{decrypt_object, encrypt_object, object_aad, CollectionKey, EncryptedObject};
+use sealbook_crypto::{
+    decrypt_object, encrypt_object, generate_kdf_salt, generate_phrase, object_aad,
+    phrase_lookup_id, phrase_recovery_public, wrap_collection_key, wrap_for_device,
+    wrap_for_phrase, CollectionKey, DeviceHpkePublic, EncryptedObject, PHRASE_CIPHERSUITE,
+    PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
+};
 use sealbook_protocol::envelope::{open_envelope, Unsealed};
+use sealbook_protocol::{KeyWrapBody, PhraseRecoveryBody};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -291,6 +297,136 @@ pub fn rotation_entries(
     }
     entries.extend(plan.carried.iter().cloned());
     Ok(entries)
+}
+
+/// What a rotation installs besides the re-sealed rows, in the types the wire
+/// carries.
+pub struct RotationWraps {
+    pub key_wraps: Vec<KeyWrapBody>,
+    pub kdf_salt: Vec<u8>,
+    pub phrase: String,
+    pub phrase_recovery: PhraseRecoveryBody,
+}
+
+/// The new key wrapped for every recipient, then for the password, then for a
+/// fresh recovery phrase.
+///
+/// The order is the one the rotation signature covers: the server checks the
+/// digest of the list as sent, so every client builds it here and none of them
+/// sequences it. Draws the salt and the phrase, and returns both for the host
+/// to keep.
+pub fn rotation_wraps_typed(
+    new_key: &CollectionKey,
+    recipients: &[CoreDevice],
+    username: &str,
+    password: &str,
+) -> Result<RotationWraps, CoreError> {
+    let salt = generate_kdf_salt();
+    let recovery = wrap_collection_key(password.as_bytes(), &salt, new_key)?;
+    let (phrase, entropy) = generate_phrase()?;
+    let phrase_wrap = wrap_for_phrase(&entropy, new_key)?;
+    let public = phrase_recovery_public(&entropy)?;
+
+    let mut key_wraps = Vec::with_capacity(recipients.len() + 2);
+    for device in recipients {
+        let pk =
+            URL_SAFE_NO_PAD
+                .decode(&device.xwing_hpke_pk)
+                .map_err(|_| CoreError::Malformed {
+                    detail: "device HPKE key".into(),
+                })?;
+        let wrap = wrap_for_device(&DeviceHpkePublic(pk), new_key)?;
+        key_wraps.push(KeyWrapBody {
+            recipient_kind: "device".into(),
+            recipient_id: device.device_id.to_string(),
+            hpke_enc: wrap.enc,
+            wrapped_ck: wrap.ciphertext,
+            ciphersuite: XWING_CIPHERSUITE.into(),
+        });
+    }
+    key_wraps.push(KeyWrapBody {
+        recipient_kind: "recovery".into(),
+        recipient_id: username.to_string(),
+        hpke_enc: recovery.nonce.to_vec(),
+        wrapped_ck: recovery.ciphertext,
+        ciphersuite: RECOVERY_CIPHERSUITE.into(),
+    });
+    key_wraps.push(KeyWrapBody {
+        recipient_kind: "phrase".into(),
+        recipient_id: username.to_string(),
+        hpke_enc: phrase_wrap.nonce.to_vec(),
+        wrapped_ck: phrase_wrap.ciphertext,
+        ciphersuite: PHRASE_CIPHERSUITE.into(),
+    });
+    Ok(RotationWraps {
+        key_wraps,
+        kdf_salt: salt.to_vec(),
+        phrase,
+        phrase_recovery: PhraseRecoveryBody {
+            mldsa_pk: public.mldsa_pk,
+            ed25519_pk: public.ed25519_pk,
+            lookup_id: phrase_lookup_id(&entropy)?.to_vec(),
+            scheme: PHRASE_SCHEME.to_string(),
+        },
+    })
+}
+
+/// One wrap of the new key, with the binary fields base64url as the hosts hold
+/// them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct CoreKeyWrap {
+    pub recipient_kind: String,
+    pub recipient_id: String,
+    pub hpke_enc: String,
+    pub wrapped_ck: String,
+    pub ciphersuite: String,
+}
+
+/// [`RotationWraps`] as a host carries it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct CoreRotationWraps {
+    pub key_wraps: Vec<CoreKeyWrap>,
+    pub kdf_salt: String,
+    pub phrase: String,
+    pub phrase_mldsa_pk: String,
+    pub phrase_ed25519_pk: String,
+    pub phrase_lookup_id: String,
+    pub phrase_scheme: String,
+}
+
+/// [`rotation_wraps_typed`] for a host that holds the new key as base64url.
+pub fn rotation_wraps(
+    new_ck_b64: &str,
+    recipients: &[CoreDevice],
+    username: &str,
+    password: &str,
+) -> Result<CoreRotationWraps, CoreError> {
+    let key = CollectionKey::from_bytes(crate::roster::collection_key(new_ck_b64)?);
+    let wraps = rotation_wraps_typed(&key, recipients, username, password)?;
+    let b64 = |bytes: &[u8]| URL_SAFE_NO_PAD.encode(bytes);
+    Ok(CoreRotationWraps {
+        key_wraps: wraps
+            .key_wraps
+            .iter()
+            .map(|wrap| CoreKeyWrap {
+                recipient_kind: wrap.recipient_kind.clone(),
+                recipient_id: wrap.recipient_id.clone(),
+                hpke_enc: b64(&wrap.hpke_enc),
+                wrapped_ck: b64(&wrap.wrapped_ck),
+                ciphersuite: wrap.ciphersuite.clone(),
+            })
+            .collect(),
+        kdf_salt: b64(&wraps.kdf_salt),
+        phrase: wraps.phrase,
+        phrase_mldsa_pk: b64(&wraps.phrase_recovery.mldsa_pk),
+        phrase_ed25519_pk: b64(&wraps.phrase_recovery.ed25519_pk),
+        phrase_lookup_id: b64(&wraps.phrase_recovery.lookup_id),
+        phrase_scheme: wraps.phrase_recovery.scheme,
+    })
 }
 
 #[cfg(test)]
@@ -606,14 +742,78 @@ mod tests {
         assert_eq!(plan.manifest.key_epoch, 3);
         assert!(rotation_entries(&plan, &[]).unwrap().is_empty());
     }
+
+    fn enrolled(id: u128) -> (CoreDevice, sealbook_crypto::DeviceHpkeSecret) {
+        let (secret, public) = sealbook_crypto::generate_device_hpke().unwrap();
+        let mut entry = device(id);
+        entry.xwing_hpke_pk = URL_SAFE_NO_PAD.encode(&public.0);
+        (entry, secret)
+    }
+
+    #[test]
+    fn wraps_go_to_each_device_then_the_password_then_the_phrase() {
+        let (first, first_secret) = enrolled(1);
+        let (second, _) = enrolled(2);
+        let key = CollectionKey::from_bytes(KEY);
+        let wraps =
+            rotation_wraps_typed(&key, &[first.clone(), second.clone()], "ada", "hunter2").unwrap();
+        let order: Vec<(&str, &str)> = wraps
+            .key_wraps
+            .iter()
+            .map(|wrap| (wrap.recipient_kind.as_str(), wrap.recipient_id.as_str()))
+            .collect();
+        assert_eq!(
+            order,
+            [
+                ("device", first.device_id.to_string().as_str()),
+                ("device", second.device_id.to_string().as_str()),
+                ("recovery", "ada"),
+                ("phrase", "ada"),
+            ]
+        );
+        assert_eq!(wraps.key_wraps[0].ciphersuite, XWING_CIPHERSUITE);
+        assert_eq!(wraps.key_wraps[2].ciphersuite, RECOVERY_CIPHERSUITE);
+        assert_eq!(wraps.key_wraps[3].ciphersuite, PHRASE_CIPHERSUITE);
+        assert_eq!(wraps.phrase_recovery.scheme, PHRASE_SCHEME);
+
+        let opened = sealbook_crypto::unwrap_for_device(
+            &first_secret,
+            &sealbook_crypto::DeviceHpkeWrap {
+                enc: wraps.key_wraps[0].hpke_enc.clone(),
+                ciphertext: wraps.key_wraps[0].wrapped_ck.clone(),
+                ciphersuite: XWING_CIPHERSUITE,
+            },
+        )
+        .unwrap();
+        assert_eq!(opened.as_bytes(), &KEY);
+    }
+
+    #[test]
+    fn the_host_form_carries_the_same_wraps_as_base64() {
+        let (only, _) = enrolled(1);
+        let wraps = rotation_wraps(&URL_SAFE_NO_PAD.encode(KEY), &[only], "ada", "pw").unwrap();
+        assert_eq!(wraps.key_wraps.len(), 3);
+        assert_eq!(wraps.phrase.split_whitespace().count(), 24);
+        assert!(URL_SAFE_NO_PAD.decode(&wraps.kdf_salt).is_ok());
+        assert!(URL_SAFE_NO_PAD.decode(&wraps.phrase_lookup_id).is_ok());
+    }
+
+    #[test]
+    fn a_device_key_that_is_not_base64_is_refused() {
+        let mut bad = device(1);
+        bad.xwing_hpke_pk = "***".into();
+        assert!(
+            rotation_wraps_typed(&CollectionKey::from_bytes(KEY), &[bad], "ada", "pw").is_err()
+        );
+    }
 }
 
 /// The uniffi surface for the rotation plan above.
 #[cfg(feature = "uniffi")]
 pub mod ffi {
     use super::{
-        CoreDevice, CoreError, CoreManifestEntry, CoreSealedRow, ResealRow, RotationPlan,
-        RotationState,
+        CoreDevice, CoreError, CoreManifestEntry, CoreRotationWraps, CoreSealedRow, ResealRow,
+        RotationPlan, RotationState,
     };
     use uuid::Uuid;
 
@@ -634,6 +834,16 @@ pub mod ffi {
         devices: Vec<CoreDevice>,
     ) -> Result<Vec<CoreDevice>, CoreError> {
         super::rotation_recipients(self_device_id, revoke_device_id, &devices)
+    }
+
+    #[uniffi::export]
+    pub fn rotation_wraps(
+        new_ck_b64: String,
+        recipients: Vec<CoreDevice>,
+        username: String,
+        password: String,
+    ) -> Result<CoreRotationWraps, CoreError> {
+        super::rotation_wraps(&new_ck_b64, &recipients, &username, &password)
     }
 
     #[uniffi::export]

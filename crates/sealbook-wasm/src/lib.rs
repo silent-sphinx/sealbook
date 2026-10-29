@@ -460,39 +460,6 @@ pub fn pair_confirmation_code(
     ))
 }
 
-#[wasm_bindgen]
-pub fn wrap_ck_for_password(ck_b64: &str, password: &str) -> Result<String, JsError> {
-    let ck = ck_from_b64(ck_b64)?;
-    let salt = generate_kdf_salt();
-    let wrap = wrap_collection_key(password.as_bytes(), &salt, &ck).map_err(js_err)?;
-    serde_json::to_string(&serde_json::json!({
-        "kdf_salt": b64(&salt),
-        "recovery_nonce": b64(&wrap.nonce),
-        "recovery_wrapped_ck": b64(&wrap.ciphertext),
-        "recovery_ciphersuite": RECOVERY_CIPHERSUITE,
-    }))
-    .map_err(js_err)
-}
-
-#[wasm_bindgen]
-pub fn generate_new_phrase(ck_b64: &str) -> Result<String, JsError> {
-    let ck = ck_from_b64(ck_b64)?;
-    let (phrase, entropy) = generate_phrase().map_err(js_err)?;
-    let wrap = wrap_for_phrase(&entropy, &ck).map_err(js_err)?;
-    let recovery = phrase_recovery_public(&entropy).map_err(js_err)?;
-    serde_json::to_string(&serde_json::json!({
-        "phrase": phrase,
-        "phrase_nonce": b64(&wrap.nonce),
-        "phrase_wrapped_ck": b64(&wrap.ciphertext),
-        "phrase_mldsa_pk": b64(&recovery.mldsa_pk),
-        "phrase_ed25519_pk": b64(&recovery.ed25519_pk),
-        "phrase_lookup_id": b64(&phrase_lookup_id(&entropy).map_err(js_err)?),
-        "phrase_scheme": PHRASE_SCHEME,
-        "phrase_ciphersuite": PHRASE_CIPHERSUITE,
-    }))
-    .map_err(js_err)
-}
-
 #[derive(Deserialize)]
 struct RotationWrapIn {
     recipient_kind: String,
@@ -1290,6 +1257,22 @@ pub fn core_rotation_plan(
     )
     .map_err(core_err)?
     .into_ts()?)
+}
+
+/// The new key wrapped for the recipients, the password and a fresh phrase, in
+/// the order the rotation signature covers.
+#[wasm_bindgen]
+pub fn core_rotation_wraps(
+    new_ck_b64: &str,
+    recipients: Ts<CoreDeviceList>,
+    username: &str,
+    password: &str,
+) -> Result<Ts<sealbook_core::CoreRotationWraps>, JsError> {
+    Ok(
+        sealbook_core::rotation_wraps(new_ck_b64, &recipients.to_rust()?.0, username, password)
+            .map_err(core_err)?
+            .into_ts()?,
+    )
 }
 
 /// The devices a rotation re-wraps the new key for, from the verified roster.

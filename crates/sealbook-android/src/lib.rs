@@ -1,13 +1,12 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sealbook_crypto::{
-    content_digest, decrypt_object, encrypt_object, generate_kdf_salt, generate_phrase,
-    key_rotation_transcript, key_wraps_digest, manifest_digest, object_aad, pair_confirmation,
-    phrase_lookup_id, phrase_recovery_public, rotated_objects_digest, rotation_recovery_payload,
-    sign, unwrap_collection_key, unwrap_for_device, wrap_collection_key, wrap_for_device,
-    wrap_for_phrase, CollectionKey, DeviceHpkePublic, DeviceHpkeSecret, DeviceHpkeWrap,
-    DeviceSigningSecrets, EncryptedObject, ManifestDigestEntry, ObjectDigestEntry, RecoveryWrap,
-    WrapDigestEntry, PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
+    content_digest, decrypt_object, encrypt_object, key_rotation_transcript, key_wraps_digest,
+    manifest_digest, object_aad, pair_confirmation, rotated_objects_digest,
+    rotation_recovery_payload, sign, unwrap_collection_key, unwrap_for_device, wrap_for_device,
+    CollectionKey, DeviceHpkePublic, DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets,
+    EncryptedObject, ManifestDigestEntry, ObjectDigestEntry, RecoveryWrap, WrapDigestEntry,
+    XWING_CIPHERSUITE,
 };
 use sealbook_protocol::envelope::{open_envelope, seal_envelope, Unsealed};
 use sealbook_protocol::{DevicePublicKeys, RosterBody, RosterSignerBody, SEALED_CONTENT_TYPE};
@@ -64,37 +63,6 @@ impl From<sealbook_crypto::CryptoError> for CryptoError {
 // ── OPAQUE Registration ──
 
 // ── Enrollment ──
-
-#[derive(uniffi::Record)]
-pub struct PasswordWrapResult {
-    pub kdf_salt: String,
-    pub recovery_nonce: String,
-    pub recovery_wrapped_ck: String,
-    pub recovery_ciphersuite: String,
-}
-
-#[uniffi::export]
-pub fn wrap_ck_for_password(
-    collection_key_b64: String,
-    password: String,
-) -> Result<PasswordWrapResult, CryptoError> {
-    let bytes = unb64(&collection_key_b64)?;
-    if bytes.len() != 32 {
-        return Err(CryptoError::General {
-            msg: "collection key must be 32 bytes".into(),
-        });
-    }
-    let mut key = [0u8; 32];
-    key.copy_from_slice(&bytes);
-    let salt = generate_kdf_salt();
-    let wrap = wrap_collection_key(password.as_bytes(), &salt, &CollectionKey::from_bytes(key))?;
-    Ok(PasswordWrapResult {
-        kdf_salt: b64(&salt),
-        recovery_nonce: b64(&wrap.nonce),
-        recovery_wrapped_ck: b64(&wrap.ciphertext),
-        recovery_ciphersuite: RECOVERY_CIPHERSUITE.to_string(),
-    })
-}
 
 // ── OPAQUE Login ──
 
@@ -386,40 +354,6 @@ pub fn new_collection_key() -> String {
 #[uniffi::export]
 pub fn new_uuid() -> String {
     Uuid::new_v4().to_string()
-}
-
-#[derive(uniffi::Record)]
-pub struct NewPhraseResult {
-    pub phrase: String,
-    pub phrase_nonce: String,
-    pub phrase_wrapped_ck: String,
-    pub phrase_mldsa_pk: String,
-    pub phrase_ed25519_pk: String,
-    pub phrase_lookup_id: String,
-    pub phrase_scheme: String,
-    pub phrase_ciphersuite: String,
-}
-
-/// A fresh recovery phrase, with the given collection key wrapped under it.
-///
-/// Every rotation issues one: the new key cannot be re-wrapped for the old phrase,
-/// because no client holds the phrase itself.
-#[uniffi::export]
-pub fn generate_new_phrase(ck_b64: String) -> Result<NewPhraseResult, CryptoError> {
-    let ck = ck_from_b64(&ck_b64)?;
-    let (phrase, entropy) = generate_phrase()?;
-    let wrap = wrap_for_phrase(&entropy, &ck)?;
-    let recovery = phrase_recovery_public(&entropy)?;
-    Ok(NewPhraseResult {
-        phrase,
-        phrase_nonce: b64(&wrap.nonce),
-        phrase_wrapped_ck: b64(&wrap.ciphertext),
-        phrase_mldsa_pk: b64(&recovery.mldsa_pk),
-        phrase_ed25519_pk: b64(&recovery.ed25519_pk),
-        phrase_lookup_id: b64(&phrase_lookup_id(&entropy)?),
-        phrase_scheme: PHRASE_SCHEME.to_string(),
-        phrase_ciphersuite: PHRASE_CIPHERSUITE.to_string(),
-    })
 }
 
 // ── Collection Key Rotation ──
