@@ -225,6 +225,48 @@ pub fn changes_request(collection_id: Uuid, cursor: &WalkCursor) -> HttpRequest 
     }
 }
 
+/// What a walk reads out of a `/changes` response body.
+///
+/// The fields the protocol requires are required here, and `resync` and
+/// `tombstone_floor` default as `ChangesResponse` does, so a page missing a
+/// required field is refused by every client and not read with a guessed value.
+/// The rows are left for the host to keep.
+pub fn changes_page_read(body: &str) -> Result<ChangesPage, CoreError> {
+    #[derive(Deserialize)]
+    struct Row {
+        revision: u64,
+    }
+    #[derive(Deserialize)]
+    struct Body {
+        latest_revision: u64,
+        key_epoch: u64,
+        objects: Vec<Row>,
+        has_more: bool,
+        manifest: Option<serde_json::Value>,
+        #[serde(default)]
+        resync: bool,
+        #[serde(default)]
+        tombstone_floor: u64,
+    }
+    let page: Body = serde_json::from_str(body).map_err(|err| CoreError::Malformed {
+        detail: format!("change page: {err}"),
+    })?;
+    Ok(ChangesPage {
+        manifest_json: page.manifest.map(|manifest| manifest.to_string()),
+        key_epoch: page.key_epoch,
+        latest_revision: page.latest_revision,
+        tombstone_floor: page.tombstone_floor,
+        has_more: page.has_more,
+        resync: page.resync,
+        highest_revision: page
+            .objects
+            .iter()
+            .map(|row| row.revision)
+            .max()
+            .unwrap_or(0),
+    })
+}
+
 /// What a walk does with the page it was just served.
 ///
 /// Pages come from separate transactions, so a write landing between two of
@@ -439,6 +481,50 @@ mod tests {
             },
         })
         .unwrap()
+    }
+
+    #[test]
+    fn a_page_body_is_read_for_what_the_walk_decides_on() {
+        let body = r#"{"latest_revision":9,"key_epoch":3,"has_more":true,"objects":[{"revision":4,"ciphertext":"x"},{"revision":7}],"manifest":null}"#;
+        let page = changes_page_read(body).unwrap();
+        assert_eq!(page.highest_revision, 7);
+        assert_eq!(page.key_epoch, 3);
+        assert_eq!(page.latest_revision, 9);
+        assert!(page.has_more);
+        assert!(!page.resync);
+        assert_eq!(page.tombstone_floor, 0);
+        assert_eq!(page.manifest_json, None);
+    }
+
+    #[test]
+    fn an_empty_page_has_no_highest_revision() {
+        let body = r#"{"latest_revision":0,"key_epoch":1,"has_more":false,"objects":[],"resync":true,"tombstone_floor":5}"#;
+        let page = changes_page_read(body).unwrap();
+        assert_eq!(page.highest_revision, 0);
+        assert!(page.resync);
+        assert_eq!(page.tombstone_floor, 5);
+    }
+
+    #[test]
+    fn a_page_missing_a_required_field_is_refused_rather_than_guessed() {
+        for body in [
+            r#"{"latest_revision":0,"has_more":false,"objects":[]}"#,
+            r#"{"latest_revision":0,"key_epoch":1,"objects":[]}"#,
+            r#"{"key_epoch":1,"has_more":false,"objects":[]}"#,
+            "not json",
+        ] {
+            assert!(
+                matches!(changes_page_read(body), Err(CoreError::Malformed { .. })),
+                "{body}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_manifest_is_carried_as_the_json_the_walk_verifies() {
+        let body = r#"{"latest_revision":1,"key_epoch":1,"has_more":false,"objects":[],"manifest":{"manifest_seq":6}}"#;
+        let page = changes_page_read(body).unwrap();
+        assert_eq!(page.manifest_json.as_deref(), Some(r#"{"manifest_seq":6}"#));
     }
 
     fn page(seq: Option<u64>) -> ChangesPage {
@@ -797,6 +883,11 @@ pub mod ffi {
     #[uniffi::export]
     pub fn changes_request(collection_id: Uuid, cursor: WalkCursor) -> HttpRequest {
         super::changes_request(collection_id, &cursor)
+    }
+
+    #[uniffi::export]
+    pub fn changes_page_read(body: String) -> Result<ChangesPage, CoreError> {
+        super::changes_page_read(&body)
     }
 
     #[uniffi::export]

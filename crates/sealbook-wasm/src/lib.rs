@@ -1182,6 +1182,14 @@ pub fn core_changes_request(
     Ok(sealbook_core::changes_request(parse_uuid(collection_id)?, &cursor.to_rust()?).into_ts()?)
 }
 
+/// What a walk reads out of a `/changes` response body.
+#[wasm_bindgen]
+pub fn core_changes_page_read(body: &str) -> Result<Ts<ChangesPage>, JsError> {
+    Ok(sealbook_core::changes_page_read(body)
+        .map_err(core_err)?
+        .into_ts()?)
+}
+
 /// What the walk does with the page it was just served: another page, a restart
 /// that drops the rows read so far, or the walk being complete.
 #[wasm_bindgen]

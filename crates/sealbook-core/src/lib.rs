@@ -151,9 +151,9 @@ pub use settings::{
 };
 pub use state::{CoreDeviceState, CoreSession};
 pub use sync::{
-    changes_request, latest_revisions, open_row, open_stored, require_key_epoch, walk_page,
-    walk_start, ChangesPage, CoreSealedRow, RowOutcome, RowRef, StoredRow, UnreadableReason,
-    WalkCursor, WalkOutcome, WalkStep, CHANGES_PAGE_LIMIT, SYNC_RESTART_LIMIT,
+    changes_page_read, changes_request, latest_revisions, open_row, open_stored, require_key_epoch,
+    walk_page, walk_start, ChangesPage, CoreSealedRow, RowOutcome, RowRef, StoredRow,
+    UnreadableReason, WalkCursor, WalkOutcome, WalkStep, CHANGES_PAGE_LIMIT, SYNC_RESTART_LIMIT,
 };
 pub use tasks::{
     default_task_list_id, normalize_due_date, resolve_task_list_id, task_list_name_by_id,

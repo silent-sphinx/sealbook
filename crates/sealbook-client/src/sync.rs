@@ -4,7 +4,9 @@
 //! shell around it. Core says what to ask for and what each page means, this
 //! moves the bytes and keeps the rows.
 
-use sealbook_core::{changes_request, latest_revisions, walk_page, ChangesPage, RowRef, WalkStep};
+use sealbook_core::{
+    changes_page_read, changes_request, latest_revisions, walk_page, RowRef, WalkStep,
+};
 use sealbook_protocol::{ChangesResponse, ObjectChange};
 
 use crate::{ClientError, SealbookClient};
@@ -32,9 +34,11 @@ impl SealbookClient {
         let mut rows: Vec<ObjectChange> = Vec::new();
         let walk = loop {
             let response = self.fetch(&changes_request(collection_id, &cursor)).await?;
-            let mut page: ChangesResponse = serde_json::from_slice(&response.body)
+            let body = std::str::from_utf8(&response.body)
                 .map_err(|err| ClientError::Server(format!("unreadable change page: {err}")))?;
-            match walk_page(&cursor, &facts(&page)?)? {
+            let mut page: ChangesResponse = serde_json::from_str(body)
+                .map_err(|err| ClientError::Server(format!("unreadable change page: {err}")))?;
+            match walk_page(&cursor, &changes_page_read(body)?)? {
                 WalkStep::Next { cursor: next } => {
                     rows.append(&mut page.objects);
                     cursor = next;
@@ -60,29 +64,6 @@ impl SealbookClient {
             tombstone_floor: walk.tombstone_floor,
         })
     }
-}
-
-/// What a walk decision reads out of a page the CLI has parsed.
-fn facts(page: &ChangesResponse) -> Result<ChangesPage, ClientError> {
-    Ok(ChangesPage {
-        manifest_json: page
-            .manifest
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()
-            .map_err(|err| ClientError::Server(format!("unreadable manifest: {err}")))?,
-        key_epoch: page.key_epoch,
-        latest_revision: page.latest_revision,
-        tombstone_floor: page.tombstone_floor,
-        has_more: page.has_more,
-        resync: page.resync,
-        highest_revision: page
-            .objects
-            .iter()
-            .map(|object| object.revision)
-            .max()
-            .unwrap_or(0),
-    })
 }
 
 /// The newest revision of each object, in the order they were first walked.
