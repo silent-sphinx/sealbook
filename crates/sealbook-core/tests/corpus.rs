@@ -198,8 +198,74 @@ fn mutate(value: &mut Value, rng: &mut Rng) {
     }
 }
 
+fn odd_text(rng: &mut Rng, text: &str) -> String {
+    match rng.below(6) {
+        0 => String::new(),
+        1 => format!("  {text}  "),
+        2 => format!("{text}\u{1f600}\u{202e}"),
+        3 => "   ".into(),
+        4 => text.repeat(40),
+        _ => format!("\t{text}\n"),
+    }
+}
+
+fn mutate_draft(value: &mut Value, rng: &mut Rng) {
+    match value {
+        Value::String(text) => *text = odd_text(rng, text),
+        Value::Array(items) if !items.is_empty() => {
+            let at = rng.below(items.len());
+            match rng.below(3) {
+                0 => {
+                    items.remove(at);
+                }
+                1 => {
+                    let copy = items[at].clone();
+                    items.push(copy);
+                }
+                _ => mutate_draft(&mut items[at], rng),
+            }
+        }
+        Value::Object(map) if !map.is_empty() => {
+            let keys: Vec<String> = map.keys().cloned().collect();
+            let key = keys[rng.below(keys.len())].clone();
+            match rng.below(4) {
+                0 => {
+                    map.remove(&key);
+                }
+                1 => {
+                    map.insert(key, Value::Null);
+                }
+                _ => {
+                    if let Some(inner) = map.get_mut(&key) {
+                        mutate_draft(inner, rng);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn row_args(args: &[Value], row: &Value, now: &Value) -> Vec<Value> {
+    args.iter()
+        .map(|key| match key {
+            Value::Object(literal) => literal["value"].clone(),
+            key => match key.as_str().expect("arg name") {
+                "$now" => now.clone(),
+                key => row.get(key).cloned().unwrap_or(Value::Null),
+            },
+        })
+        .collect()
+}
+
+fn call_quietly(op: &str, args: &[Value]) -> Option<Value> {
+    std::panic::catch_unwind(|| call(op, args)).ok()
+}
+
 /// Rewrites `payloads/fuzz.json`: near-valid stored payloads, made by mutating
-/// every parse row's `raw`, with core's own reading as the expected value.
+/// every parse row's `raw`, and drafts, made by perturbing every write row's
+/// `draft`, with core's own output as the expected value. A draft core cannot
+/// read is dropped.
 #[test]
 #[ignore]
 fn regenerate_the_fuzz_fixture() {
@@ -209,6 +275,8 @@ fn regenerate_the_fuzz_fixture() {
         .unwrap_or(0x5ea1_b00c);
     let mut rng = Rng(seed | 1);
     let corpus = load("corpus.json");
+    let hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
     let mut fixture = serde_json::Map::new();
     let mut tables = Vec::new();
     for entry in corpus["fixtures"].as_array().expect("fixtures") {
@@ -221,7 +289,8 @@ fn regenerate_the_fuzz_fixture() {
         for table in entry["tables"].as_array().expect("tables") {
             let op = table["op"].as_str().expect("op");
             let args = table["args"].as_array().expect("args");
-            if !op.ends_with(".parse") || !args.iter().any(|arg| arg == "raw") {
+            let writes = op.ends_with(".write") && args.iter().any(|arg| arg == "draft");
+            if !writes && (!op.ends_with(".parse") || !args.iter().any(|arg| arg == "raw")) {
                 continue;
             }
             let name = format!("{stem}_{}", table["table"].as_str().expect("table"));
@@ -231,6 +300,21 @@ fn regenerate_the_fuzz_fixture() {
                 .as_array()
                 .expect("rows")
             {
+                if writes {
+                    for index in 0..FUZZ_MUTANTS {
+                        let mut next = row.clone();
+                        for _ in 0..=rng.below(3) {
+                            mutate_draft(&mut next["draft"], &mut rng);
+                        }
+                        next["now"] = source["now"].clone();
+                        let call_args = row_args(args, &next, &source["now"]);
+                        let Some(result) = call_quietly(op, &call_args) else { continue };
+                        next["case"] = Value::String(format!("{} (mutant {index})", row["case"]));
+                        next[expect] = result;
+                        rows.push(next);
+                    }
+                    continue;
+                }
                 let Some(Ok(base)) = row["raw"].as_str().map(serde_json::from_str::<Value>) else {
                     continue;
                 };
@@ -242,10 +326,7 @@ fn regenerate_the_fuzz_fixture() {
                     let mut next = row.clone();
                     next["case"] = Value::String(format!("{} (mutant {index})", row["case"]));
                     next["raw"] = Value::String(raw.to_string());
-                    let call_args: Vec<Value> = args
-                        .iter()
-                        .map(|key| next.get(key.as_str().expect("arg")).cloned().unwrap_or(Value::Null))
-                        .collect();
+                    let call_args = row_args(args, &next, &source["now"]);
                     next[expect] = call(op, &call_args);
                     rows.push(next);
                 }
@@ -256,6 +337,7 @@ fn regenerate_the_fuzz_fixture() {
             fixture.insert(name, Value::Array(rows));
         }
     }
+    std::panic::set_hook(hook);
     fixture.insert("seed".into(), Value::from(seed));
     let text = serde_json::to_string_pretty(&Value::Object(fixture)).expect("serialises");
     std::fs::write(format!("{ROOT}{FUZZ_FILE}"), text + "\n").expect("writes");

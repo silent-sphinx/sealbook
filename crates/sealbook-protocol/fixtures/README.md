@@ -305,10 +305,12 @@ The cases that decide whether two implementations drift live in the tables:
 
 ### Fuzzed cases
 
-`payloads/fuzz.json` is generated: every parse row's stored payload is mutated
+`payloads/fuzz.json` is generated. Every parse row's stored payload is mutated
 (unknown keys, wrong types, dropped keys, odd versions, integers past 2^53,
-astral and bidirectional text) and core's reading of each mutant is the expected
-value. It is listed in the manifest like any other file, so no host needs code
+astral and bidirectional text), and every write row's draft is perturbed
+(padded, blank, repeated or dropped text, dropped or nulled fields, duplicated
+list entries). Core's output for each mutant is the expected value, and a draft
+core cannot read is dropped. Write rows carry their own `now`. It is listed in the manifest like any other file, so no host needs code
 for it. Regenerate with a seed to hunt for a divergence:
 
 ```

@@ -254,6 +254,15 @@
       "file": "payloads/fuzz.json",
       "tables": [
         {
+          "table": "tasks_writes",
+          "op": "task.write",
+          "args": [
+            "draft",
+            "now"
+          ],
+          "expect": "payload"
+        },
+        {
           "table": "tasks_parses",
           "op": "task.parse",
           "args": [
@@ -261,6 +270,14 @@
             "raw"
           ],
           "expect": "task"
+        },
+        {
+          "table": "tasks_list_writes",
+          "op": "task_list.write",
+          "args": [
+            "draft"
+          ],
+          "expect": "payload"
         },
         {
           "table": "tasks_list_parses",
@@ -272,6 +289,15 @@
           "expect": "list"
         },
         {
+          "table": "bookmarks_writes",
+          "op": "bookmark.write",
+          "args": [
+            "draft",
+            "now"
+          ],
+          "expect": "payload"
+        },
+        {
           "table": "bookmarks_parses",
           "op": "bookmark.parse",
           "args": [
@@ -281,6 +307,14 @@
           "expect": "bookmark"
         },
         {
+          "table": "bookmarks_collection_writes",
+          "op": "bookmark_collection.write",
+          "args": [
+            "draft"
+          ],
+          "expect": "payload"
+        },
+        {
           "table": "bookmarks_collection_parses",
           "op": "bookmark_collection.parse",
           "args": [
@@ -288,6 +322,15 @@
             "raw"
           ],
           "expect": "collection"
+        },
+        {
+          "table": "notes_writes",
+          "op": "note.write",
+          "args": [
+            "draft",
+            "now"
+          ],
+          "expect": "payload"
         },
         {
           "table": "notes_parses",
@@ -308,6 +351,14 @@
           "expect": "notebook"
         },
         {
+          "table": "calendars_calendar_writes",
+          "op": "calendar.write",
+          "args": [
+            "draft"
+          ],
+          "expect": "payload"
+        },
+        {
           "table": "calendars_calendar_parses",
           "op": "calendar.parse",
           "args": [
@@ -315,6 +366,14 @@
             "raw"
           ],
           "expect": "calendar"
+        },
+        {
+          "table": "calendars_event_writes",
+          "op": "event.write",
+          "args": [
+            "draft"
+          ],
+          "expect": "payload"
         },
         {
           "table": "calendars_event_parses",
@@ -326,6 +385,17 @@
           "expect": "event"
         },
         {
+          "table": "contacts_contact_writes",
+          "op": "contact.write",
+          "args": [
+            "draft",
+            {
+              "value": "2026-10-28T12:00:00.000Z"
+            }
+          ],
+          "expect": "payload"
+        },
+        {
           "table": "contacts_contact_parses",
           "op": "contact.parse",
           "args": [
@@ -335,6 +405,14 @@
           "expect": "contact"
         },
         {
+          "table": "contacts_address_book_writes",
+          "op": "address_book.write",
+          "args": [
+            "draft"
+          ],
+          "expect": "payload"
+        },
+        {
           "table": "contacts_address_book_parses",
           "op": "address_book.parse",
           "args": [
@@ -342,6 +420,14 @@
             "raw"
           ],
           "expect": "address_book"
+        },
+        {
+          "table": "settings_writes",
+          "op": "settings.write",
+          "args": [
+            "draft"
+          ],
+          "expect": "payload"
         },
         {
           "table": "settings_parses",
