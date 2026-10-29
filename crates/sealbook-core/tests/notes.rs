@@ -34,6 +34,7 @@ struct Fixture {
     parses: Vec<ParseCase>,
     notebook_writes: Vec<NotebookWriteCase>,
     notebook_parses: Vec<NotebookParseCase>,
+    notebook_tones: Vec<NotebookToneCase>,
     refusals: Vec<RefusalCase>,
 }
 
@@ -81,6 +82,13 @@ struct NotebookParseCase {
     id: String,
     raw: String,
     notebook: CoreNotebook,
+}
+
+#[derive(Serialize, Deserialize)]
+struct NotebookToneCase {
+    case: String,
+    id: String,
+    tone: String,
 }
 
 /// The variant name, which is what the fixture pins rather than the sentence
@@ -367,6 +375,37 @@ fn every_notebook_reads_back_as_the_record_the_fixture_holds() {
     }
 }
 
+/// Ids with astral characters and accents, since the hash runs over UTF-16 units.
+fn notebook_tone_cases() -> Vec<(String, String)> {
+    [
+        ("the default notebook", default_notebook_id()),
+        ("another notebook", OTHER_NOTEBOOK.to_string()),
+        ("an empty id", String::new()),
+        ("a short id", "a".to_string()),
+        ("an id that is not a uuid", "not-a-uuid".to_string()),
+        ("an id with accents", "caf\u{e9}-\u{fc}ber".to_string()),
+        (
+            "an id with an astral character",
+            "book-\u{1f4d2}".to_string(),
+        ),
+        ("a long id", "x".repeat(500)),
+    ]
+    .into_iter()
+    .map(|(case, id)| (case.to_string(), id))
+    .collect()
+}
+
+#[test]
+fn every_notebook_tone_is_the_one_the_fixture_holds() {
+    let fixture = fixture();
+    assert_eq!(fixture.notebook_tones.len(), notebook_tone_cases().len());
+    for (expected, (case, id)) in fixture.notebook_tones.iter().zip(notebook_tone_cases()) {
+        assert_eq!(expected.case, case);
+        assert_eq!(expected.id, id, "{case}");
+        assert_eq!(notebook_tone(&id), expected.tone, "{case}");
+    }
+}
+
 #[test]
 fn the_fixture_states_the_constants_the_three_hosts_mirror() {
     let constants = fixture().constants;
@@ -477,6 +516,14 @@ fn regenerate() {
                 notebook: notebook_parse(&id, &raw),
                 id,
                 raw,
+            })
+            .collect(),
+        notebook_tones: notebook_tone_cases()
+            .into_iter()
+            .map(|(case, id)| NotebookToneCase {
+                case,
+                tone: notebook_tone(&id),
+                id,
             })
             .collect(),
         refusals: vec![

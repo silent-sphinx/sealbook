@@ -133,6 +133,13 @@ fn write_cases() -> Vec<(String, CoreAccountSettingsDraft)> {
     fallback.accent = "amber".into();
     add("an unreadable stored payload is replaced", fallback);
 
+    add(
+        "a newer minor keeps its version and its keys",
+        draft(Some(
+            r#"{"@type":"AccountSettings","version":"1.3","features":{"contacts":true},"futureKey":1}"#,
+        )),
+    );
+
     cases
 }
 

@@ -188,6 +188,17 @@ fn write_cases() -> Vec<(String, CoreBookmarkDraft)> {
             )
             .draft(),
         ),
+        (
+            "a newer minor keeps its version and its keys".into(),
+            CoreBookmarkDraft {
+                title: "t".into(),
+                ..bookmark_parse(
+                    BOOKMARK,
+                    r#"{"@type":"Bookmark","version":"1.7","url":"https://example.com","createdAt":"2026-01-01T00:00:00Z","futureKey":[1]}"#,
+                )
+                .draft()
+            },
+        ),
     ]
 }
 
