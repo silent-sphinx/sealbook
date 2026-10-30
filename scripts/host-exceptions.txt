@@ -1,0 +1,18 @@
+# Intentional host copies of logic that core also owns, or core never will.
+# Anything that decides data and is not listed here is a defect.
+#
+# Columns, separated by " | ": rule, location, reason, what holds it.
+# The rules "seal" and "type" are enforced by check-host-boundaries.sh.
+# The rule "mirror" is a reviewed duplicate the scan cannot see.
+type   | web lib/bookmarkExport.ts | web-only export envelope, no other writer or reader | none needed
+type   | web lib/taskExport.ts | web-only export envelope, no other writer or reader | none needed
+mirror | web lib/bookmark.ts normalizeUrl, normalizeTags | called on every keystroke of the editor, a wasm call per key is not worth it | web lib/bookmarkParity.test.ts
+mirror | web and Android default-id fallbacks | an id minted before the first save, replaced by core on write | per-type parity tests
+mirror | web and Android search needle matching | filters the loaded list on each keystroke | none, display only
+mirror | web and Android note previews | list row text, not stored | none, display only
+mirror | web and Android export file date stamps | file names use the device clock and zone | none, display only
+mirror | web and Android view-model name trims | trims a label for a row, never written back | none, display only
+mirror | web and Android calendar search and date labels | zone-aware, core has no zone database | none, display only
+mirror | Android ImportExportManager MAX_IMPORT_BYTES | file-size precheck before the dialog reads the file; core re-checks | core tests
+mirror | web and Android noteFitsObjectLimit, sortNotes | editor and list responsiveness | web noteParity.test.ts, Android NoteTest
+mirror | web markdown.ts and Android Markdown.kt | display parser twin, no shared document tree yet (plan H.3 decision gate) | pipe-tables.json covers the table repair only

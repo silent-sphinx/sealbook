@@ -21,11 +21,16 @@ fi
 
 SEAL_WRAPPERS='lib/wasm\.ts|lib/clientCore\.ts|api/VaultClient\.kt'
 EXCLUDE='/uniffi/|/pkg/|/test/|\.test\.|Test\.kt'
-# path-suffix:rule pairs that are reviewed and allowed
-EXCEPTIONS=(
-  "lib/bookmarkExport.ts:type"
-  "lib/taskExport.ts:type"
-)
+REGISTER="$(dirname "$0")/host-exceptions.txt"
+# path-suffix:rule pairs read from the register
+EXCEPTIONS=()
+while IFS='|' read -r rule location _; do
+  rule="${rule//[[:space:]]/}"
+  [[ "$rule" == seal || "$rule" == type ]] || continue
+  path="${location#*web }"
+  path="${path//[[:space:]]/}"
+  EXCEPTIONS+=("$path:$rule")
+done < <(grep -v '^#' "$REGISTER")
 
 findings=()
 scan() {
