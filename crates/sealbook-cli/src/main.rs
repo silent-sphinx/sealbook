@@ -1262,32 +1262,16 @@ fn bookmark_json(
     Ok(sealbook_client::bookmark_write(&draft, &now)?)
 }
 
-fn bookmark_field(json: &str, field: &str) -> Option<String> {
-    serde_json::from_str::<serde_json::Value>(json)
-        .ok()
-        .and_then(|value| {
-            value
-                .get(field)
-                .and_then(|found| found.as_str())
-                .map(ToOwned::to_owned)
-        })
-}
-
 fn bookmark_url(json: &str) -> String {
-    bookmark_field(json, "url").unwrap_or_default()
+    sealbook_client::bookmark_parse("", json).url
 }
 
 fn bookmark_title(json: &str) -> String {
-    bookmark_field(json, "title")
-        .map(|title| title.trim().to_string())
-        .filter(|title| !title.is_empty())
-        .unwrap_or_else(|| "Untitled".to_string())
+    sealbook_client::bookmark_parse("", json).title
 }
 
 fn bookmark_collection_id(json: &str, fallback: Uuid) -> Uuid {
-    bookmark_field(json, "collectionId")
-        .and_then(|id| Uuid::parse_str(&id).ok())
-        .unwrap_or(fallback)
+    Uuid::parse_str(&sealbook_client::bookmark_parse("", json).collection_id).unwrap_or(fallback)
 }
 
 /// The draft a `notes update` writes, built from the stored note.

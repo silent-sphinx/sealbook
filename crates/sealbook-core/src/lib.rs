@@ -25,6 +25,7 @@ mod calendars;
 mod contact_json;
 mod contact_profile;
 mod contacts;
+mod containers;
 mod csv;
 mod error;
 mod http;
@@ -175,6 +176,7 @@ pub use tasks::{
 };
 
 pub use contact_json::{contacts_import, json_import, CoreContactFile};
+pub use containers::container_order;
 pub use csv::{csv_import, csv_parse, csv_rows, csv_write};
 pub use markdown::repair_pipe_tables;
 pub use notes_file::{

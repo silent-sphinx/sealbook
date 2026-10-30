@@ -180,13 +180,11 @@ impl SealbookClient {
             ));
         }
         out.sort_by(|a, b| {
-            if a.0 == DEFAULT_ADDRESS_BOOK_ID {
-                return std::cmp::Ordering::Less;
-            }
-            if b.0 == DEFAULT_ADDRESS_BOOK_ID {
-                return std::cmp::Ordering::Greater;
-            }
-            a.1.to_lowercase().cmp(&b.1.to_lowercase())
+            sealbook_core::container_order(
+                &DEFAULT_ADDRESS_BOOK_ID.to_string(),
+                (&a.0.to_string(), &a.1),
+                (&b.0.to_string(), &b.1),
+            )
         });
         Ok(out)
     }
@@ -263,13 +261,11 @@ impl SealbookClient {
             ));
         }
         out.sort_by(|a, b| {
-            if a.0 == DEFAULT_CALENDAR_ID {
-                return std::cmp::Ordering::Less;
-            }
-            if b.0 == DEFAULT_CALENDAR_ID {
-                return std::cmp::Ordering::Greater;
-            }
-            a.1.to_lowercase().cmp(&b.1.to_lowercase())
+            sealbook_core::container_order(
+                &DEFAULT_CALENDAR_ID.to_string(),
+                (&a.0.to_string(), &a.1),
+                (&b.0.to_string(), &b.1),
+            )
         });
         Ok(out)
     }
@@ -353,13 +349,11 @@ impl SealbookClient {
             ));
         }
         out.sort_by(|a, b| {
-            if a.0 == DEFAULT_NOTEBOOK_ID {
-                return std::cmp::Ordering::Less;
-            }
-            if b.0 == DEFAULT_NOTEBOOK_ID {
-                return std::cmp::Ordering::Greater;
-            }
-            a.1.to_lowercase().cmp(&b.1.to_lowercase())
+            sealbook_core::container_order(
+                &DEFAULT_NOTEBOOK_ID.to_string(),
+                (&a.0.to_string(), &a.1),
+                (&b.0.to_string(), &b.1),
+            )
         });
         Ok(out)
     }
@@ -470,13 +464,11 @@ impl SealbookClient {
             ));
         }
         out.sort_by(|a, b| {
-            if a.0 == DEFAULT_BOOKMARK_COLLECTION_ID {
-                return std::cmp::Ordering::Less;
-            }
-            if b.0 == DEFAULT_BOOKMARK_COLLECTION_ID {
-                return std::cmp::Ordering::Greater;
-            }
-            a.1.to_lowercase().cmp(&b.1.to_lowercase())
+            sealbook_core::container_order(
+                &DEFAULT_BOOKMARK_COLLECTION_ID.to_string(),
+                (&a.0.to_string(), &a.1),
+                (&b.0.to_string(), &b.1),
+            )
         });
         Ok(out)
     }
