@@ -2,11 +2,10 @@
   "csv": [
     {
       "@type": "Card",
-      "addresses": {
+      "anniversaries": {
         "a1": {
-          "street": [
-            "ada@analytical.example"
-          ]
+          "date": "1815-12-10",
+          "kind": "birth"
         }
       },
       "emails": {
@@ -18,11 +17,11 @@
         }
       },
       "name": {
-        "full": "Ada"
+        "full": "Ada Lovelace"
       },
       "notes": {
         "n1": {
-          "note": "Line one\r\nline two, with comma and \"quotes\"\",1815-12-10\r\n,,,,,,,\r\nGrace,Hopper,grace@navy.example,,US Navy,,,\r\nSolo,,,,,,,"
+          "note": "Line one\r\nline two, with comma and \"quotes\""
         }
       },
       "organizations": {
@@ -46,6 +45,35 @@
           "organization": "o1"
         }
       },
+      "version": "1.0"
+    },
+    {
+      "@type": "Card",
+      "emails": {
+        "e1": {
+          "address": "grace@navy.example",
+          "contexts": {
+            "private": true
+          }
+        }
+      },
+      "name": {
+        "full": "Grace Hopper"
+      },
+      "organizations": {
+        "o1": {
+          "name": "US Navy"
+        }
+      },
+      "sealbook:addressBookId": "book",
+      "version": "1.0"
+    },
+    {
+      "@type": "Card",
+      "name": {
+        "full": "Solo"
+      },
+      "sealbook:addressBookId": "book",
       "version": "1.0"
     }
   ],

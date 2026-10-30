@@ -30,7 +30,7 @@ impl Prop {
 }
 
 /// What a script engine's `trim` removes: Unicode space, plus the byte order mark.
-fn trim(text: &str) -> &str {
+pub(crate) fn trim(text: &str) -> &str {
     text.trim_matches(|c: char| (c.is_whitespace() && c != '\u{85}') || c == '\u{feff}')
 }
 

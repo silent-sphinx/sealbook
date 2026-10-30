@@ -2552,6 +2552,24 @@ pub fn core_vcard_parse(
     Ok(ContactDraftList(sealbook_core::vcard_parse(text, address_book_id)).into_ts()?)
 }
 
+/// The contacts in a CSV file, as drafts for the address book unless a row names its own.
+#[wasm_bindgen]
+pub fn core_csv_parse(text: &str, address_book_id: &str) -> Result<Ts<ContactDraftList>, JsError> {
+    Ok(ContactDraftList(sealbook_core::csv_parse(text, address_book_id)).into_ts()?)
+}
+
+/// A CSV file holding the cards, each row's book named from `books`.
+#[wasm_bindgen]
+pub fn core_csv_write(
+    contacts: Ts<ContactDraftList>,
+    books: Ts<CoreAddressBookList>,
+) -> Result<String, JsError> {
+    Ok(sealbook_core::csv_write(
+        &contacts.to_rust()?.0,
+        &books.to_rust()?.0,
+    ))
+}
+
 /// A vCard 3.0 file holding the cards.
 #[wasm_bindgen]
 pub fn core_vcard_write(contacts: Ts<ContactDraftList>) -> Result<String, JsError> {

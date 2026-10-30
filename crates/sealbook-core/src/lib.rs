@@ -24,6 +24,7 @@ mod bookmarks;
 mod calendars;
 mod contact_profile;
 mod contacts;
+mod csv;
 mod error;
 mod http;
 mod manifest;
@@ -165,6 +166,7 @@ pub use tasks::{
     UNTITLED_TASK_LIST_NAME, UNTITLED_TASK_TITLE,
 };
 
+pub use csv::{csv_parse, csv_rows, csv_write};
 pub use sealbook_protocol::{PAYLOAD_SCHEMA_VERSION, PROTOCOL_VERSION};
 pub use vcard::{vcard_parse, vcard_write};
 
