@@ -15,6 +15,11 @@ both builds already require for the wasm module and the JNI library.
 
 ## Contents
 
+- `design/tokens.json` — the colour tokens every client paints with: the
+  dark surfaces, text, danger, and the six accent pairs. Web's `index.css` and
+  `ACCENT_COLORS`, Android's `Color.kt` and `AccentKey`, and Firefox's popup
+  stylesheet are each held to it by a test, so a colour changes here first.
+
 - `v1.0.0-account-export.json` — the v1.0.0 release's own account export,
   carrying a content type that release had no parser for and a payload that is
   not JSON. Pins that both the CLI and the web importer still round-trip every
