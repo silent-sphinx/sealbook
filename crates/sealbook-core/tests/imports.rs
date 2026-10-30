@@ -335,3 +335,31 @@ fn an_all_day_event_writes_an_exclusive_end() {
         ("2026-12-24", Some("2026-12-27"))
     );
 }
+
+#[test]
+fn vcard_cards_with_nothing_to_name_them_by_are_reported() {
+    let text = "BEGIN:VCARD\nNOTE:x\nEND:VCARD\nBEGIN:VCARD\nFN:Ada\nEND:VCARD";
+    let imported = vcard_import(text, "book");
+    assert_eq!(imported.contacts.len(), 1);
+    assert_eq!(imported.skipped.len(), 1);
+    assert_eq!(imported.skipped[0].label, "Card 1");
+}
+
+#[test]
+fn csv_rows_with_nothing_to_name_them_by_are_reported() {
+    let imported = csv_import("Name,Notes\nAda,x\n,only a note\n\nBob,y", "book");
+    assert_eq!(imported.contacts.len(), 2);
+    assert_eq!(imported.skipped.len(), 1);
+    assert_eq!(imported.skipped[0].label, "Row 3");
+}
+
+#[test]
+fn rules_that_cannot_be_kept_are_counted() {
+    let event = |rule: &str| {
+        format!(
+            "BEGIN:VCALENDAR\nBEGIN:VEVENT\nSUMMARY:x\nDTSTART:20261001T090000Z\nRRULE:{rule}\nEND:VEVENT\nEND:VCALENDAR"
+        )
+    };
+    assert_eq!(ics_parse(&event("FREQ=HOURLY")).dropped_rules, 1);
+    assert_eq!(ics_parse(&event("FREQ=DAILY")).dropped_rules, 0);
+}

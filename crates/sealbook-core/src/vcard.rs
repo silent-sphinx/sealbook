@@ -5,6 +5,8 @@
 //! lenient: a line it does not know is skipped, a card with no usable name is
 //! dropped, and a damaged profile line loses the profile and not the card.
 
+use serde::{Deserialize, Serialize};
+
 use crate::contact_profile::{profile_parse, profile_write};
 use crate::contacts::{
     resolve_address_book_id, CoreChannelKind, CoreContactAddress, CoreContactChannel,
@@ -108,8 +110,33 @@ fn channel(kind: CoreChannelKind, label: Option<String>, value: String) -> CoreC
     }
 }
 
+/// A card or row the file held that had nothing to name it by, so a host can say
+/// how many were left out rather than lose them quietly.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct CoreContactSkipped {
+    pub label: String,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct CoreContactImport {
+    pub contacts: Vec<CoreContactDraft>,
+    pub skipped: Vec<CoreContactSkipped>,
+}
+
+pub(crate) const NO_NAME: &str = "it has no name, email or phone number";
+
 /// The cards in a vCard file, as drafts for `address_book_id`.
 pub fn vcard_parse(text: &str, address_book_id: &str) -> Vec<CoreContactDraft> {
+    vcard_import(text, address_book_id).contacts
+}
+
+/// The cards in a vCard file, and the ones that could not be used.
+pub fn vcard_import(text: &str, address_book_id: &str) -> CoreContactImport {
     let unfolded = text
         .replace("\r\n ", "")
         .replace("\r\n\t", "")
@@ -118,6 +145,8 @@ pub fn vcard_parse(text: &str, address_book_id: &str) -> Vec<CoreContactDraft> {
     let book = resolve_address_book_id(Some(address_book_id.to_string()));
 
     let mut cards = Vec::new();
+    let mut skipped = Vec::new();
+    let mut seen = 0;
     let mut in_card = false;
     let mut props: Vec<Prop> = Vec::new();
 
@@ -133,7 +162,8 @@ pub fn vcard_parse(text: &str, address_book_id: &str) -> Vec<CoreContactDraft> {
         }
         if line.eq_ignore_ascii_case("END:VCARD") {
             if in_card && !props.is_empty() {
-                cards.extend(build(&props, &book));
+                seen += 1;
+                keep(&mut cards, &mut skipped, seen, build(&props, &book));
             }
             in_card = false;
             props.clear();
@@ -145,10 +175,28 @@ pub fn vcard_parse(text: &str, address_book_id: &str) -> Vec<CoreContactDraft> {
     }
 
     // A single card whose BEGIN and END lines are missing.
-    if cards.is_empty() && !props.is_empty() {
-        cards.extend(build(&props, &book));
+    if cards.is_empty() && skipped.is_empty() && !props.is_empty() {
+        keep(&mut cards, &mut skipped, 1, build(&props, &book));
     }
-    cards
+    CoreContactImport {
+        contacts: cards,
+        skipped,
+    }
+}
+
+fn keep(
+    cards: &mut Vec<CoreContactDraft>,
+    skipped: &mut Vec<CoreContactSkipped>,
+    number: usize,
+    card: Option<CoreContactDraft>,
+) {
+    match card {
+        Some(card) => cards.push(card),
+        None => skipped.push(CoreContactSkipped {
+            label: format!("Card {number}"),
+            reason: NO_NAME.to_string(),
+        }),
+    }
 }
 
 fn build(props: &[Prop], book: &str) -> Option<CoreContactDraft> {
@@ -554,11 +602,12 @@ fn photo(avatar: &str) -> String {
 /// Everything above, in the shapes the bindings can carry.
 #[cfg(feature = "uniffi")]
 pub mod ffi {
+    use super::CoreContactImport;
     use crate::contacts::CoreContactDraft;
 
-    #[uniffi::export(name = "vcard_parse")]
-    pub fn vcard_parse(text: String, address_book_id: String) -> Vec<CoreContactDraft> {
-        super::vcard_parse(&text, &address_book_id)
+    #[uniffi::export(name = "vcard_import")]
+    pub fn vcard_import(text: String, address_book_id: String) -> CoreContactImport {
+        super::vcard_import(&text, &address_book_id)
     }
 
     #[uniffi::export(name = "vcard_write")]

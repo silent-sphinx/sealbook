@@ -171,9 +171,9 @@ pub use tasks::{
     UNTITLED_TASK_LIST_NAME, UNTITLED_TASK_TITLE,
 };
 
-pub use csv::{csv_parse, csv_rows, csv_write};
+pub use csv::{csv_import, csv_parse, csv_rows, csv_write};
 pub use sealbook_protocol::{PAYLOAD_SCHEMA_VERSION, PROTOCOL_VERSION};
-pub use vcard::{vcard_parse, vcard_write};
+pub use vcard::{vcard_import, vcard_parse, vcard_write, CoreContactImport, CoreContactSkipped};
 
 /// This core build, for the pinning check each client's build runs.
 ///

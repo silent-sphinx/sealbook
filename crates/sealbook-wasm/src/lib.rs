@@ -6,16 +6,16 @@ use sealbook_core::{
     CoreAccountSettings, CoreAccountSettingsDraft, CoreAddressBook, CoreAddressBookDraft,
     CoreBookmark, CoreBookmarkCollection, CoreBookmarkCollectionDraft, CoreBookmarkDraft,
     CoreBuild, CoreCalendar, CoreCalendarDraft, CoreCalendarEvent, CoreCalendarEventDraft,
-    CoreContact, CoreContactDraft, CoreContactProfile, CoreDevice, CoreDeviceSecrets,
-    CoreDeviceState, CoreExportAccount, CoreExportObject, CoreIcsExportEvent, CoreIcsImport,
-    CoreManifestEntry, CoreNote, CoreNoteDraft, CoreNotebook, CorePairPreview, CoreRecurrence,
-    CoreRoster, CoreRosterPin, CoreSealedRow, CoreSession, CoreTask, CoreTaskDraft, CoreTaskList,
-    CoreTaskListDraft, HttpRequest, HttpResponse, LoggedIn, LoginStarting, ManifestContext,
-    ManifestOutcome, ManifestPlan, ManifestSigner, OpaqueStart, PairApproval, PairJoined, PairPoll,
-    PairStatus, PasswordChange, PasswordChangeStarted, RecoverStarted, Recovering,
-    RegisterIdentity, Registering, ResealRow, RosterContext, RotationPlan, RotationState,
-    RowOutcome, RowRef, SignedManifest, SweepCursor, SweepPage, VerifiedRoster, WalkCursor,
-    WalkStep,
+    CoreContact, CoreContactDraft, CoreContactImport, CoreContactProfile, CoreDevice,
+    CoreDeviceSecrets, CoreDeviceState, CoreExportAccount, CoreExportObject, CoreIcsExportEvent,
+    CoreIcsImport, CoreManifestEntry, CoreNote, CoreNoteDraft, CoreNotebook, CorePairPreview,
+    CoreRecurrence, CoreRoster, CoreRosterPin, CoreSealedRow, CoreSession, CoreTask, CoreTaskDraft,
+    CoreTaskList, CoreTaskListDraft, HttpRequest, HttpResponse, LoggedIn, LoginStarting,
+    ManifestContext, ManifestOutcome, ManifestPlan, ManifestSigner, OpaqueStart, PairApproval,
+    PairJoined, PairPoll, PairStatus, PasswordChange, PasswordChangeStarted, RecoverStarted,
+    Recovering, RegisterIdentity, Registering, ResealRow, RosterContext, RotationPlan,
+    RotationState, RowOutcome, RowRef, SignedManifest, SweepCursor, SweepPage, VerifiedRoster,
+    WalkCursor, WalkStep,
 };
 use sealbook_crypto::RosterPin;
 use sealbook_crypto::{
@@ -2544,13 +2544,13 @@ pub fn core_can_disable_feature(
 #[serde(transparent)]
 pub struct ContactDraftList(pub Vec<CoreContactDraft>);
 
-/// The cards in a vCard file, as drafts for `address_book_id`.
+/// The cards in a vCard file, as drafts for `address_book_id`, and the ones left out.
 #[wasm_bindgen]
-pub fn core_vcard_parse(
+pub fn core_vcard_import(
     text: &str,
     address_book_id: &str,
-) -> Result<Ts<ContactDraftList>, JsError> {
-    Ok(ContactDraftList(sealbook_core::vcard_parse(text, address_book_id)).into_ts()?)
+) -> Result<Ts<CoreContactImport>, JsError> {
+    Ok(sealbook_core::vcard_import(text, address_book_id).into_ts()?)
 }
 
 #[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
@@ -2578,10 +2578,14 @@ pub fn core_ics_write(
     ))
 }
 
-/// The contacts in a CSV file, as drafts for the address book unless a row names its own.
+/// The contacts in a CSV file, as drafts for the address book unless a row names its own,
+/// and the rows left out.
 #[wasm_bindgen]
-pub fn core_csv_parse(text: &str, address_book_id: &str) -> Result<Ts<ContactDraftList>, JsError> {
-    Ok(ContactDraftList(sealbook_core::csv_parse(text, address_book_id)).into_ts()?)
+pub fn core_csv_import(
+    text: &str,
+    address_book_id: &str,
+) -> Result<Ts<CoreContactImport>, JsError> {
+    Ok(sealbook_core::csv_import(text, address_book_id).into_ts()?)
 }
 
 /// A CSV file holding the cards, each row's book named from `books`.

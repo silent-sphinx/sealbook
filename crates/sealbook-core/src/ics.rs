@@ -64,6 +64,9 @@ pub struct CoreIcsSkipped {
 pub struct CoreIcsImport {
     pub events: Vec<CoreIcsEvent>,
     pub skipped: Vec<CoreIcsSkipped>,
+    /// Events that repeat by a rule Sealbook cannot express; they import as
+    /// single events.
+    pub dropped_rules: u32,
 }
 
 /// An event to write out, with the id its `UID` is made from.
@@ -451,6 +454,7 @@ pub fn ics_parse(input: &str) -> CoreIcsImport {
     let lines = unfold(input);
     let mut events = Vec::new();
     let mut skipped = Vec::new();
+    let mut dropped_rules = 0;
     let mut index = 0;
     while index < lines.len() {
         if !trim(&lines[index]).eq_ignore_ascii_case("BEGIN:VEVENT") {
@@ -476,14 +480,21 @@ pub fn ics_parse(input: &str) -> CoreIcsImport {
             title
         };
         match event_of(&fields, &title) {
-            Ok(event) => events.push(event),
+            Ok((event, dropped)) => {
+                dropped_rules += u32::from(dropped);
+                events.push(event);
+            }
             Err(reason) => skipped.push(CoreIcsSkipped { title, reason }),
         }
     }
-    CoreIcsImport { events, skipped }
+    CoreIcsImport {
+        events,
+        skipped,
+        dropped_rules,
+    }
 }
 
-fn event_of(fields: &Fields, title: &str) -> Result<CoreIcsEvent, String> {
+fn event_of(fields: &Fields, title: &str) -> Result<(CoreIcsEvent, bool), String> {
     let start_property =
         first(fields, "DTSTART").ok_or_else(|| "it has no start date".to_string())?;
     let start = parse_moment(start_property)?;
@@ -526,9 +537,13 @@ fn event_of(fields: &Fields, title: &str) -> Result<CoreIcsEvent, String> {
         .map(|p| decode_text(&p.value))
         .filter(|text| !text.is_empty());
 
-    Ok(CoreIcsEvent {
+    let rule = first(fields, "RRULE");
+    let recurrence = rule.and_then(|rule| ics_rrule(&rule.value, &start.value));
+    let dropped = rule.is_some() && recurrence.is_none();
+
+    let event = CoreIcsEvent {
         title: title.to_string(),
-        recurrence: first(fields, "RRULE").and_then(|rule| ics_rrule(&rule.value, &start.value)),
+        recurrence,
         start: start.value,
         end: stored_end,
         start_zone: start_property.param("TZID").map(str::to_string),
@@ -538,7 +553,8 @@ fn event_of(fields: &Fields, title: &str) -> Result<CoreIcsEvent, String> {
         notes: described,
         location: first(fields, "LOCATION").and_then(|p| location_of(&p.value)),
         participants,
-    })
+    };
+    Ok((event, dropped))
 }
 
 // Export.

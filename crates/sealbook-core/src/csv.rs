@@ -13,7 +13,7 @@ use crate::contacts::{
     CoreContactAddress, CoreContactChannel, CoreContactDate, CoreContactDateKind, CoreContactDraft,
     CoreContactSocial, CoreContactWork,
 };
-use crate::vcard::trim;
+use crate::vcard::{trim, CoreContactImport, CoreContactSkipped, NO_NAME};
 
 const HEADERS: &[&str] = &[
     "Name",
@@ -180,24 +180,34 @@ fn channel(kind: CoreChannelKind, value: String) -> CoreContactChannel {
 /// The contacts in a CSV file, as drafts for `address_book_id` unless a row names
 /// its own book.
 pub fn csv_parse(text: &str, address_book_id: &str) -> Vec<CoreContactDraft> {
+    csv_import(text, address_book_id).contacts
+}
+
+/// The contacts in a CSV file, and the rows that could not be used.
+pub fn csv_import(text: &str, address_book_id: &str) -> CoreContactImport {
     let rows = csv_rows(text);
-    if rows.len() < 2 {
-        return Vec::new();
+    let mut contacts = Vec::new();
+    let mut skipped = Vec::new();
+    if rows.len() >= 2 {
+        let headers: Vec<String> = rows[0].iter().map(|h| normalize_header(h)).collect();
+        for (index, cells) in rows.iter().enumerate().skip(1) {
+            if cells.iter().all(|c| trim(c).is_empty()) {
+                continue;
+            }
+            let row = Row {
+                headers: &headers,
+                cells,
+            };
+            match read(&row, address_book_id) {
+                Some(contact) => contacts.push(contact),
+                None => skipped.push(CoreContactSkipped {
+                    label: format!("Row {}", index + 1),
+                    reason: NO_NAME.to_string(),
+                }),
+            }
+        }
     }
-    let headers: Vec<String> = rows[0].iter().map(|h| normalize_header(h)).collect();
-    rows[1..]
-        .iter()
-        .filter(|cells| cells.iter().any(|c| !trim(c).is_empty()))
-        .filter_map(|cells| {
-            read(
-                &Row {
-                    headers: &headers,
-                    cells,
-                },
-                address_book_id,
-            )
-        })
-        .collect()
+    CoreContactImport { contacts, skipped }
 }
 
 fn read(row: &Row, default_book: &str) -> Option<CoreContactDraft> {
@@ -809,11 +819,12 @@ pub fn csv_write(contacts: &[CoreContactDraft], books: &[CoreAddressBook]) -> St
 /// Everything above, in the shapes the bindings can carry.
 #[cfg(feature = "uniffi")]
 pub mod ffi {
+    use super::CoreContactImport;
     use crate::contacts::{CoreAddressBook, CoreContactDraft};
 
-    #[uniffi::export(name = "csv_parse")]
-    pub fn csv_parse(text: String, address_book_id: String) -> Vec<CoreContactDraft> {
-        super::csv_parse(&text, &address_book_id)
+    #[uniffi::export(name = "csv_import")]
+    pub fn csv_import(text: String, address_book_id: String) -> CoreContactImport {
+        super::csv_import(&text, &address_book_id)
     }
 
     #[uniffi::export(name = "csv_write")]

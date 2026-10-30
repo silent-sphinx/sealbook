@@ -164,6 +164,7 @@
     ]
   },
   "ics_parsed": {
+    "dropped_rules": 0,
     "events": [
       {
         "end": "2026-10-01T09:15:00Z",
