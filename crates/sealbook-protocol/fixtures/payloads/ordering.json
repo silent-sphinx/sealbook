@@ -1,0 +1,267 @@
+{
+  "cases": [
+    {
+      "name": "names ignore case",
+      "rule": "name",
+      "items": [
+        {
+          "id": "1",
+          "name": "bob",
+          "pinned": false,
+          "stamp": ""
+        },
+        {
+          "id": "2",
+          "name": "Alice",
+          "pinned": false,
+          "stamp": ""
+        },
+        {
+          "id": "3",
+          "name": "charlie",
+          "pinned": false,
+          "stamp": ""
+        }
+      ],
+      "order": [
+        "2",
+        "1",
+        "3"
+      ]
+    },
+    {
+      "name": "names ignore accents",
+      "rule": "name",
+      "items": [
+        {
+          "id": "1",
+          "name": "Zoe",
+          "pinned": false,
+          "stamp": ""
+        },
+        {
+          "id": "2",
+          "name": "Émile",
+          "pinned": false,
+          "stamp": ""
+        },
+        {
+          "id": "3",
+          "name": "Emma",
+          "pinned": false,
+          "stamp": ""
+        }
+      ],
+      "order": [
+        "2",
+        "3",
+        "1"
+      ]
+    },
+    {
+      "name": "digits order as text",
+      "rule": "name",
+      "items": [
+        {
+          "id": "1",
+          "name": "Room 10",
+          "pinned": false,
+          "stamp": ""
+        },
+        {
+          "id": "2",
+          "name": "Room 9",
+          "pinned": false,
+          "stamp": ""
+        },
+        {
+          "id": "3",
+          "name": "Room 1",
+          "pinned": false,
+          "stamp": ""
+        }
+      ],
+      "order": [
+        "3",
+        "1",
+        "2"
+      ]
+    },
+    {
+      "name": "names that fold together fall back to the raw name",
+      "rule": "name",
+      "items": [
+        {
+          "id": "a",
+          "name": "Café",
+          "pinned": false,
+          "stamp": ""
+        },
+        {
+          "id": "b",
+          "name": "Cafe",
+          "pinned": false,
+          "stamp": ""
+        }
+      ],
+      "order": [
+        "b",
+        "a"
+      ]
+    },
+    {
+      "name": "the default container leads",
+      "rule": "containers",
+      "default_id": "d",
+      "items": [
+        {
+          "id": "x",
+          "name": "Alpha",
+          "pinned": false,
+          "stamp": ""
+        },
+        {
+          "id": "d",
+          "name": "Zulu",
+          "pinned": false,
+          "stamp": ""
+        },
+        {
+          "id": "y",
+          "name": "beta",
+          "pinned": false,
+          "stamp": ""
+        }
+      ],
+      "order": [
+        "d",
+        "x",
+        "y"
+      ]
+    },
+    {
+      "name": "recency puts the latest edit first",
+      "rule": "recency",
+      "items": [
+        {
+          "id": "old",
+          "name": "A",
+          "pinned": false,
+          "stamp": "2026-01-01T00:00:00Z"
+        },
+        {
+          "id": "new",
+          "name": "B",
+          "pinned": false,
+          "stamp": "2026-06-01T00:00:00Z"
+        }
+      ],
+      "order": [
+        "new",
+        "old"
+      ]
+    },
+    {
+      "name": "a missing or unreadable stamp sorts last, then by name",
+      "rule": "recency",
+      "items": [
+        {
+          "id": "none",
+          "name": "b",
+          "pinned": false,
+          "stamp": ""
+        },
+        {
+          "id": "bad",
+          "name": "a",
+          "pinned": false,
+          "stamp": "not a date"
+        },
+        {
+          "id": "good",
+          "name": "c",
+          "pinned": false,
+          "stamp": "2026-01-01T00:00:00Z"
+        }
+      ],
+      "order": [
+        "good",
+        "bad",
+        "none"
+      ]
+    },
+    {
+      "name": "a stamp in another zone compares by the instant",
+      "rule": "recency",
+      "items": [
+        {
+          "id": "a",
+          "name": "A",
+          "pinned": false,
+          "stamp": "2026-01-01T01:00:00+02:00"
+        },
+        {
+          "id": "b",
+          "name": "B",
+          "pinned": false,
+          "stamp": "2026-01-01T00:30:00Z"
+        }
+      ],
+      "order": [
+        "b",
+        "a"
+      ]
+    },
+    {
+      "name": "pinned entries lead when pins count",
+      "rule": "recency_pinned",
+      "items": [
+        {
+          "id": "new",
+          "name": "B",
+          "pinned": false,
+          "stamp": "2026-03-01T00:00:00Z"
+        },
+        {
+          "id": "pin",
+          "name": "C",
+          "pinned": true,
+          "stamp": "2025-01-01T00:00:00Z"
+        },
+        {
+          "id": "old",
+          "name": "A",
+          "pinned": false,
+          "stamp": "2026-01-01T00:00:00Z"
+        }
+      ],
+      "order": [
+        "pin",
+        "new",
+        "old"
+      ]
+    },
+    {
+      "name": "pins are ignored when they do not count",
+      "rule": "recency",
+      "items": [
+        {
+          "id": "new",
+          "name": "B",
+          "pinned": false,
+          "stamp": "2026-03-01T00:00:00Z"
+        },
+        {
+          "id": "pin",
+          "name": "C",
+          "pinned": true,
+          "stamp": "2025-01-01T00:00:00Z"
+        }
+      ],
+      "order": [
+        "new",
+        "pin"
+      ]
+    }
+  ]
+}

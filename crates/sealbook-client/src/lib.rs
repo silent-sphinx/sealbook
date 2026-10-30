@@ -43,7 +43,7 @@ pub use sealbook_core::{
     CoreBookmarkDraft, CoreCalendar, CoreCalendarDraft, CoreCalendarEvent, CoreCalendarEventDraft,
     CoreChannelKind, CoreContact, CoreContactChannel, CoreContactDraft, CoreContactFile,
     CoreContactImport, CoreExportAccount, CoreExportObject, CoreNote, CoreNoteAttachment,
-    CoreNoteDraft, CoreNotebook, CoreRecurrence, PairPoll, PAIR_POLL_INTERVAL_MS,
+    CoreNoteDraft, CoreNotebook, CoreOrderItem, CoreRecurrence, PairPoll, PAIR_POLL_INTERVAL_MS,
 };
 
 pub use sealbook_protocol::{

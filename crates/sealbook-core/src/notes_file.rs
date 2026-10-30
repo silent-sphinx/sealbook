@@ -11,7 +11,7 @@ use crate::notes::{
     note_write, notebook_name_by_id, resolve_notebook_id, CoreNoteDraft, CoreNotebook,
     UNTITLED_NOTE_TITLE,
 };
-use crate::recurrence::days_from_civil;
+use crate::order::{name_key, stamp_millis};
 use crate::CoreError;
 
 /// A bundle holds many notes in one file, so each needs a boundary a note body
@@ -78,40 +78,6 @@ fn unquote(value: &str) -> String {
     trimmed.to_string()
 }
 
-/// Milliseconds since the epoch of an RFC 3339 stamp, 0 when it is not one.
-fn edited_millis(stamp: Option<&str>) -> i64 {
-    let parse = |stamp: &str| -> Option<i64> {
-        let (date, time) = stamp.split_once(['T', 't'])?;
-        let mut day = date.split('-');
-        let (y, m, d) = (
-            day.next()?.parse().ok()?,
-            day.next()?.parse().ok()?,
-            day.next()?.parse().ok()?,
-        );
-        let split = time.find(['Z', 'z', '+', '-']).unwrap_or(time.len());
-        let (clock, zone) = time.split_at(split);
-        let mut parts = clock.split(':');
-        let hours: i64 = parts.next()?.parse().ok()?;
-        let minutes: i64 = parts.next()?.parse().ok()?;
-        let seconds: f64 = parts.next()?.parse().ok()?;
-        let offset = match zone.as_bytes().first() {
-            Some(b'+' | b'-') => {
-                let (h, m) = zone[1..].split_once(':')?;
-                let minutes = h.parse::<i64>().ok()? * 60 + m.parse::<i64>().ok()?;
-                if zone.starts_with('-') {
-                    -minutes
-                } else {
-                    minutes
-                }
-            }
-            _ => 0,
-        };
-        let days = days_from_civil(y, m, d);
-        Some(((days * 24 + hours) * 60 + minutes - offset) * 60_000 + (seconds * 1000.0) as i64)
-    };
-    stamp.and_then(parse).unwrap_or(0)
-}
-
 /// Pinned first, then most recently edited, then by title so the order is total.
 fn sorted(notes: &[CoreNoteFileEntry]) -> Vec<&CoreNoteFileEntry> {
     let mut list: Vec<&CoreNoteFileEntry> = notes.iter().collect();
@@ -119,10 +85,10 @@ fn sorted(notes: &[CoreNoteFileEntry]) -> Vec<&CoreNoteFileEntry> {
         let key = |n: &CoreNoteFileEntry| {
             (
                 n.pinned != Some(true),
-                std::cmp::Reverse(edited_millis(
+                std::cmp::Reverse(stamp_millis(
                     n.updated_at.as_deref().or(n.created_at.as_deref()),
                 )),
-                n.title.to_lowercase(),
+                name_key(&n.title),
             )
         };
         key(a).cmp(&key(b))

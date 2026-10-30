@@ -179,13 +179,7 @@ impl SealbookClient {
                 sealbook_core::address_book_parse(&obj.id.to_string(), &obj.plaintext).name,
             ));
         }
-        out.sort_by(|a, b| {
-            sealbook_core::container_order(
-                &DEFAULT_ADDRESS_BOOK_ID.to_string(),
-                (&a.0.to_string(), &a.1),
-                (&b.0.to_string(), &b.1),
-            )
-        });
+        out = ordered_containers(&DEFAULT_ADDRESS_BOOK_ID.to_string(), out);
         Ok(out)
     }
 
@@ -260,13 +254,7 @@ impl SealbookClient {
                 sealbook_core::calendar_parse(&obj.id.to_string(), &obj.plaintext).name,
             ));
         }
-        out.sort_by(|a, b| {
-            sealbook_core::container_order(
-                &DEFAULT_CALENDAR_ID.to_string(),
-                (&a.0.to_string(), &a.1),
-                (&b.0.to_string(), &b.1),
-            )
-        });
+        out = ordered_containers(&DEFAULT_CALENDAR_ID.to_string(), out);
         Ok(out)
     }
 
@@ -348,13 +336,7 @@ impl SealbookClient {
                 sealbook_core::notebook_parse(&obj.id.to_string(), &obj.plaintext).name,
             ));
         }
-        out.sort_by(|a, b| {
-            sealbook_core::container_order(
-                &DEFAULT_NOTEBOOK_ID.to_string(),
-                (&a.0.to_string(), &a.1),
-                (&b.0.to_string(), &b.1),
-            )
-        });
+        out = ordered_containers(&DEFAULT_NOTEBOOK_ID.to_string(), out);
         Ok(out)
     }
 
@@ -463,13 +445,7 @@ impl SealbookClient {
                 sealbook_core::bookmark_collection_parse(&obj.id.to_string(), &obj.plaintext).name,
             ));
         }
-        out.sort_by(|a, b| {
-            sealbook_core::container_order(
-                &DEFAULT_BOOKMARK_COLLECTION_ID.to_string(),
-                (&a.0.to_string(), &a.1),
-                (&b.0.to_string(), &b.1),
-            )
-        });
+        out = ordered_containers(&DEFAULT_BOOKMARK_COLLECTION_ID.to_string(), out);
         Ok(out)
     }
 
@@ -907,4 +883,19 @@ mod tests {
     // The envelope format itself is covered in `sealbook_protocol::envelope`,
     // which is where all three clients read it from. The walk and the row
     // classification are covered in `sealbook_core::sync`.
+}
+
+fn ordered_containers(default_id: &str, rows: Vec<(Uuid, String)>) -> Vec<(Uuid, String)> {
+    let items: Vec<sealbook_core::CoreOrderItem> = rows
+        .iter()
+        .map(|(id, name)| sealbook_core::CoreOrderItem {
+            id: id.to_string(),
+            name: name.clone(),
+            ..Default::default()
+        })
+        .collect();
+    sealbook_core::order_containers(default_id, &items)
+        .iter()
+        .filter_map(|id| rows.iter().find(|(row, _)| row.to_string() == *id).cloned())
+        .collect()
 }

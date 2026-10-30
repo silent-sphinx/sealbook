@@ -25,7 +25,6 @@ mod calendars;
 mod contact_json;
 mod contact_profile;
 mod contacts;
-mod containers;
 mod csv;
 mod error;
 mod http;
@@ -34,6 +33,7 @@ mod manifest;
 mod markdown;
 mod notes;
 mod notes_file;
+mod order;
 mod pairing;
 mod payload;
 mod recurrence;
@@ -176,13 +176,13 @@ pub use tasks::{
 };
 
 pub use contact_json::{contacts_import, json_import, CoreContactFile};
-pub use containers::container_order;
 pub use csv::{csv_import, csv_parse, csv_rows, csv_write};
 pub use markdown::repair_pipe_tables;
 pub use notes_file::{
     notes_import, notes_write_json, notes_write_markdown, CoreNoteFile, CoreNoteFileEntry,
     CoreNoteSkipped,
 };
+pub use order::{name_key, order_by_name, order_by_recency, order_containers, CoreOrderItem};
 pub use sealbook_protocol::{PAYLOAD_SCHEMA_VERSION, PROTOCOL_VERSION};
 pub use vcard::{vcard_import, vcard_parse, vcard_write, CoreContactImport, CoreContactSkipped};
 

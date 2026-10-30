@@ -16,3 +16,5 @@ mirror | web and Android calendar search and date labels | zone-aware, core has 
 mirror | Android ImportExportManager MAX_IMPORT_BYTES | file-size precheck before the dialog reads the file; core re-checks | core tests
 mirror | web and Android noteFitsObjectLimit, sortNotes | editor and list responsiveness | web noteParity.test.ts, Android NoteTest
 mirror | web markdown.ts and Android Markdown.kt | display parser twin, no shared document tree yet (plan H.3 decision gate) | pipe-tables.json covers the table repair only
+mirror | web sortNotes, web sortTasks | web ignores pins (favouriting was removed there); tasks order by due time, which needs the device zone | web noteParity.test.ts, taskParity.test.ts
+mirror | web and Android calendar event order | orders by start time in the device zone | none, display only

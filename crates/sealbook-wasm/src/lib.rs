@@ -2711,3 +2711,37 @@ pub fn core_account_export_parse(document: &str) -> Result<Ts<CoreAccountImport>
 pub fn core_account_export_filename(username: &str, day: &str) -> String {
     sealbook_core::account_export_filename(username, day)
 }
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct CoreOrderItemList(pub Vec<sealbook_core::CoreOrderItem>);
+
+/// Ids by name, without regard to case or accents.
+#[wasm_bindgen]
+pub fn core_order_by_name(items: Ts<CoreOrderItemList>) -> Result<Vec<String>, JsError> {
+    Ok(sealbook_core::order_by_name(&items.to_rust()?.0))
+}
+
+/// Ids with the default container first, then the rest by name.
+#[wasm_bindgen]
+pub fn core_order_containers(
+    default_id: &str,
+    items: Ts<CoreOrderItemList>,
+) -> Result<Vec<String>, JsError> {
+    Ok(sealbook_core::order_containers(
+        default_id,
+        &items.to_rust()?.0,
+    ))
+}
+
+/// Ids most recently edited first, pinned entries leading when asked.
+#[wasm_bindgen]
+pub fn core_order_by_recency(
+    items: Ts<CoreOrderItemList>,
+    pinned_first: bool,
+) -> Result<Vec<String>, JsError> {
+    Ok(sealbook_core::order_by_recency(
+        &items.to_rust()?.0,
+        pinned_first,
+    ))
+}
