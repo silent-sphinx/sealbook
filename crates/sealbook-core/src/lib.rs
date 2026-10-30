@@ -32,6 +32,7 @@ mod http;
 mod ics;
 mod manifest;
 mod markdown;
+mod messages;
 mod notes;
 mod notes_file;
 mod order;
@@ -180,6 +181,10 @@ pub use contact_json::{contacts_import, json_import, CoreContactFile};
 pub use contact_search::{ContactIndex, CoreBookName, CoreContactSource};
 pub use csv::{csv_import, csv_parse, csv_rows, csv_write};
 pub use markdown::repair_pipe_tables;
+pub use messages::{
+    attachment_message, auth_message, collection_busy_message, error_message, pair_message,
+    recovery_pending_message, roster_too_old_message, rotation_message,
+};
 pub use notes_file::{
     notes_import, notes_write_json, notes_write_markdown, CoreNoteFile, CoreNoteFileEntry,
     CoreNoteSkipped,

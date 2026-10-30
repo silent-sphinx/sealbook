@@ -1,0 +1,264 @@
+{
+  "cases": [
+    {
+      "name": "revoking self",
+      "error": {
+        "kind": "Rotation",
+        "refusal": {
+          "refusal": "RevokingSelf"
+        }
+      },
+      "message": "You can't revoke the device you're signed in on."
+    },
+    {
+      "name": "not in roster",
+      "error": {
+        "kind": "Rotation",
+        "refusal": {
+          "refusal": "NotInRoster"
+        }
+      },
+      "message": "That device has already been removed."
+    },
+    {
+      "name": "last device",
+      "error": {
+        "kind": "Rotation",
+        "refusal": {
+          "refusal": "LastDevice"
+        }
+      },
+      "message": "You can't revoke the last device."
+    },
+    {
+      "name": "not enrolled",
+      "error": {
+        "kind": "Rotation",
+        "refusal": {
+          "refusal": "NotEnrolled"
+        }
+      },
+      "message": "This device isn't in the account's device list. Sign in again."
+    },
+    {
+      "name": "unreadable",
+      "error": {
+        "kind": "Rotation",
+        "refusal": {
+          "refusal": "Unreadable",
+          "object": "00000000-0000-0000-0000-000000000001",
+          "reason": "Key"
+        }
+      },
+      "message": "One object in this vault can't be re-encrypted, so the key wasn't rotated and nothing was changed. Sign in on a device that can read it."
+    },
+    {
+      "name": "pair no anchor",
+      "error": {
+        "kind": "Pair",
+        "refusal": {
+          "refusal": "NoAnchor"
+        }
+      },
+      "message": "The server sent no device list for this account to anchor on, so there is nothing to pair against."
+    },
+    {
+      "name": "pair server code",
+      "error": {
+        "kind": "Pair",
+        "refusal": {
+          "refusal": "ServerCode"
+        }
+      },
+      "message": "This device and the new one don't agree on the account's devices. Start the pairing again."
+    },
+    {
+      "name": "pair expired",
+      "error": {
+        "kind": "Pair",
+        "refusal": {
+          "refusal": "Expired"
+        }
+      },
+      "message": "That pairing code has expired. Start the pairing again on the new device."
+    },
+    {
+      "name": "pair key rotated",
+      "error": {
+        "kind": "Pair",
+        "refusal": {
+          "refusal": "KeyRotated",
+          "held": 1,
+          "roster": 2
+        }
+      },
+      "message": "The vault key has been rotated since this device fetched it. Sign in again and approve the new device after that."
+    },
+    {
+      "name": "pair already enrolled",
+      "error": {
+        "kind": "Pair",
+        "refusal": {
+          "refusal": "AlreadyEnrolled",
+          "device": "00000000-0000-0000-0000-000000000001"
+        }
+      },
+      "message": "That device is already enrolled."
+    },
+    {
+      "name": "pair roster moved",
+      "error": {
+        "kind": "Pair",
+        "refusal": {
+          "refusal": "RosterMoved",
+          "joined_at": 4,
+          "now": 7
+        }
+      },
+      "message": "The new device started pairing against device list 4 but this account is now on 7. Start the pairing again."
+    },
+    {
+      "name": "pair typed code",
+      "error": {
+        "kind": "Pair",
+        "refusal": {
+          "refusal": "TypedCode"
+        }
+      },
+      "message": "That code doesn't match the one for this pairing."
+    },
+    {
+      "name": "auth username",
+      "error": {
+        "kind": "Auth",
+        "refusal": {
+          "refusal": "Username"
+        }
+      },
+      "message": "A name can be 3 to 64 characters of letters, digits, dot, dash or underscore, and nothing else."
+    },
+    {
+      "name": "auth phrase",
+      "error": {
+        "kind": "Auth",
+        "refusal": {
+          "refusal": "Phrase"
+        }
+      },
+      "message": "That isn't a 24-word recovery phrase. Check for a missing or misspelled word."
+    },
+    {
+      "name": "auth phrase mismatch",
+      "error": {
+        "kind": "Auth",
+        "refusal": {
+          "refusal": "PhraseMismatch"
+        }
+      },
+      "message": "That recovery phrase doesn't open this account. Check the account name and the words."
+    },
+    {
+      "name": "auth no roster",
+      "error": {
+        "kind": "Auth",
+        "refusal": {
+          "refusal": "NoRoster"
+        }
+      },
+      "message": "The server sent no device list for this account, so the devices this would restore access alongside can't be checked."
+    },
+    {
+      "name": "auth challenge",
+      "error": {
+        "kind": "Auth",
+        "refusal": {
+          "refusal": "Challenge"
+        }
+      },
+      "message": "The server's answer wasn't in the shape a recovery needs. Try again."
+    },
+    {
+      "name": "auth collection moved",
+      "error": {
+        "kind": "Auth",
+        "refusal": {
+          "refusal": "CollectionMoved",
+          "chose": "00000000-0000-0000-0000-000000000001",
+          "served": "00000000-0000-0000-0000-000000000001"
+        }
+      },
+      "message": "The server answered with a different vault than the one this device just signed for. Nothing was saved."
+    },
+    {
+      "name": "auth no key wrap",
+      "error": {
+        "kind": "Auth",
+        "refusal": {
+          "refusal": "NoKeyWrap"
+        }
+      },
+      "message": "This device no longer has access to the vault. It may have been removed."
+    },
+    {
+      "name": "attachment empty",
+      "error": {
+        "kind": "Attachment",
+        "refusal": {
+          "refusal": "Empty"
+        }
+      },
+      "message": "That file is empty, so there is nothing to attach."
+    },
+    {
+      "name": "attachment too large",
+      "error": {
+        "kind": "Attachment",
+        "refusal": {
+          "refusal": "TooLarge",
+          "size": 15728640,
+          "max": 10485760
+        }
+      },
+      "message": "That file is 15 MB, over the 10 MB limit for an attachment."
+    },
+    {
+      "name": "attachment mismatch",
+      "error": {
+        "kind": "Attachment",
+        "refusal": {
+          "refusal": "MissingNonce"
+        }
+      },
+      "message": "The server's copy of this attachment doesn't match what this device expected, so it wasn't opened. Try again."
+    },
+    {
+      "name": "roster too old",
+      "error": {
+        "kind": "RosterTooOld"
+      },
+      "message": "This device has been away too long to check the account's device list. Pair it again to carry on."
+    },
+    {
+      "name": "collection busy",
+      "error": {
+        "kind": "CollectionBusy"
+      },
+      "message": "The vault kept changing while it was being read. Another device may be writing to it; try again."
+    },
+    {
+      "name": "recovery pending",
+      "error": {
+        "kind": "RecoveryRotationPending"
+      },
+      "message": "This account has an unfinished recovery. Replace the vault key to finish it, which issues a new recovery phrase. Nothing can be saved until then."
+    },
+    {
+      "name": "no sentence",
+      "error": {
+        "kind": "Manifest",
+        "detail": "x"
+      },
+      "message": null
+    }
+  ]
+}

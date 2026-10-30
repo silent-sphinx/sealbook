@@ -2746,6 +2746,15 @@ pub fn core_order_by_recency(
     ))
 }
 
+/// The sentence core words for an error, given the JSON it crossed in.
+///
+/// `None` for text that is not a core error, and for one with no sentence.
+#[wasm_bindgen]
+pub fn core_error_message(raw: &str) -> Option<String> {
+    let error: sealbook_core::CoreError = serde_json::from_str(raw).ok()?;
+    sealbook_core::error_message(&error)
+}
+
 #[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
 #[serde(transparent)]
 pub struct CoreContactSourceList(pub Vec<sealbook_core::CoreContactSource>);
