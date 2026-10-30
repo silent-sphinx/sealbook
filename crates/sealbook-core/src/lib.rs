@@ -37,6 +37,7 @@ mod settings;
 mod state;
 mod sync;
 mod tasks;
+mod vcard;
 
 // uniffi's scaffolding and custom types have to sit in the crate root.
 #[cfg(feature = "uniffi")]
@@ -165,6 +166,7 @@ pub use tasks::{
 };
 
 pub use sealbook_protocol::{PAYLOAD_SCHEMA_VERSION, PROTOCOL_VERSION};
+pub use vcard::{vcard_parse, vcard_write};
 
 /// This core build, for the pinning check each client's build runs.
 ///

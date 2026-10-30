@@ -2541,6 +2541,25 @@ pub fn core_can_disable_feature(
 
 #[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
 #[serde(transparent)]
+pub struct ContactDraftList(pub Vec<CoreContactDraft>);
+
+/// The cards in a vCard file, as drafts for `address_book_id`.
+#[wasm_bindgen]
+pub fn core_vcard_parse(
+    text: &str,
+    address_book_id: &str,
+) -> Result<Ts<ContactDraftList>, JsError> {
+    Ok(ContactDraftList(sealbook_core::vcard_parse(text, address_book_id)).into_ts()?)
+}
+
+/// A vCard 3.0 file holding the cards.
+#[wasm_bindgen]
+pub fn core_vcard_write(contacts: Ts<ContactDraftList>) -> Result<String, JsError> {
+    Ok(sealbook_core::vcard_write(&contacts.to_rust()?.0))
+}
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
 pub struct ExportObjectList(pub Vec<CoreExportObject>);
 
 /// The account export document for a vault.
