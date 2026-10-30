@@ -217,6 +217,39 @@ pub fn pair_status(status: u16, body: &str) -> Result<PairStatus, CoreError> {
     })
 }
 
+/// How long a joining device waits between polls.
+pub const PAIR_POLL_INTERVAL_MS: u32 = 2000;
+
+/// What a joining device does after a poll.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
+pub enum PairPoll {
+    /// The pairing was approved: stop polling and finish signing in.
+    Ready,
+    /// The code is gone: stop polling and tell the user to start again.
+    Expired,
+    /// Nothing to act on yet: ask again after this long.
+    Wait { after_ms: u32 },
+}
+
+/// The decision a poll's outcome leads to, so no host chooses its own.
+///
+/// `status` is `None` when the request never got an answer. Everything that is
+/// neither approval nor expiry is a wait: a dropped request, a server error and
+/// an unreadable body say nothing about the pairing, and giving up on one would
+/// abandon a pairing the user is still waiting to approve.
+pub fn pair_poll(status: Option<u16>, body: &str) -> PairPoll {
+    let wait = PairPoll::Wait {
+        after_ms: PAIR_POLL_INTERVAL_MS,
+    };
+    match status.map(|status| pair_status(status, body)) {
+        Some(Ok(PairStatus::Ready)) => PairPoll::Ready,
+        Some(Ok(PairStatus::Expired)) => PairPoll::Expired,
+        Some(Ok(PairStatus::Pending)) | Some(Err(_)) | None => wait,
+    }
+}
+
 /// The path that looks a pairing up, from a code as the user typed it or from a
 /// pair id.
 ///
@@ -464,10 +497,39 @@ fn decode(text: &str, what: &str) -> Result<Vec<u8>, CoreError> {
 /// Separate because uniffi lowers records by value rather than borrowing them,
 /// and takes the device's signing secrets as base64 because that is how Kotlin
 /// holds them.
+#[cfg(test)]
+mod poll_tests {
+    use super::*;
+
+    fn served(status: &str) -> String {
+        format!(
+            r#"{{"pair_id":"00000000-0000-0000-0000-000000000001","status":"{status}","confirm":"0000-0000"}}"#
+        )
+    }
+
+    #[test]
+    fn approval_and_expiry_end_the_poll() {
+        assert_eq!(pair_poll(Some(200), &served("ready")), PairPoll::Ready);
+        assert_eq!(pair_poll(Some(404), ""), PairPoll::Expired);
+        assert_eq!(pair_poll(Some(200), &served("expired")), PairPoll::Expired);
+    }
+
+    #[test]
+    fn anything_else_waits_the_same_interval() {
+        let wait = PairPoll::Wait {
+            after_ms: PAIR_POLL_INTERVAL_MS,
+        };
+        assert_eq!(pair_poll(Some(200), &served("pending")), wait);
+        assert_eq!(pair_poll(None, ""), wait);
+        assert_eq!(pair_poll(Some(500), "oops"), wait);
+        assert_eq!(pair_poll(Some(200), "not json"), wait);
+    }
+}
+
 #[cfg(feature = "uniffi")]
 pub mod ffi {
     use super::{
-        CoreDevice, CoreError, CorePairPreview, PairApproval, PairJoined, PairStatus,
+        CoreDevice, CoreError, CorePairPreview, PairApproval, PairJoined, PairPoll, PairStatus,
         RosterContext, VerifiedRoster,
     };
     use crate::CoreSession;
@@ -512,6 +574,11 @@ pub mod ffi {
     #[uniffi::export]
     pub fn pair_join_accept(device: CoreDevice, body: String) -> Result<PairJoined, CoreError> {
         super::pair_join_accept(&device, &body)
+    }
+
+    #[uniffi::export]
+    pub fn pair_poll(status: Option<u16>, body: String) -> PairPoll {
+        super::pair_poll(status, &body)
     }
 
     #[uniffi::export]

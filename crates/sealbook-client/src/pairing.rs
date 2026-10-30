@@ -5,7 +5,7 @@
 //! of it agrees, whether the roster has moved under the pairing, and what an
 //! approval signs. This module moves bytes and persists what comes back.
 
-use sealbook_core::{PairStatus, RosterContext};
+use sealbook_core::{PairPoll, PairStatus, RosterContext};
 use sealbook_crypto::DeviceSigningSecrets;
 use sealbook_protocol::{PairStatusResponse, RosterBody};
 use uuid::Uuid;
@@ -67,6 +67,22 @@ impl SealbookClient {
         let url = format!("{server}{}", sealbook_core::pair_path(pair_code));
         let (status, body) = self.get_status(&url).await?;
         Ok(sealbook_core::pair_status(status, &body)? == PairStatus::Ready)
+    }
+
+    /// One poll of a pairing, as the decision core makes of it. A request that
+    /// gets no answer is a wait, not an error.
+    pub async fn pair_poll(&self, pair_code: &str) -> Result<PairPoll, ClientError> {
+        let server = self
+            .state
+            .as_ref()
+            .ok_or(ClientError::NoState)?
+            .server
+            .clone();
+        let url = format!("{server}{}", sealbook_core::pair_path(pair_code));
+        Ok(match self.get_status(&url).await {
+            Ok((status, body)) => sealbook_core::pair_poll(Some(status), &body),
+            Err(_) => sealbook_core::pair_poll(None, ""),
+        })
     }
 
     pub async fn pair_preview(&self, pair_code: &str) -> Result<PairStatusResponse, ClientError> {

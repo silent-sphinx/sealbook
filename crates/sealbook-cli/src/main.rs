@@ -370,11 +370,20 @@ async fn main() -> Result<()> {
                 "Confirm both screens show: {}",
                 sealbook_client::format_confirmation(&confirm)
             );
+            let mut wait = Duration::from_millis(sealbook_client::PAIR_POLL_INTERVAL_MS.into());
             loop {
-                tokio::time::sleep(Duration::from_secs(2)).await;
-                if client.pair_ready(&pair_id).await.unwrap_or(false) {
-                    println!("approved. sign in with: sealbook login");
-                    break;
+                tokio::time::sleep(wait).await;
+                match client.pair_poll(&pair_id).await? {
+                    sealbook_client::PairPoll::Ready => {
+                        println!("approved. sign in with: sealbook login");
+                        break;
+                    }
+                    sealbook_client::PairPoll::Expired => {
+                        anyhow::bail!("that pairing request expired; start again")
+                    }
+                    sealbook_client::PairPoll::Wait { after_ms } => {
+                        wait = Duration::from_millis(after_ms.into());
+                    }
                 }
             }
         }

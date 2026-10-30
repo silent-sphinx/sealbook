@@ -11,7 +11,7 @@ use sealbook_core::{
     CoreNoteDraft, CoreNotebook, CorePairPreview, CoreRecurrence, CoreRoster, CoreRosterPin,
     CoreSealedRow, CoreSession, CoreTask, CoreTaskDraft, CoreTaskList, CoreTaskListDraft,
     HttpRequest, HttpResponse, LoggedIn, LoginStarting, ManifestContext, ManifestOutcome,
-    ManifestPlan, ManifestSigner, OpaqueStart, PairApproval, PairJoined, PairStatus,
+    ManifestPlan, ManifestSigner, OpaqueStart, PairApproval, PairJoined, PairPoll, PairStatus,
     PasswordChange, PasswordChangeStarted, RecoverStarted, Recovering, RegisterIdentity,
     Registering, ResealRow, RosterContext, RotationPlan, RotationState, RowOutcome, RowRef,
     SignedManifest, SweepCursor, SweepPage, VerifiedRoster, WalkCursor, WalkStep,
@@ -1382,6 +1382,13 @@ pub fn core_pair_status(status: u16, body: &str) -> Result<Ts<PairStatus>, JsErr
     Ok(sealbook_core::pair_status(status, body)
         .map_err(core_err)?
         .into_ts()?)
+}
+
+/// What a joining device does after a poll. `status` is absent when the request
+/// got no answer.
+#[wasm_bindgen]
+pub fn core_pair_poll(status: Option<u16>, body: &str) -> Result<Ts<PairPoll>, JsError> {
+    Ok(sealbook_core::pair_poll(status, body).into_ts()?)
 }
 
 /// The server-relative path that looks a pairing up, from a code as typed.

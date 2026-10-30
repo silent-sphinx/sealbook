@@ -127,8 +127,9 @@ pub use notes::{
 };
 pub use pairing::{
     confirmation_groups, format_confirmation, normalize_confirmation, pair_approve,
-    pair_approve_path, pair_join_accept, pair_join_body, pair_path, pair_preview, pair_status,
-    CorePairPreview, PairApproval, PairJoined, PairRefusal, PairStatus,
+    pair_approve_path, pair_join_accept, pair_join_body, pair_path, pair_poll, pair_preview,
+    pair_status, CorePairPreview, PairApproval, PairJoined, PairPoll, PairRefusal, PairStatus,
+    PAIR_POLL_INTERVAL_MS,
 };
 pub use payload::write_payload;
 pub use recurrence::{is_calendar_day, recurrence_days, recurrence_next};
