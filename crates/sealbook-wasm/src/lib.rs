@@ -6,16 +6,16 @@ use sealbook_core::{
     CoreAccountSettings, CoreAccountSettingsDraft, CoreAddressBook, CoreAddressBookDraft,
     CoreBookmark, CoreBookmarkCollection, CoreBookmarkCollectionDraft, CoreBookmarkDraft,
     CoreBuild, CoreCalendar, CoreCalendarDraft, CoreCalendarEvent, CoreCalendarEventDraft,
-    CoreContact, CoreContactDraft, CoreContactImport, CoreContactProfile, CoreDevice,
-    CoreDeviceSecrets, CoreDeviceState, CoreExportAccount, CoreExportObject, CoreIcsExportEvent,
-    CoreIcsImport, CoreManifestEntry, CoreNote, CoreNoteDraft, CoreNotebook, CorePairPreview,
-    CoreRecurrence, CoreRoster, CoreRosterPin, CoreSealedRow, CoreSession, CoreTask, CoreTaskDraft,
-    CoreTaskList, CoreTaskListDraft, HttpRequest, HttpResponse, LoggedIn, LoginStarting,
-    ManifestContext, ManifestOutcome, ManifestPlan, ManifestSigner, OpaqueStart, PairApproval,
-    PairJoined, PairPoll, PairStatus, PasswordChange, PasswordChangeStarted, RecoverStarted,
-    Recovering, RegisterIdentity, Registering, ResealRow, RosterContext, RotationPlan,
-    RotationState, RowOutcome, RowRef, SignedManifest, SweepCursor, SweepPage, VerifiedRoster,
-    WalkCursor, WalkStep,
+    CoreContact, CoreContactDraft, CoreContactFile, CoreContactImport, CoreContactProfile,
+    CoreDevice, CoreDeviceSecrets, CoreDeviceState, CoreExportAccount, CoreExportObject,
+    CoreIcsExportEvent, CoreIcsImport, CoreManifestEntry, CoreNote, CoreNoteDraft, CoreNotebook,
+    CorePairPreview, CoreRecurrence, CoreRoster, CoreRosterPin, CoreSealedRow, CoreSession,
+    CoreTask, CoreTaskDraft, CoreTaskList, CoreTaskListDraft, HttpRequest, HttpResponse, LoggedIn,
+    LoginStarting, ManifestContext, ManifestOutcome, ManifestPlan, ManifestSigner, OpaqueStart,
+    PairApproval, PairJoined, PairPoll, PairStatus, PasswordChange, PasswordChangeStarted,
+    RecoverStarted, Recovering, RegisterIdentity, Registering, ResealRow, RosterContext,
+    RotationPlan, RotationState, RowOutcome, RowRef, SignedManifest, SweepCursor, SweepPage,
+    VerifiedRoster, WalkCursor, WalkStep,
 };
 use sealbook_crypto::RosterPin;
 use sealbook_crypto::{
@@ -2595,6 +2595,21 @@ pub fn core_csv_import(
     address_book_id: &str,
 ) -> Result<Ts<CoreContactImport>, JsError> {
     Ok(sealbook_core::csv_import(text, address_book_id).into_ts()?)
+}
+
+/// The cards in a JSON, vCard or CSV file, and the format it was read as. Throws with a
+/// sentence fit to show the user when the file is too large or holds too many cards.
+#[wasm_bindgen]
+pub fn core_contacts_import(
+    filename: &str,
+    text: &str,
+    address_book_id: &str,
+) -> Result<Ts<CoreContactFile>, JsError> {
+    Ok(
+        sealbook_core::contacts_import(filename, text, address_book_id)
+            .map_err(core_err)?
+            .into_ts()?,
+    )
 }
 
 /// A CSV file holding the cards, each row's book named from `books`.

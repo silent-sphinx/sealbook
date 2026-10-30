@@ -1331,32 +1331,14 @@ fn now_rfc3339() -> String {
         .unwrap_or_default()
 }
 
-const MAX_IMPORT_BYTES: usize = 5 * 1024 * 1024;
-const MAX_IMPORTED_CONTACTS: usize = 1_000;
-
-/// The contacts in a vCard or CSV file: vCard when the name ends in `.vcf` or
-/// the text holds a card, CSV otherwise.
+/// The contacts in a JSON, vCard or CSV file.
 fn read_contacts(
     filename: &str,
     text: &str,
     book_id: Uuid,
-) -> Result<sealbook_client::CoreContactImport> {
-    if text.len() > MAX_IMPORT_BYTES {
-        anyhow::bail!("import file is too large (maximum 5 MB)");
-    }
-    let text = text.trim();
-    let book = book_id.to_string();
-    let is_vcard =
-        filename.to_lowercase().ends_with(".vcf") || text.to_uppercase().contains("BEGIN:VCARD");
-    let read = if is_vcard {
-        sealbook_client::vcard_import(text, &book)
-    } else {
-        sealbook_client::csv_import(text, &book)
-    };
-    if read.contacts.len() > MAX_IMPORTED_CONTACTS {
-        anyhow::bail!("import contains too many contacts (maximum 1,000)");
-    }
-    Ok(read)
+) -> Result<sealbook_client::CoreContactFile> {
+    sealbook_client::contacts_import(filename, text, &book_id.to_string())
+        .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 fn write_contacts(

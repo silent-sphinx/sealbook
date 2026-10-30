@@ -536,7 +536,7 @@ fn social(platform: String, handle: String) -> CoreContactSocial {
     }
 }
 
-fn text(entry: &Map<String, Value>, key: &str) -> Option<String> {
+pub(crate) fn text(entry: &Map<String, Value>, key: &str) -> Option<String> {
     entry
         .get(key)
         .and_then(Value::as_str)
@@ -557,7 +557,7 @@ fn entries<T>(raw: &str, read: fn(&Map<String, Value>) -> Option<T>) -> Option<V
     (!rows.is_empty()).then_some(rows)
 }
 
-fn channel_of(entry: &Map<String, Value>) -> Option<CoreContactChannel> {
+pub(crate) fn channel_of(entry: &Map<String, Value>) -> Option<CoreContactChannel> {
     let value = text(entry, "value")?;
     let kind = match text(entry, "kind")
         .unwrap_or_default()
@@ -577,7 +577,7 @@ fn channel_of(entry: &Map<String, Value>) -> Option<CoreContactChannel> {
     })
 }
 
-fn date_of(entry: &Map<String, Value>) -> Option<CoreContactDate> {
+pub(crate) fn date_of(entry: &Map<String, Value>) -> Option<CoreContactDate> {
     let date = text(entry, "date")?;
     let kind = match text(entry, "kind")
         .unwrap_or_else(|| "birthday".into())
@@ -591,7 +591,7 @@ fn date_of(entry: &Map<String, Value>) -> Option<CoreContactDate> {
     Some(date_row(kind, text(entry, "label"), date))
 }
 
-fn social_of(entry: &Map<String, Value>) -> Option<CoreContactSocial> {
+pub(crate) fn social_of(entry: &Map<String, Value>) -> Option<CoreContactSocial> {
     let handle = text(entry, "handle")?;
     Some(social(
         text(entry, "platform").unwrap_or_else(|| "custom".into()),
@@ -599,7 +599,7 @@ fn social_of(entry: &Map<String, Value>) -> Option<CoreContactSocial> {
     ))
 }
 
-fn work_of(entry: &Map<String, Value>) -> Option<CoreContactWork> {
+pub(crate) fn work_of(entry: &Map<String, Value>) -> Option<CoreContactWork> {
     let organization = text(entry, "organization");
     let title = text(entry, "title");
     if organization.is_none() && title.is_none() {
@@ -612,7 +612,7 @@ fn work_of(entry: &Map<String, Value>) -> Option<CoreContactWork> {
     })
 }
 
-fn address_of(raw: &str) -> Option<CoreContactAddress> {
+pub(crate) fn address_of(raw: &str) -> Option<CoreContactAddress> {
     let value: Value = serde_json::from_str(raw).ok()?;
     let entry = value.as_object()?;
     let address = CoreContactAddress {
