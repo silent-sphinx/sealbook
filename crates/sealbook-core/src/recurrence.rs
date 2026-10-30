@@ -16,9 +16,9 @@ use crate::{CoreRecurrence, CoreRecurrenceFrequency};
 const MAX_PERIODS: i64 = 10_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct Day(i64);
+pub(crate) struct Day(pub(crate) i64);
 
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+pub(crate) fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     let year = if month <= 2 { year - 1 } else { year };
     let era = year.div_euclid(400);
     let yoe = year - era * 400;
@@ -28,7 +28,7 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     era * 146_097 + doe - 719_468
 }
 
-fn civil_from_days(days: i64) -> (i64, i64, i64) {
+pub(crate) fn civil_from_days(days: i64) -> (i64, i64, i64) {
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z - era * 146_097;
@@ -41,7 +41,7 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
     (year, month, day)
 }
 
-fn month_length(year: i64, month: i64) -> i64 {
+pub(crate) fn month_length(year: i64, month: i64) -> i64 {
     let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
     match month {
         2 if leap => 29,
@@ -52,12 +52,12 @@ fn month_length(year: i64, month: i64) -> i64 {
 }
 
 /// 0 for Sunday through 6, the numbering the protocol stores.
-fn weekday(day: Day) -> i64 {
+pub(crate) fn weekday(day: Day) -> i64 {
     (day.0 + 4).rem_euclid(7)
 }
 
 /// Strict: the first ten characters must be a real calendar day.
-fn parse_day(text: &str) -> Option<Day> {
+pub(crate) fn parse_day(text: &str) -> Option<Day> {
     let head = text.trim().get(..10)?;
     let bytes = head.as_bytes();
     if bytes[4] != b'-' || bytes[7] != b'-' {
@@ -75,7 +75,7 @@ fn parse_day(text: &str) -> Option<Day> {
         .then(|| Day(days_from_civil(year, month, day)))
 }
 
-fn format_day(day: Day) -> String {
+pub(crate) fn format_day(day: Day) -> String {
     let (year, month, date) = civil_from_days(day.0);
     format!("{year:04}-{month:02}-{date:02}")
 }

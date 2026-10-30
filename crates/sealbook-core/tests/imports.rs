@@ -92,6 +92,7 @@ fn regenerate() {
     let cards = |drafts: Vec<CoreContactDraft>| Value::Array(drafts.iter().map(stored).collect());
     expected["vcf"] = cards(vcard_parse(&read("contacts.vcf"), "book"));
     expected["csv"] = cards(csv_parse(&read("contacts.csv"), "book"));
+    expected["ics_parsed"] = serde_json::to_value(ics_parse(&read("calendar.ics"))).unwrap();
     let text = serde_json::to_string_pretty(&expected).unwrap() + "\n";
     std::fs::write(format!("{DIR}/expected.json"), text).unwrap();
 }
@@ -157,4 +158,180 @@ fn rows_hold_commas_quotes_and_line_breaks_inside_quotes() {
     );
     assert_eq!(csv_rows("a,b,c\n1,,3")[1], ["1", "", "3"]);
     assert!(csv_rows("").is_empty());
+}
+
+#[test]
+fn the_ics_sample_becomes_the_expected_events() {
+    let expected: Value = serde_json::from_str(&read("expected.json")).unwrap();
+    let parsed = serde_json::to_value(ics_parse(&read("calendar.ics"))).unwrap();
+    assert_eq!(parsed, expected["ics_parsed"]);
+}
+
+fn one(text: &str) -> CoreIcsEvent {
+    let body = format!("BEGIN:VEVENT\n{text}\nEND:VEVENT");
+    let mut parsed = ics_parse(&body);
+    assert!(parsed.skipped.is_empty(), "{:?}", parsed.skipped);
+    parsed.events.remove(0)
+}
+
+#[test]
+fn an_ics_time_comes_back_as_utc_or_local_with_its_zone() {
+    let utc = one("SUMMARY:A\nDTSTART:20261001T090000Z");
+    assert_eq!(
+        (utc.start.as_str(), utc.start_zone),
+        ("2026-10-01T09:00:00Z", None)
+    );
+    let zoned = one("SUMMARY:A\nDTSTART;TZID=Europe/London:20261002T1230\nDTEND;TZID=Asia/Tokyo:20261002T133000");
+    assert_eq!(zoned.start, "2026-10-02T12:30:00");
+    assert_eq!(zoned.start_zone.as_deref(), Some("Europe/London"));
+    assert_eq!(zoned.end.as_deref(), Some("2026-10-02T13:30:00"));
+    assert_eq!(zoned.end_zone.as_deref(), Some("Asia/Tokyo"));
+}
+
+#[test]
+fn an_all_day_end_is_inclusive() {
+    let event = one("SUMMARY:A\nDTSTART;VALUE=DATE:20261224\nDTEND;VALUE=DATE:20261228");
+    assert_eq!(event.end.as_deref(), Some("2026-12-27"));
+}
+
+#[test]
+fn an_unreadable_date_skips_one_event_and_says_why() {
+    let text = "BEGIN:VEVENT\nSUMMARY:Bad\nDTSTART:20261301\nEND:VEVENT\nBEGIN:VEVENT\nSUMMARY:Good\nDTSTART:20261001T090000Z\nEND:VEVENT\nBEGIN:VEVENT\nSUMMARY:None\nEND:VEVENT\nBEGIN:VEVENT\nDTSTART:20261001T250000\nEND:VEVENT";
+    let parsed = ics_parse(text);
+    assert_eq!(parsed.events.len(), 1);
+    assert_eq!(parsed.skipped.len(), 3);
+    assert_eq!(parsed.skipped[0].reason, "Unsupported ICS date: 20261301");
+    assert_eq!(parsed.skipped[1].reason, "it has no start date");
+    assert_eq!(parsed.skipped[2].title, "Untitled event");
+}
+
+#[test]
+fn text_loses_its_markup_and_keeps_its_meaning() {
+    let event = one("SUMMARY:A\nDTSTART:20261001T090000Z\nDESCRIPTION:text/html\\,<p>Hi &amp; bye<br/>Room%203</p>\nLOCATION:Location: Room 3\nATTENDEE:mailto:ada@x.example");
+    assert_eq!(event.notes.as_deref(), Some("Hi & bye\nRoom 3"));
+    assert_eq!(event.location.as_deref(), Some("Room 3"));
+    assert_eq!(event.participants, ["ada@x.example"]);
+}
+
+#[test]
+fn a_percent_sign_that_is_not_an_escape_is_left_alone() {
+    let event = one("SUMMARY:A\nDTSTART:20261001T090000Z\nDESCRIPTION:100% sure");
+    assert_eq!(event.notes.as_deref(), Some("100% sure"));
+}
+
+#[test]
+fn rules_keep_what_the_protocol_can_say() {
+    let weekly = ics_rrule("FREQ=WEEKLY;BYDAY=MO,WE,FR", "2026-10-05").unwrap();
+    assert_eq!(weekly.weekdays, [1, 3, 5]);
+    assert_eq!(
+        ics_rrule("FREQ=WEEKLY", "2026-10-07").unwrap().weekdays,
+        [3]
+    );
+    let nth = ics_rrule("FREQ=MONTHLY;BYDAY=3TU", "2026-10-20").unwrap();
+    assert_eq!(
+        nth.nth_weekday,
+        Some(CoreNthWeekday {
+            ordinal: 3,
+            weekday: 2
+        })
+    );
+    assert_eq!(
+        ics_rrule("FREQ=MONTHLY", "2026-10-20")
+            .unwrap()
+            .day_of_month,
+        Some(20)
+    );
+    assert!(ics_rrule("FREQ=MONTHLY;BYDAY=-1FR", "2026-10-20")
+        .unwrap()
+        .nth_weekday
+        .is_none());
+    let until = ics_rrule("FREQ=DAILY;UNTIL=20261031T235959Z;COUNT=5", "2026-10-01").unwrap();
+    assert_eq!(
+        (until.until.as_deref(), until.count),
+        (Some("2026-10-31"), Some(5))
+    );
+    assert_eq!(
+        ics_rrule("FREQ=DAILY;INTERVAL=1", "2026-10-01")
+            .unwrap()
+            .interval,
+        None
+    );
+    assert_eq!(
+        ics_rrule("FREQ=DAILY;INTERVAL=2", "2026-10-01")
+            .unwrap()
+            .interval,
+        Some(2)
+    );
+    assert!(ics_rrule("FREQ=HOURLY;INTERVAL=6", "2026-10-01").is_none());
+    assert!(ics_rrule("", "2026-10-01").is_none());
+}
+
+#[test]
+fn a_stamp_is_utc_seconds_whatever_form_the_instant_came_in() {
+    assert_eq!(ics_stamp("2026-10-01T09:00:00.000Z"), "20261001T090000Z");
+    assert_eq!(ics_stamp("2026-10-01T09:00:00Z"), "20261001T090000Z");
+    assert_eq!(ics_stamp("2026-10-01T10:30:00+01:00"), "20261001T093000Z");
+    assert_eq!(ics_stamp("2026-10-01"), "20261001");
+}
+
+#[test]
+fn a_long_line_folds_on_octets() {
+    let folded = ics_fold(&format!("SUMMARY:{}", "\u{e9}".repeat(40)));
+    for (at, line) in folded.split("\r\n").enumerate() {
+        let size = line.len();
+        assert!(size <= if at == 0 { 75 } else { 75 }, "{size}");
+    }
+    assert!(folded.contains("\r\n "));
+}
+
+fn export(start: &str, end: Option<&str>) -> CoreIcsExportEvent {
+    CoreIcsExportEvent {
+        id: "e1".into(),
+        event: CoreCalendarEventDraft {
+            title: "Gym, then tea".into(),
+            start: start.into(),
+            end: end.map(str::to_string),
+            participants: vec!["Ada".into(), "grace@x.example".into()],
+            ..CoreCalendarEventDraft::default()
+        },
+    }
+}
+
+#[test]
+fn an_event_survives_an_export_and_an_import() {
+    let mut event = export("2026-10-05T18:00:00Z", Some("2026-10-05T19:00:00Z"));
+    event.event.recurrence = ics_rrule("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;COUNT=6", "2026-10-05");
+    event.event.notes = Some("one\ntwo; three".into());
+    let text = ics_write(&[event.clone()], "Work", "2026-10-30T12:00:00Z");
+    assert!(text.contains("PRODID:-//Sealbook//EN\r\n"));
+    assert!(text.contains("DTSTAMP:20261030T120000Z\r\n"));
+    assert!(text.contains("UID:e1@sealbook\r\n"));
+    assert!(text.contains("ATTENDEE;CN=Ada:invalid:nomail\r\n"));
+    assert!(text.ends_with("END:VCALENDAR\r\n"));
+    let back = ics_parse(&text).events.remove(0);
+    assert_eq!(back.title, "Gym, then tea");
+    assert_eq!(back.start, "2026-10-05T18:00:00Z");
+    assert_eq!(back.end.as_deref(), Some("2026-10-05T19:00:00Z"));
+    assert_eq!(back.notes.as_deref(), Some("one\ntwo; three"));
+    assert_eq!(back.recurrence, event.event.recurrence);
+    assert_eq!(
+        back.participants,
+        ["Ada", "grace@x.example"].map(String::from)
+    );
+}
+
+#[test]
+fn an_all_day_event_writes_an_exclusive_end() {
+    let text = ics_write(
+        &[export("2026-12-24", Some("2026-12-27"))],
+        "Work",
+        "2026-10-30T12:00:00Z",
+    );
+    assert!(text.contains("DTSTART;VALUE=DATE:20261224\r\n"));
+    assert!(text.contains("DTEND;VALUE=DATE:20261228\r\n"));
+    let back = ics_parse(&text).events.remove(0);
+    assert_eq!(
+        (back.start.as_str(), back.end.as_deref()),
+        ("2026-12-24", Some("2026-12-27"))
+    );
 }

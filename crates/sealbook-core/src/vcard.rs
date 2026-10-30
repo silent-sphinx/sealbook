@@ -34,7 +34,7 @@ pub(crate) fn trim(text: &str) -> &str {
     text.trim_matches(|c: char| (c.is_whitespace() && c != '\u{85}') || c == '\u{feff}')
 }
 
-fn unescape(value: &str) -> String {
+pub(crate) fn unescape(value: &str) -> String {
     let value = value.replace("\\n", "\n").replace("\\N", "\n");
     let value = value
         .replace("\\,", ",")

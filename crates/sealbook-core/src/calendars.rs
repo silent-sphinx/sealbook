@@ -103,7 +103,7 @@ impl CoreRecurrenceFrequency {
         }
     }
 
-    fn from_wire(value: &str) -> Option<Self> {
+    pub(crate) fn from_wire(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "daily" => Some(Self::Daily),
             "weekly" => Some(Self::Weekly),
@@ -200,7 +200,7 @@ pub struct CoreCalendar {
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct CoreCalendarEventDraft {
     pub title: String,
-    /// A timed event is a UTC instant (`2026-10-01T09:00:00.000Z`) and an all-day
+    /// A timed event is a UTC instant (`2026-10-01T09:00:00Z`) and an all-day
     /// event is a plain local date (`2026-10-01`) whose `end` is **inclusive**.
     /// The shape carries the distinction, so there is no all-day flag to drift.
     pub start: String,

@@ -27,6 +27,7 @@ mod contacts;
 mod csv;
 mod error;
 mod http;
+mod ics;
 mod manifest;
 mod notes;
 mod pairing;
@@ -112,6 +113,10 @@ pub use contacts::{
 };
 pub use error::CoreError;
 pub use http::{Header, HttpRequest, HttpResponse, Method, Step};
+pub use ics::{
+    ics_fold, ics_parse, ics_rrule, ics_stamp, ics_write, CoreIcsEvent, CoreIcsExportEvent,
+    CoreIcsImport, CoreIcsSkipped,
+};
 pub use manifest::{
     accept_manifest_seq, core_entries, manifest_absence_ok, manifest_accept, manifest_apply,
     manifest_buckets_accept, manifest_buckets_from_whole, manifest_buckets_request,

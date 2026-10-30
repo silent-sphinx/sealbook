@@ -7,14 +7,15 @@ use sealbook_core::{
     CoreBookmark, CoreBookmarkCollection, CoreBookmarkCollectionDraft, CoreBookmarkDraft,
     CoreBuild, CoreCalendar, CoreCalendarDraft, CoreCalendarEvent, CoreCalendarEventDraft,
     CoreContact, CoreContactDraft, CoreContactProfile, CoreDevice, CoreDeviceSecrets,
-    CoreDeviceState, CoreExportAccount, CoreExportObject, CoreManifestEntry, CoreNote,
-    CoreNoteDraft, CoreNotebook, CorePairPreview, CoreRecurrence, CoreRoster, CoreRosterPin,
-    CoreSealedRow, CoreSession, CoreTask, CoreTaskDraft, CoreTaskList, CoreTaskListDraft,
-    HttpRequest, HttpResponse, LoggedIn, LoginStarting, ManifestContext, ManifestOutcome,
-    ManifestPlan, ManifestSigner, OpaqueStart, PairApproval, PairJoined, PairPoll, PairStatus,
-    PasswordChange, PasswordChangeStarted, RecoverStarted, Recovering, RegisterIdentity,
-    Registering, ResealRow, RosterContext, RotationPlan, RotationState, RowOutcome, RowRef,
-    SignedManifest, SweepCursor, SweepPage, VerifiedRoster, WalkCursor, WalkStep,
+    CoreDeviceState, CoreExportAccount, CoreExportObject, CoreIcsExportEvent, CoreIcsImport,
+    CoreManifestEntry, CoreNote, CoreNoteDraft, CoreNotebook, CorePairPreview, CoreRecurrence,
+    CoreRoster, CoreRosterPin, CoreSealedRow, CoreSession, CoreTask, CoreTaskDraft, CoreTaskList,
+    CoreTaskListDraft, HttpRequest, HttpResponse, LoggedIn, LoginStarting, ManifestContext,
+    ManifestOutcome, ManifestPlan, ManifestSigner, OpaqueStart, PairApproval, PairJoined, PairPoll,
+    PairStatus, PasswordChange, PasswordChangeStarted, RecoverStarted, Recovering,
+    RegisterIdentity, Registering, ResealRow, RosterContext, RotationPlan, RotationState,
+    RowOutcome, RowRef, SignedManifest, SweepCursor, SweepPage, VerifiedRoster, WalkCursor,
+    WalkStep,
 };
 use sealbook_crypto::RosterPin;
 use sealbook_crypto::{
@@ -2550,6 +2551,31 @@ pub fn core_vcard_parse(
     address_book_id: &str,
 ) -> Result<Ts<ContactDraftList>, JsError> {
     Ok(ContactDraftList(sealbook_core::vcard_parse(text, address_book_id)).into_ts()?)
+}
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct IcsExportList(pub Vec<CoreIcsExportEvent>);
+
+/// The events in a calendar file. Times written in a zone come back as local
+/// wall-clock time and the zone's name, for the host to resolve.
+#[wasm_bindgen]
+pub fn core_ics_parse(input: &str) -> Result<Ts<CoreIcsImport>, JsError> {
+    Ok(sealbook_core::ics_parse(input).into_ts()?)
+}
+
+/// An RFC 5545 calendar holding the events. `now` is the caller's clock.
+#[wasm_bindgen]
+pub fn core_ics_write(
+    events: Ts<IcsExportList>,
+    calendar_name: &str,
+    now: &str,
+) -> Result<String, JsError> {
+    Ok(sealbook_core::ics_write(
+        &events.to_rust()?.0,
+        calendar_name,
+        now,
+    ))
 }
 
 /// The contacts in a CSV file, as drafts for the address book unless a row names its own.

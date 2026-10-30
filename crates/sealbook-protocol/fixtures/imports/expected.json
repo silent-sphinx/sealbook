@@ -163,6 +163,88 @@
       }
     ]
   },
+  "ics_parsed": {
+    "events": [
+      {
+        "end": "2026-10-01T09:15:00Z",
+        "location": "Room 3",
+        "participants": [],
+        "start": "2026-10-01T09:00:00Z",
+        "title": "Standup"
+      },
+      {
+        "end": "2026-10-02T13:30:00",
+        "end_zone": "Europe/London",
+        "notes": "Bring notes\nand the long agenda that is folded across two lines",
+        "participants": [
+          "ada@analytical.example"
+        ],
+        "start": "2026-10-02T12:30:00",
+        "start_zone": "Europe/London",
+        "title": "Lunch, with Ada"
+      },
+      {
+        "end": "2026-12-27",
+        "participants": [],
+        "start": "2026-12-24",
+        "title": "Holiday"
+      },
+      {
+        "participants": [],
+        "recurrence": {
+          "frequency": "yearly",
+          "weekdays": []
+        },
+        "start": "2026-11-10",
+        "title": "Birthday"
+      },
+      {
+        "end": "2026-10-05T19:00:00Z",
+        "participants": [],
+        "recurrence": {
+          "count": 6,
+          "frequency": "weekly",
+          "interval": 2,
+          "weekdays": [
+            1,
+            3
+          ]
+        },
+        "start": "2026-10-05T18:00:00Z",
+        "title": "Gym"
+      },
+      {
+        "participants": [],
+        "recurrence": {
+          "frequency": "monthly",
+          "nth_weekday": {
+            "ordinal": 1,
+            "weekday": 5
+          },
+          "until": "2027-12-31",
+          "weekdays": []
+        },
+        "start": "2026-10-01",
+        "title": "Review"
+      },
+      {
+        "participants": [],
+        "recurrence": {
+          "day_of_month": 31,
+          "frequency": "monthly",
+          "weekdays": []
+        },
+        "start": "2026-10-31",
+        "title": "Payday"
+      }
+    ],
+    "skipped": [
+      {
+        "reason": "Unsupported ICS date: not-a-date",
+        "title": "Broken"
+      }
+    ]
+  },
   "vcf": [
     {
       "@type": "Card",
