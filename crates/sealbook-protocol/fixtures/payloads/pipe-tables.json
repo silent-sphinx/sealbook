@@ -1,0 +1,109 @@
+{
+  "cases": [
+    {
+      "name": "valid table left alone",
+      "input": "| a | b |\n| --- | --- |\n| 1 | 2 |",
+      "output": "| a | b |\n| --- | --- |\n| 1 | 2 |"
+    },
+    {
+      "name": "valid aligned table left alone",
+      "input": "| a | b |\n| :-- | --: |\n| 1 | 2 |",
+      "output": "| a | b |\n| :-- | --: |\n| 1 | 2 |"
+    },
+    {
+      "name": "prose left alone",
+      "input": "Hello world.\n\nSecond.",
+      "output": "Hello world.\n\nSecond."
+    },
+    {
+      "name": "pipes without a delimiter row",
+      "input": "a | b | c\nd | e | f",
+      "output": "a | b | c\nd | e | f"
+    },
+    {
+      "name": "second row is not a delimiter",
+      "input": "| a | b |\n| no | no |\n| 1 | 2 |",
+      "output": "| a | b |\n| no | no |\n| 1 | 2 |"
+    },
+    {
+      "name": "blank delimiter cells filled",
+      "input": "| a | b | c |\n| --- |  |  |\n| 1 | 2 | 3 |",
+      "output": "| a | b | c |\n| --- | --- | --- |\n| 1 | 2 | 3 |"
+    },
+    {
+      "name": "widens to the longest row",
+      "input": "| a | b |\n| --- |  |\n| 1 | 2 | 3 | 4 |",
+      "output": "| a | b |  |  |\n| --- | --- | --- | --- |\n| 1 | 2 | 3 | 4 |"
+    },
+    {
+      "name": "keeps the requested alignment",
+      "input": "| a | b |\n| :-: |  |\n| 1 | 2 |",
+      "output": "| a | b |\n| :-: | --- |\n| 1 | 2 |"
+    },
+    {
+      "name": "keeps an escaped pipe",
+      "input": "| a | b |\n| --- |  |\n| x \\| y | 2 |",
+      "output": "| a | b |\n| --- | --- |\n| x \\| y | 2 |"
+    },
+    {
+      "name": "stops at a blank line",
+      "input": "| a |  |\n| --- |  |\n| 1 |  |\n\nAfter.",
+      "output": "| a |  |\n| --- | --- |\n| 1 |  |\n\nAfter."
+    },
+    {
+      "name": "stops at a heading",
+      "input": "| a | b |\n| --- |  |\n| 1 | 2 |\n# Next\n| x | y |",
+      "output": "| a | b |\n| --- | --- |\n| 1 | 2 |\n# Next\n| x | y |"
+    },
+    {
+      "name": "stops at a list item",
+      "input": "| a | b |\n| --- |  |\n| 1 | 2 |\n- item | more",
+      "output": "| a | b |\n| --- | --- |\n| 1 | 2 |\n- item | more"
+    },
+    {
+      "name": "stops at a fence",
+      "input": "| a | b |\n| --- |  |\n| 1 | 2 |\n```\n| c | d |",
+      "output": "| a | b |\n| --- | --- |\n| 1 | 2 |\n```\n| c | d |"
+    },
+    {
+      "name": "stops at a quote",
+      "input": "| a | b |\n| --- |  |\n| 1 | 2 |\n> quoted | text",
+      "output": "| a | b |\n| --- | --- |\n| 1 | 2 |\n> quoted | text"
+    },
+    {
+      "name": "stops at a thematic break",
+      "input": "| a | b |\n| --- |  |\n| 1 | 2 |\n* * *",
+      "output": "| a | b |\n| --- | --- |\n| 1 | 2 |\n* * *"
+    },
+    {
+      "name": "ordered list item ends the table",
+      "input": "| a | b |\n| --- |  |\n| 1 | 2 |\n1. first | x",
+      "output": "| a | b |\n| --- | --- |\n| 1 | 2 |\n1. first | x"
+    },
+    {
+      "name": "CRLF line endings",
+      "input": "| a | b |\r\n| --- |  |\r\n| 1 | 2 |\r\n",
+      "output": "| a | b |\n| --- | --- |\n| 1 | 2 |\n"
+    },
+    {
+      "name": "two tables in one note",
+      "input": "| a | b |\n| --- |  |\n| 1 | 2 |\n\ntext\n\n| c | d |\n| :-- |  |\n| 3 | 4 |",
+      "output": "| a | b |\n| --- | --- |\n| 1 | 2 |\n\ntext\n\n| c | d |\n| :-- | --- |\n| 3 | 4 |"
+    },
+    {
+      "name": "unicode cells",
+      "input": "| nom | prénom |\n| --- |  |\n| 日本 | 😀 |",
+      "output": "| nom | prénom |\n| --- | --- |\n| 日本 | 😀 |"
+    },
+    {
+      "name": "unpiped header row",
+      "input": "a | b\n--- | \n1 | 2",
+      "output": "a | b\n--- | \n1 | 2"
+    },
+    {
+      "name": "empty source",
+      "input": "",
+      "output": ""
+    }
+  ]
+}

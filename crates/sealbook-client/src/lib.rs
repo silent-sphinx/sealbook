@@ -37,13 +37,13 @@ pub use sealbook_core::{
     bookmark_collection_tone, bookmark_collection_write, bookmark_parse, bookmark_write,
     calendar_name_by_id, calendar_parse, calendar_write, contact_parse, contact_write,
     contacts_import, csv_import, csv_write, event_parse, event_write, note_parse, note_write,
-    notebook_name_by_id, notebook_parse, notebook_write, vcard_import, vcard_write,
-    CoreAddressBook, CoreAddressBookDraft, CoreBookmark, CoreBookmarkCollection,
-    CoreBookmarkCollectionDraft, CoreBookmarkDraft, CoreCalendar, CoreCalendarDraft,
-    CoreCalendarEvent, CoreCalendarEventDraft, CoreChannelKind, CoreContact, CoreContactChannel,
-    CoreContactDraft, CoreContactFile, CoreContactImport, CoreExportAccount, CoreExportObject,
-    CoreNote, CoreNoteAttachment, CoreNoteDraft, CoreNotebook, CoreRecurrence, PairPoll,
-    PAIR_POLL_INTERVAL_MS,
+    notebook_name_by_id, notebook_parse, notebook_write, notes_import, notes_write_json,
+    notes_write_markdown, repair_pipe_tables, vcard_import, vcard_write, CoreAddressBook,
+    CoreAddressBookDraft, CoreBookmark, CoreBookmarkCollection, CoreBookmarkCollectionDraft,
+    CoreBookmarkDraft, CoreCalendar, CoreCalendarDraft, CoreCalendarEvent, CoreCalendarEventDraft,
+    CoreChannelKind, CoreContact, CoreContactChannel, CoreContactDraft, CoreContactFile,
+    CoreContactImport, CoreExportAccount, CoreExportObject, CoreNote, CoreNoteAttachment,
+    CoreNoteDraft, CoreNotebook, CoreRecurrence, PairPoll, PAIR_POLL_INTERVAL_MS,
 };
 
 pub use sealbook_protocol::{

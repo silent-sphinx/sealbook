@@ -8,14 +8,14 @@ use sealbook_core::{
     CoreBuild, CoreCalendar, CoreCalendarDraft, CoreCalendarEvent, CoreCalendarEventDraft,
     CoreContact, CoreContactDraft, CoreContactFile, CoreContactImport, CoreContactProfile,
     CoreDevice, CoreDeviceSecrets, CoreDeviceState, CoreExportAccount, CoreExportObject,
-    CoreIcsExportEvent, CoreIcsImport, CoreManifestEntry, CoreNote, CoreNoteDraft, CoreNotebook,
-    CorePairPreview, CoreRecurrence, CoreRoster, CoreRosterPin, CoreSealedRow, CoreSession,
-    CoreTask, CoreTaskDraft, CoreTaskList, CoreTaskListDraft, HttpRequest, HttpResponse, LoggedIn,
-    LoginStarting, ManifestContext, ManifestOutcome, ManifestPlan, ManifestSigner, OpaqueStart,
-    PairApproval, PairJoined, PairPoll, PairStatus, PasswordChange, PasswordChangeStarted,
-    RecoverStarted, Recovering, RegisterIdentity, Registering, ResealRow, RosterContext,
-    RotationPlan, RotationState, RowOutcome, RowRef, SignedManifest, SweepCursor, SweepPage,
-    VerifiedRoster, WalkCursor, WalkStep,
+    CoreIcsExportEvent, CoreIcsImport, CoreManifestEntry, CoreNote, CoreNoteDraft, CoreNoteFile,
+    CoreNoteFileEntry, CoreNotebook, CorePairPreview, CoreRecurrence, CoreRoster, CoreRosterPin,
+    CoreSealedRow, CoreSession, CoreTask, CoreTaskDraft, CoreTaskList, CoreTaskListDraft,
+    HttpRequest, HttpResponse, LoggedIn, LoginStarting, ManifestContext, ManifestOutcome,
+    ManifestPlan, ManifestSigner, OpaqueStart, PairApproval, PairJoined, PairPoll, PairStatus,
+    PasswordChange, PasswordChangeStarted, RecoverStarted, Recovering, RegisterIdentity,
+    Registering, ResealRow, RosterContext, RotationPlan, RotationState, RowOutcome, RowRef,
+    SignedManifest, SweepCursor, SweepPage, VerifiedRoster, WalkCursor, WalkStep,
 };
 use sealbook_crypto::RosterPin;
 use sealbook_crypto::{
@@ -2610,6 +2610,55 @@ pub fn core_contacts_import(
             .map_err(core_err)?
             .into_ts()?,
     )
+}
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct CoreNoteFileEntryList(pub Vec<CoreNoteFileEntry>);
+
+/// Notes with a pipe table an exporter left loose rewritten so the parser reads it.
+#[wasm_bindgen]
+pub fn core_repair_pipe_tables(source: &str) -> String {
+    sealbook_core::repair_pipe_tables(source)
+}
+
+/// Every note in one markdown file, in the order a list shows them.
+#[wasm_bindgen]
+pub fn core_notes_write_markdown(
+    notes: Ts<CoreNoteFileEntryList>,
+    notebooks: Ts<CoreNotebookList>,
+) -> Result<String, JsError> {
+    Ok(sealbook_core::notes_write_markdown(
+        &notes.to_rust()?.0,
+        &notebooks.to_rust()?.0,
+    ))
+}
+
+/// Every note, and the notebooks, as a JSON backup.
+#[wasm_bindgen]
+pub fn core_notes_write_json(
+    notes: Ts<CoreNoteFileEntryList>,
+    notebooks: Ts<CoreNotebookList>,
+    exported_at: &str,
+) -> Result<String, JsError> {
+    Ok(sealbook_core::notes_write_json(
+        &notes.to_rust()?.0,
+        &notebooks.to_rust()?.0,
+        exported_at,
+    ))
+}
+
+/// The notes in a JSON or markdown file. Throws with a sentence fit to show the user
+/// when the file is too large or holds too many notes.
+#[wasm_bindgen]
+pub fn core_notes_import(
+    filename: &str,
+    text: &str,
+    notebook_id: &str,
+) -> Result<Ts<CoreNoteFile>, JsError> {
+    Ok(sealbook_core::notes_import(filename, text, notebook_id)
+        .map_err(core_err)?
+        .into_ts()?)
 }
 
 /// A CSV file holding the cards, each row's book named from `books`.
