@@ -191,6 +191,26 @@ enum ContactsCommand {
         #[arg(long)]
         book: Option<String>,
     },
+    /// Add the contacts in a vCard or CSV file, read by the same code every client uses.
+    Import {
+        /// File to read. Omit to read from stdin.
+        #[arg(long)]
+        file: Option<PathBuf>,
+        /// Address book to add them to, unless a CSV row names its own.
+        #[arg(long)]
+        book: Option<String>,
+    },
+    /// Write the contacts as a vCard or CSV file.
+    Export {
+        /// `vcf` or `csv`.
+        #[arg(long, default_value = "vcf")]
+        format: String,
+        /// File to write. Omit to write to stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        book: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -616,6 +636,81 @@ async fn main() -> Result<()> {
                 for (id, json) in visible {
                     let book_name = book_name_for(&books, contact_book_id(&json));
                     println!("{id} [{book_name}] {json}");
+                }
+                save_state(&cli.state, client.state.as_ref().unwrap())?;
+            }
+            ContactsCommand::Import { file, book } => {
+                let text = match &file {
+                    Some(path) => std::fs::read_to_string(path)
+                        .with_context(|| format!("read {}", path.display()))?,
+                    None => {
+                        let mut buf = String::new();
+                        std::io::stdin()
+                            .read_to_string(&mut buf)
+                            .context("read stdin")?;
+                        buf
+                    }
+                };
+                let name = file
+                    .as_ref()
+                    .map(|path| path.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let state = load_state(&cli.state)?;
+                let password = read_secret("Password: ", "SEALBOOK_PASSWORD")?;
+                let mut client =
+                    SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
+                sign_in(&mut client, &password).await?;
+                client
+                    .ensure_default_address_book()
+                    .await
+                    .context("default address book")?;
+                let books = client.list_address_books().await.context("books")?;
+                let book_id =
+                    resolve_book(&books, book.as_deref())?.unwrap_or(DEFAULT_ADDRESS_BOOK_ID);
+                let read = read_contacts(&name, &text, book_id)?;
+                let now = now_rfc3339();
+                for draft in &read.contacts {
+                    let card = contact_write(draft, &now)?;
+                    client
+                        .put_contact(Uuid::new_v4(), &card)
+                        .await
+                        .context("put")?;
+                }
+                println!(
+                    "imported {} contact(s), skipped {}",
+                    read.contacts.len(),
+                    read.skipped.len()
+                );
+                for skipped in &read.skipped {
+                    println!("skipped {}: {}", skipped.label, skipped.reason);
+                }
+                save_state(&cli.state, client.state.as_ref().unwrap())?;
+            }
+            ContactsCommand::Export { format, out, book } => {
+                let state = load_state(&cli.state)?;
+                let password = read_secret("Password: ", "SEALBOOK_PASSWORD")?;
+                let mut client =
+                    SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
+                sign_in(&mut client, &password).await?;
+                client
+                    .ensure_default_address_book()
+                    .await
+                    .context("default address book")?;
+                let books = client.list_address_books().await.context("books")?;
+                let book_id = resolve_book(&books, book.as_deref())?;
+                let drafts: Vec<CoreContactDraft> = client
+                    .list_contacts()
+                    .await
+                    .context("list")?
+                    .into_iter()
+                    .filter(|(_, json)| book_id.is_none_or(|id| contact_book_id(json) == id))
+                    .map(|(id, json)| contact_parse(&id.to_string(), &json).draft())
+                    .collect();
+                let data = write_contacts(&format, &drafts, &books)?;
+                match out {
+                    Some(path) => std::fs::write(&path, data)
+                        .with_context(|| format!("write {}", path.display()))?,
+                    None => print!("{data}"),
                 }
                 save_state(&cli.state, client.state.as_ref().unwrap())?;
             }
@@ -1236,6 +1331,57 @@ fn now_rfc3339() -> String {
         .unwrap_or_default()
 }
 
+const MAX_IMPORT_BYTES: usize = 5 * 1024 * 1024;
+const MAX_IMPORTED_CONTACTS: usize = 1_000;
+
+/// The contacts in a vCard or CSV file: vCard when the name ends in `.vcf` or
+/// the text holds a card, CSV otherwise.
+fn read_contacts(
+    filename: &str,
+    text: &str,
+    book_id: Uuid,
+) -> Result<sealbook_client::CoreContactImport> {
+    if text.len() > MAX_IMPORT_BYTES {
+        anyhow::bail!("import file is too large (maximum 5 MB)");
+    }
+    let text = text.trim();
+    let book = book_id.to_string();
+    let is_vcard =
+        filename.to_lowercase().ends_with(".vcf") || text.to_uppercase().contains("BEGIN:VCARD");
+    let read = if is_vcard {
+        sealbook_client::vcard_import(text, &book)
+    } else {
+        sealbook_client::csv_import(text, &book)
+    };
+    if read.contacts.len() > MAX_IMPORTED_CONTACTS {
+        anyhow::bail!("import contains too many contacts (maximum 1,000)");
+    }
+    Ok(read)
+}
+
+fn write_contacts(
+    format: &str,
+    drafts: &[CoreContactDraft],
+    books: &[(Uuid, String)],
+) -> Result<String> {
+    match format.to_lowercase().as_str() {
+        "vcf" | "vcard" => Ok(sealbook_client::vcard_write(drafts)),
+        "csv" => {
+            let books: Vec<sealbook_client::CoreAddressBook> = books
+                .iter()
+                .map(|(id, name)| sealbook_client::CoreAddressBook {
+                    id: id.to_string(),
+                    name: name.clone(),
+                    readable: true,
+                    raw: String::new(),
+                })
+                .collect();
+            Ok(sealbook_client::csv_write(drafts, &books))
+        }
+        other => anyhow::bail!("unknown format {other}: use vcf or csv"),
+    }
+}
+
 /// A card for `contacts put` and `contacts update`.
 ///
 /// Built from the stored card when there is one, so the fields this command does
@@ -1764,6 +1910,29 @@ mod tests {
             bookmark_collection_id(r#"{"collectionId":"nope"}"#, fallback),
             fallback
         );
+    }
+
+    #[test]
+    fn a_vcard_file_is_read_and_written_back_by_core() {
+        let book = Uuid::from_u128(7);
+        let text =
+            "BEGIN:VCARD\nFN:Ada\nEMAIL:ada@example.com\nEND:VCARD\nBEGIN:VCARD\nNOTE:x\nEND:VCARD";
+        let read = read_contacts("people.vcf", text, book).unwrap();
+        assert_eq!(read.contacts.len(), 1);
+        assert_eq!(read.skipped.len(), 1);
+        assert_eq!(read.contacts[0].address_book_id, book.to_string());
+        let out = write_contacts("vcf", &read.contacts, &[]).unwrap();
+        assert!(out.contains("FN:Ada"));
+    }
+
+    #[test]
+    fn a_csv_file_is_the_fallback_and_exports_as_csv() {
+        let read =
+            read_contacts("people.csv", "Name,Email\nGrace,g@example.com", Uuid::nil()).unwrap();
+        assert_eq!(read.contacts[0].name, "Grace");
+        let out = write_contacts("csv", &read.contacts, &[]).unwrap();
+        assert!(out.contains("Grace"));
+        assert!(write_contacts("pdf", &read.contacts, &[]).is_err());
     }
 
     #[test]

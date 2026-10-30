@@ -35,13 +35,14 @@ pub use sealbook_core::{
     account_export_parse, account_export_write, address_book_name_by_id, address_book_parse,
     address_book_write, bookmark_collection_name_by_id, bookmark_collection_parse,
     bookmark_collection_tone, bookmark_collection_write, bookmark_parse, bookmark_write,
-    calendar_name_by_id, calendar_parse, calendar_write, contact_parse, contact_write, event_parse,
-    event_write, note_parse, note_write, notebook_name_by_id, notebook_parse, notebook_write,
-    CoreAddressBook, CoreAddressBookDraft, CoreBookmark, CoreBookmarkCollection,
-    CoreBookmarkCollectionDraft, CoreBookmarkDraft, CoreCalendar, CoreCalendarDraft,
-    CoreCalendarEvent, CoreCalendarEventDraft, CoreChannelKind, CoreContact, CoreContactChannel,
-    CoreContactDraft, CoreExportAccount, CoreExportObject, CoreNote, CoreNoteAttachment,
-    CoreNoteDraft, CoreNotebook, CoreRecurrence, PairPoll, PAIR_POLL_INTERVAL_MS,
+    calendar_name_by_id, calendar_parse, calendar_write, contact_parse, contact_write, csv_import,
+    csv_write, event_parse, event_write, note_parse, note_write, notebook_name_by_id,
+    notebook_parse, notebook_write, vcard_import, vcard_write, CoreAddressBook,
+    CoreAddressBookDraft, CoreBookmark, CoreBookmarkCollection, CoreBookmarkCollectionDraft,
+    CoreBookmarkDraft, CoreCalendar, CoreCalendarDraft, CoreCalendarEvent, CoreCalendarEventDraft,
+    CoreChannelKind, CoreContact, CoreContactChannel, CoreContactDraft, CoreContactImport,
+    CoreExportAccount, CoreExportObject, CoreNote, CoreNoteAttachment, CoreNoteDraft, CoreNotebook,
+    CoreRecurrence, PairPoll, PAIR_POLL_INTERVAL_MS,
 };
 
 pub use sealbook_protocol::{
