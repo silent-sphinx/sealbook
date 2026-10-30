@@ -138,7 +138,7 @@ pub use pairing::{
     pair_status, CorePairPreview, PairApproval, PairJoined, PairPoll, PairRefusal, PairStatus,
     PAIR_POLL_INTERVAL_MS,
 };
-pub use payload::write_payload;
+pub use payload::{payload_kind, write_payload, CorePayloadKind};
 pub use recurrence::{is_calendar_day, recurrence_days, recurrence_next};
 pub use roster::{
     pin_roster, read_roster, roster_accept, roster_accept_sealed, roster_answers_for,

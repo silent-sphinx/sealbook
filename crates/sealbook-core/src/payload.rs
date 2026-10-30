@@ -113,6 +113,88 @@ pub(crate) fn as_object(raw: &str) -> Option<Map<String, Value>> {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
+pub enum CorePayloadKind {
+    Contact,
+    AddressBook,
+    CalendarEvent,
+    Calendar,
+    Note,
+    Notebook,
+    Bookmark,
+    BookmarkCollection,
+    Task,
+    TaskList,
+    AccountSettings,
+    Unknown,
+}
+
+/// Which payload type an opened object is.
+///
+/// The content type wins when it names a type, then the `@type` tag. An untagged
+/// payload with an object `name` is a legacy contact; anything else is
+/// `Unknown`, so a future type is skipped rather than rendered and overwritten
+/// as a contact.
+pub fn payload_kind(content_type: &str, raw: &str) -> CorePayloadKind {
+    use sealbook_protocol::{
+        ADDRESS_BOOK_CONTENT_TYPE, BOOKMARK_COLLECTION_CONTENT_TYPE, BOOKMARK_CONTENT_TYPE,
+        CALENDAR_CONTENT_TYPE, CALENDAR_EVENT_CONTENT_TYPE, JSCONTACT_CONTENT_TYPE,
+        NOTEBOOK_CONTENT_TYPE, NOTE_CONTENT_TYPE, TASK_CONTENT_TYPE, TASK_LIST_CONTENT_TYPE,
+    };
+    use CorePayloadKind::*;
+    let by_content_type = [
+        (JSCONTACT_CONTENT_TYPE, Contact),
+        (CALENDAR_EVENT_CONTENT_TYPE, CalendarEvent),
+        (CALENDAR_CONTENT_TYPE, Calendar),
+        (ADDRESS_BOOK_CONTENT_TYPE, AddressBook),
+        (NOTE_CONTENT_TYPE, Note),
+        (NOTEBOOK_CONTENT_TYPE, Notebook),
+        (BOOKMARK_CONTENT_TYPE, Bookmark),
+        (BOOKMARK_COLLECTION_CONTENT_TYPE, BookmarkCollection),
+        (TASK_CONTENT_TYPE, Task),
+        (TASK_LIST_CONTENT_TYPE, TaskList),
+        (
+            crate::settings::ACCOUNT_SETTINGS_CONTENT_TYPE,
+            AccountSettings,
+        ),
+    ];
+    if let Some((_, kind)) = by_content_type
+        .iter()
+        .find(|(name, _)| *name == content_type)
+    {
+        return *kind;
+    }
+    let object = as_object(raw);
+    match object
+        .as_ref()
+        .and_then(|o| o.get("@type"))
+        .and_then(Value::as_str)
+    {
+        Some("CalendarEvent") => CalendarEvent,
+        Some("Calendar") => Calendar,
+        Some("AddressBook") => AddressBook,
+        Some("Note") => Note,
+        Some("Notebook") => Notebook,
+        Some("Bookmark") => Bookmark,
+        Some("BookmarkCollection") => BookmarkCollection,
+        Some("Task") => Task,
+        Some("TaskList") => TaskList,
+        Some("AccountSettings") => AccountSettings,
+        Some("Card") => Contact,
+        Some(_) => Unknown,
+        None if object
+            .as_ref()
+            .is_some_and(|o| o.get("name").is_some_and(Value::is_object)) =>
+        {
+            Contact
+        }
+        None => Unknown,
+    }
+}
+
 /// Whether this build reads the schema major a payload declares.
 ///
 /// A payload with no `version` at all is read: the field was added after the
@@ -147,9 +229,33 @@ pub(crate) fn refuse_newer_major(previous: Option<&str>) -> Result<(), CoreError
     })
 }
 
+#[cfg(feature = "uniffi")]
+pub mod ffi {
+    use super::CorePayloadKind;
+
+    #[uniffi::export(name = "payload_kind")]
+    pub fn payload_kind(content_type: String, raw: String) -> CorePayloadKind {
+        super::payload_kind(&content_type, &raw)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_content_type_then_the_tag_then_the_legacy_shape_names_the_kind() {
+        use CorePayloadKind::*;
+        let kind = |content_type: &str, raw: &str| payload_kind(content_type, raw);
+        assert_eq!(kind("application/sealbook.note+json", "{}"), Note);
+        assert_eq!(kind("application/jscontact+json", "{}"), Contact);
+        assert_eq!(kind("", r#"{"@type":"TaskList"}"#), TaskList);
+        assert_eq!(kind("", r#"{"@type":"Card"}"#), Contact);
+        assert_eq!(kind("", r#"{"name":{"full":"Ada"}}"#), Contact);
+        assert_eq!(kind("", r#"{"name":"Ada"}"#), Unknown);
+        assert_eq!(kind("", r#"{"@type":"Hologram","name":{}}"#), Unknown);
+        assert_eq!(kind("", "not json"), Unknown);
+    }
 
     const OWNED: &[&str] = &["@type", "title"];
 

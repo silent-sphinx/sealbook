@@ -2365,6 +2365,15 @@ pub fn core_recurrence_next(
     ))
 }
 
+/// Which payload type an opened object is.
+#[wasm_bindgen]
+pub fn core_payload_kind(
+    content_type: &str,
+    raw: &str,
+) -> Result<Ts<sealbook_core::CorePayloadKind>, JsError> {
+    Ok(sealbook_core::payload_kind(content_type, raw).into_ts()?)
+}
+
 /// Whether the text is a real calendar day, which `Date.parse` is not strict
 /// enough to say.
 #[wasm_bindgen]
