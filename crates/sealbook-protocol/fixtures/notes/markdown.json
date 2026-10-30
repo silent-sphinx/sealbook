@@ -1,0 +1,3143 @@
+{
+ "cases": [
+  {
+   "input": "### Monday",
+   "blocks": [
+    {
+     "kind": "heading",
+     "level": 3,
+     "children": [
+      {
+       "kind": "text",
+       "text": "Monday"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "#tag",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "#tag"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "one\ntwo",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "one two"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "one\n\ntwo",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "one"
+      }
+     ]
+    },
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "two"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "- milk\n- bread",
+   "blocks": [
+    {
+     "kind": "list",
+     "ordered": false,
+     "start": 1,
+     "items": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "milk"
+        }
+       ],
+       "task": false,
+       "checked": false,
+       "line": null,
+       "blocks": []
+      },
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "bread"
+        }
+       ],
+       "task": false,
+       "checked": false,
+       "line": null,
+       "blocks": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "3. third\n4. fourth",
+   "blocks": [
+    {
+     "kind": "list",
+     "ordered": true,
+     "start": 3,
+     "items": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "third"
+        }
+       ],
+       "task": false,
+       "checked": false,
+       "line": null,
+       "blocks": []
+      },
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "fourth"
+        }
+       ],
+       "task": false,
+       "checked": false,
+       "line": null,
+       "blocks": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "- a\n\n- b",
+   "blocks": [
+    {
+     "kind": "list",
+     "ordered": false,
+     "start": 1,
+     "items": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "a"
+        }
+       ],
+       "task": false,
+       "checked": false,
+       "line": null,
+       "blocks": []
+      },
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "b"
+        }
+       ],
+       "task": false,
+       "checked": false,
+       "line": null,
+       "blocks": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "- [ ] todo\n- [x] done",
+   "blocks": [
+    {
+     "kind": "list",
+     "ordered": false,
+     "start": 1,
+     "items": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "todo"
+        }
+       ],
+       "task": true,
+       "checked": false,
+       "line": null,
+       "blocks": []
+      },
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "done"
+        }
+       ],
+       "task": true,
+       "checked": true,
+       "line": null,
+       "blocks": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "- - -",
+   "blocks": [
+    {
+     "kind": "rule"
+    }
+   ]
+  },
+  {
+   "input": "***",
+   "blocks": [
+    {
+     "kind": "rule"
+    }
+   ]
+  },
+  {
+   "input": "___",
+   "blocks": [
+    {
+     "kind": "rule"
+    }
+   ]
+  },
+  {
+   "input": "```ts\nconst a = **1**;\n```",
+   "blocks": [
+    {
+     "kind": "code",
+     "language": "ts",
+     "text": "const a = **1**;"
+    }
+   ]
+  },
+  {
+   "input": "```\nstill here",
+   "blocks": [
+    {
+     "kind": "code",
+     "language": null,
+     "text": "still here"
+    }
+   ]
+  },
+  {
+   "input": "> quoted",
+   "blocks": [
+    {
+     "kind": "quote",
+     "blocks": [
+      {
+       "kind": "paragraph",
+       "children": [
+        {
+         "kind": "text",
+         "text": "quoted"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "> > > > > deep",
+   "blocks": [
+    {
+     "kind": "quote",
+     "blocks": [
+      {
+       "kind": "quote",
+       "blocks": [
+        {
+         "kind": "quote",
+         "blocks": [
+          {
+           "kind": "paragraph",
+           "children": [
+            {
+             "kind": "text",
+             "text": "> deep"
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "# a\r\n\r\n- b\r\n",
+   "blocks": [
+    {
+     "kind": "heading",
+     "level": 1,
+     "children": [
+      {
+       "kind": "text",
+       "text": "a"
+      }
+     ]
+    },
+    {
+     "kind": "list",
+     "ordered": false,
+     "start": 1,
+     "items": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "b"
+        }
+       ],
+       "task": false,
+       "checked": false,
+       "line": null,
+       "blocks": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "# a\n\n- b\n",
+   "blocks": [
+    {
+     "kind": "heading",
+     "level": 1,
+     "children": [
+      {
+       "kind": "text",
+       "text": "a"
+      }
+     ]
+    },
+    {
+     "kind": "list",
+     "ordered": false,
+     "start": 1,
+     "items": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "b"
+        }
+       ],
+       "task": false,
+       "checked": false,
+       "line": null,
+       "blocks": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "> quoted\n# heading",
+   "blocks": [
+    {
+     "kind": "quote",
+     "blocks": [
+      {
+       "kind": "paragraph",
+       "children": [
+        {
+         "kind": "text",
+         "text": "quoted"
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "kind": "heading",
+     "level": 1,
+     "children": [
+      {
+       "kind": "text",
+       "text": "heading"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "**b**",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "strong",
+       "children": [
+        {
+         "kind": "text",
+         "text": "b"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "__b__",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "strong",
+       "children": [
+        {
+         "kind": "text",
+         "text": "b"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "*i*",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "em",
+       "children": [
+        {
+         "kind": "text",
+         "text": "i"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "_i_",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "em",
+       "children": [
+        {
+         "kind": "text",
+         "text": "i"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "~~s~~",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "strike",
+       "children": [
+        {
+         "kind": "text",
+         "text": "s"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "## a **b**",
+   "blocks": [
+    {
+     "kind": "heading",
+     "level": 2,
+     "children": [
+      {
+       "kind": "text",
+       "text": "a "
+      },
+      {
+       "kind": "strong",
+       "children": [
+        {
+         "kind": "text",
+         "text": "b"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "a ** b",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "a ** b"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "`a*b*c`",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "code",
+       "text": "a*b*c"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "*a `b*c` d*",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "em",
+       "children": [
+        {
+         "kind": "text",
+         "text": "a "
+        },
+        {
+         "kind": "code",
+         "text": "b*c"
+        },
+        {
+         "kind": "text",
+         "text": " d"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "``a ` b``",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "code",
+       "text": "a ` b"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "\\*not italic\\*",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "*not italic*"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "see https://example.com now",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "see "
+      },
+      {
+       "kind": "link",
+       "href": "https://example.com/",
+       "children": [
+        {
+         "kind": "text",
+         "text": "https://example.com"
+        }
+       ]
+      },
+      {
+       "kind": "text",
+       "text": " now"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "xhttps://example.com",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "xhttps://example.com"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "see https://example.com/a.",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "see "
+      },
+      {
+       "kind": "link",
+       "href": "https://example.com/a",
+       "children": [
+        {
+         "kind": "text",
+         "text": "https://example.com/a"
+        }
+       ]
+      },
+      {
+       "kind": "text",
+       "text": "."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "![alt](https://example.com/a.png)",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "link",
+       "href": "https://example.com/a.png",
+       "children": [
+        {
+         "kind": "text",
+         "text": "alt"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "<img src=x onerror=\"alert(1)\">",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "<img src=x onerror=\"alert(1)\">"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "[x](javascript:alert(1))",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "[x](javascript:alert(1)"
+      },
+      {
+       "kind": "text",
+       "text": ")"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "[x](data:text/html,<script>alert(1)</script>)",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "[x](data:text/html,<script>alert(1)"
+      },
+      {
+       "kind": "text",
+       "text": "</script>)"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "[x](vbscript:msgbox)",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "[x](vbscript:msgbox)"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "[x](blob:https://example.com/abc)",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "[x](blob:https://example.com/abc)"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "[x](file:///etc/passwd)",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "[x](file:///etc/passwd)"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "[x](   javascript:alert(1))",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "[x](   javascript:alert(1)"
+      },
+      {
+       "kind": "text",
+       "text": ")"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "[x](JaVaScRiPt:alert(1))",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "[x](JaVaScRiPt:alert(1)"
+      },
+      {
+       "kind": "text",
+       "text": ")"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "[a](http://example.com)",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "link",
+       "href": "http://example.com/",
+       "children": [
+        {
+         "kind": "text",
+         "text": "a"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "[a](https://example.com)",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "link",
+       "href": "https://example.com/",
+       "children": [
+        {
+         "kind": "text",
+         "text": "a"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "[a](mailto:someone@example.com)",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "link",
+       "href": "mailto:someone@example.com",
+       "children": [
+        {
+         "kind": "text",
+         "text": "a"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "[a](./notes)",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "link",
+       "href": "https://sealbook.invalid/notes",
+       "children": [
+        {
+         "kind": "text",
+         "text": "a"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "[see https://example.com](https://other.example)",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "link",
+       "href": "https://other.example/",
+       "children": [
+        {
+         "kind": "text",
+         "text": "see https://example.com"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "![Sunset](attachment:abc-123)",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "image",
+       "attachmentId": "abc-123",
+       "alt": "Sunset"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "[x](attachment:abc-123)",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "[x](attachment:abc-123)"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "![a](https://example.com/x.png)",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "link",
+       "href": "https://example.com/x.png",
+       "children": [
+        {
+         "kind": "text",
+         "text": "a"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "| Day | Plan |\n| --- | --- |\n| Sat | Land 12:15 |\n| Sun | Sintra |",
+   "blocks": [
+    {
+     "kind": "table",
+     "align": [
+      null,
+      null
+     ],
+     "header": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "Day"
+        }
+       ],
+       "raw": "Day",
+       "span": 1
+      },
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "Plan"
+        }
+       ],
+       "raw": "Plan",
+       "span": 1
+      }
+     ],
+     "rows": [
+      [
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "Sat"
+         }
+        ],
+        "raw": "Sat",
+        "span": 1
+       },
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "Land 12:15"
+         }
+        ],
+        "raw": "Land 12:15",
+        "span": 1
+       }
+      ],
+      [
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "Sun"
+         }
+        ],
+        "raw": "Sun",
+        "span": 1
+       },
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "Sintra"
+         }
+        ],
+        "raw": "Sintra",
+        "span": 1
+       }
+      ]
+     ],
+     "layout": {
+      "heights": {},
+      "fills": {},
+      "rowspans": {}
+     },
+     "line": null
+    }
+   ]
+  },
+  {
+   "input": "Day | Plan\n--- | ---\nSat | Land",
+   "blocks": [
+    {
+     "kind": "table",
+     "align": [
+      null,
+      null
+     ],
+     "header": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "Day"
+        }
+       ],
+       "raw": "Day",
+       "span": 1
+      },
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "Plan"
+        }
+       ],
+       "raw": "Plan",
+       "span": 1
+      }
+     ],
+     "rows": [
+      [
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "Sat"
+         }
+        ],
+        "raw": "Sat",
+        "span": 1
+       },
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "Land"
+         }
+        ],
+        "raw": "Land",
+        "span": 1
+       }
+      ]
+     ],
+     "layout": {
+      "heights": {},
+      "fills": {},
+      "rowspans": {}
+     },
+     "line": null
+    }
+   ]
+  },
+  {
+   "input": "| a | b | c | d |\n| --- | :-- | :-: | --: |\n| 1 | 2 | 3 | 4 |",
+   "blocks": [
+    {
+     "kind": "table",
+     "align": [
+      null,
+      "left",
+      "center",
+      "right"
+     ],
+     "header": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "a"
+        }
+       ],
+       "raw": "a",
+       "span": 1
+      },
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "b"
+        }
+       ],
+       "raw": "b",
+       "span": 1
+      },
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "c"
+        }
+       ],
+       "raw": "c",
+       "span": 1
+      },
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "d"
+        }
+       ],
+       "raw": "d",
+       "span": 1
+      }
+     ],
+     "rows": [
+      [
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "1"
+         }
+        ],
+        "raw": "1",
+        "span": 1
+       },
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "2"
+         }
+        ],
+        "raw": "2",
+        "span": 1
+       },
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "3"
+         }
+        ],
+        "raw": "3",
+        "span": 1
+       },
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "4"
+         }
+        ],
+        "raw": "4",
+        "span": 1
+       }
+      ]
+     ],
+     "layout": {
+      "heights": {},
+      "fills": {},
+      "rowspans": {}
+     },
+     "line": null
+    }
+   ]
+  },
+  {
+   "input": "| Plan |\n| --- |\n| hold expires **8 August** |",
+   "blocks": [
+    {
+     "kind": "table",
+     "align": [
+      null
+     ],
+     "header": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "Plan"
+        }
+       ],
+       "raw": "Plan",
+       "span": 1
+      }
+     ],
+     "rows": [
+      [
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "hold expires "
+         },
+         {
+          "kind": "strong",
+          "children": [
+           {
+            "kind": "text",
+            "text": "8 August"
+           }
+          ]
+         }
+        ],
+        "raw": "hold expires **8 August**",
+        "span": 1
+       }
+      ]
+     ],
+     "layout": {
+      "heights": {},
+      "fills": {},
+      "rowspans": {}
+     },
+     "line": null
+    }
+   ]
+  },
+  {
+   "input": "| a | b |\n| --- | --- |\n| one \\| two | three |",
+   "blocks": [
+    {
+     "kind": "table",
+     "align": [
+      null,
+      null
+     ],
+     "header": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "a"
+        }
+       ],
+       "raw": "a",
+       "span": 1
+      },
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "b"
+        }
+       ],
+       "raw": "b",
+       "span": 1
+      }
+     ],
+     "rows": [
+      [
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "one | two"
+         }
+        ],
+        "raw": "one | two",
+        "span": 1
+       },
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "three"
+         }
+        ],
+        "raw": "three",
+        "span": 1
+       }
+      ]
+     ],
+     "layout": {
+      "heights": {},
+      "fills": {},
+      "rowspans": {}
+     },
+     "line": null
+    }
+   ]
+  },
+  {
+   "input": "| a | b |\n| --- | --- |\n| 1 | 2 |\n<!-- sealbook:table h=1:48 bg=0.0:amber rs=1.0:2 -->",
+   "blocks": [
+    {
+     "kind": "table",
+     "align": [
+      null,
+      null
+     ],
+     "header": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "a"
+        }
+       ],
+       "raw": "a",
+       "span": 1
+      },
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "b"
+        }
+       ],
+       "raw": "b",
+       "span": 1
+      }
+     ],
+     "rows": [
+      [
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "1"
+         }
+        ],
+        "raw": "1",
+        "span": 1
+       },
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "2"
+         }
+        ],
+        "raw": "2",
+        "span": 1
+       }
+      ]
+     ],
+     "layout": {
+      "heights": {
+       "1": 48
+      },
+      "fills": {
+       "0.0": "amber"
+      },
+      "rowspans": {
+       "1.0": 2
+      }
+     },
+     "line": null
+    }
+   ]
+  },
+  {
+   "input": "| a | b |\n| --- | --- |\n| 1 | 2 |",
+   "blocks": [
+    {
+     "kind": "table",
+     "align": [
+      null,
+      null
+     ],
+     "header": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "a"
+        }
+       ],
+       "raw": "a",
+       "span": 1
+      },
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "b"
+        }
+       ],
+       "raw": "b",
+       "span": 1
+      }
+     ],
+     "rows": [
+      [
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "1"
+         }
+        ],
+        "raw": "1",
+        "span": 1
+       },
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "2"
+         }
+        ],
+        "raw": "2",
+        "span": 1
+       }
+      ]
+     ],
+     "layout": {
+      "heights": {},
+      "fills": {},
+      "rowspans": {}
+     },
+     "line": null
+    }
+   ]
+  },
+  {
+   "input": "| a |\n| --- |\n| 1 |\n<!-- sealbook:table bg=0.0:neon future=yes h=0:24 -->",
+   "blocks": [
+    {
+     "kind": "table",
+     "align": [
+      null
+     ],
+     "header": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "a"
+        }
+       ],
+       "raw": "a",
+       "span": 1
+      }
+     ],
+     "rows": [
+      [
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "1"
+         }
+        ],
+        "raw": "1",
+        "span": 1
+       }
+      ]
+     ],
+     "layout": {
+      "heights": {
+       "0": 24
+      },
+      "fills": {},
+      "rowspans": {}
+     },
+     "line": null
+    }
+   ]
+  },
+  {
+   "input": "| a |\n| --- |\n| 1 |\n\n<!-- sealbook:table h=0:24 -->",
+   "blocks": [
+    {
+     "kind": "table",
+     "align": [
+      null
+     ],
+     "header": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "a"
+        }
+       ],
+       "raw": "a",
+       "span": 1
+      }
+     ],
+     "rows": [
+      [
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "1"
+         }
+        ],
+        "raw": "1",
+        "span": 1
+       }
+      ]
+     ],
+     "layout": {
+      "heights": {},
+      "fills": {},
+      "rowspans": {}
+     },
+     "line": null
+    },
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "<!-- sealbook:table h=0:24 -->"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "| a | b | c |\n| --- | --- | --- |\n| 1 |\n| 1 | 2 | 3 | 4 |",
+   "blocks": [
+    {
+     "kind": "table",
+     "align": [
+      null,
+      null,
+      null
+     ],
+     "header": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "a"
+        }
+       ],
+       "raw": "a",
+       "span": 1
+      },
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "b"
+        }
+       ],
+       "raw": "b",
+       "span": 1
+      },
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "c"
+        }
+       ],
+       "raw": "c",
+       "span": 1
+      }
+     ],
+     "rows": [
+      [
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "1"
+         }
+        ],
+        "raw": "1",
+        "span": 1
+       },
+       {
+        "children": [],
+        "raw": "",
+        "span": 1
+       },
+       {
+        "children": [],
+        "raw": "",
+        "span": 1
+       }
+      ],
+      [
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "1"
+         }
+        ],
+        "raw": "1",
+        "span": 1
+       },
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "2"
+         }
+        ],
+        "raw": "2",
+        "span": 1
+       },
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "3"
+         }
+        ],
+        "raw": "3",
+        "span": 1
+       }
+      ]
+     ],
+     "layout": {
+      "heights": {},
+      "fills": {},
+      "rowspans": {}
+     },
+     "line": null
+    }
+   ]
+  },
+  {
+   "input": "| a |\n| --- |\n| 1 |\n\nAfter the table.",
+   "blocks": [
+    {
+     "kind": "table",
+     "align": [
+      null
+     ],
+     "header": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "a"
+        }
+       ],
+       "raw": "a",
+       "span": 1
+      }
+     ],
+     "rows": [
+      [
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "1"
+         }
+        ],
+        "raw": "1",
+        "span": 1
+       }
+      ]
+     ],
+     "layout": {
+      "heights": {},
+      "fills": {},
+      "rowspans": {}
+     },
+     "line": null
+    },
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "After the table."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "| a |\n| --- |\n| 1 |\n## Next",
+   "blocks": [
+    {
+     "kind": "table",
+     "align": [
+      null
+     ],
+     "header": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "a"
+        }
+       ],
+       "raw": "a",
+       "span": 1
+      }
+     ],
+     "rows": [
+      [
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "1"
+         }
+        ],
+        "raw": "1",
+        "span": 1
+       }
+      ]
+     ],
+     "layout": {
+      "heights": {},
+      "fills": {},
+      "rowspans": {}
+     },
+     "line": null
+    },
+    {
+     "kind": "heading",
+     "level": 2,
+     "children": [
+      {
+       "kind": "text",
+       "text": "Next"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "| a | b |\n| --- |\n| 1 | 2 |",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "| a | b | | --- | | 1 | 2 |"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "| a | b |\n| --- | --- | --- |",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "| a | b | | --- | --- | --- |"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "| a | b |\n| 1 | 2 |",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "| a | b | | 1 | 2 |"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "Some prose\n| a | b |\n| --- | --- |\n| 1 | 2 |",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "Some prose | a | b | | --- | --- | | 1 | 2 |"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "- a | b\n- | -",
+   "blocks": [
+    {
+     "kind": "list",
+     "ordered": false,
+     "start": 1,
+     "items": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "a | b"
+        }
+       ],
+       "task": false,
+       "checked": false,
+       "line": null,
+       "blocks": []
+      },
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "| -"
+        }
+       ],
+       "task": false,
+       "checked": false,
+       "line": null,
+       "blocks": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "> | a |\n> | --- |\n> | 1 |",
+   "blocks": [
+    {
+     "kind": "quote",
+     "blocks": [
+      {
+       "kind": "table",
+       "align": [
+        null
+       ],
+       "header": [
+        {
+         "children": [
+          {
+           "kind": "text",
+           "text": "a"
+          }
+         ],
+         "raw": "a",
+         "span": 1
+        }
+       ],
+       "rows": [
+        [
+         {
+          "children": [
+           {
+            "kind": "text",
+            "text": "1"
+           }
+          ],
+          "raw": "1",
+          "span": 1
+         }
+        ]
+       ],
+       "layout": {
+        "heights": {},
+        "fills": {},
+        "rowspans": {}
+       },
+       "line": null
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "---",
+   "blocks": [
+    {
+     "kind": "rule"
+    }
+   ]
+  },
+  {
+   "input": "***both***",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "strong",
+       "children": [
+        {
+         "kind": "em",
+         "children": [
+          {
+           "kind": "text",
+           "text": "both"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "___both___",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "strong",
+       "children": [
+        {
+         "kind": "em",
+         "children": [
+          {
+           "kind": "text",
+           "text": "both"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "***loose",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "***loose"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "**bold**",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "strong",
+       "children": [
+        {
+         "kind": "text",
+         "text": "bold"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "- one\n  - inner\n- two",
+   "blocks": [
+    {
+     "kind": "list",
+     "ordered": false,
+     "start": 1,
+     "items": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "one"
+        }
+       ],
+       "task": false,
+       "checked": false,
+       "line": null,
+       "blocks": [
+        {
+         "kind": "list",
+         "ordered": false,
+         "start": 1,
+         "items": [
+          {
+           "children": [
+            {
+             "kind": "text",
+             "text": "inner"
+            }
+           ],
+           "task": false,
+           "checked": false,
+           "line": null,
+           "blocks": []
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "two"
+        }
+       ],
+       "task": false,
+       "checked": false,
+       "line": null,
+       "blocks": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "- a\n  - b\n    - c",
+   "blocks": [
+    {
+     "kind": "list",
+     "ordered": false,
+     "start": 1,
+     "items": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "a"
+        }
+       ],
+       "task": false,
+       "checked": false,
+       "line": null,
+       "blocks": [
+        {
+         "kind": "list",
+         "ordered": false,
+         "start": 1,
+         "items": [
+          {
+           "children": [
+            {
+             "kind": "text",
+             "text": "b"
+            }
+           ],
+           "task": false,
+           "checked": false,
+           "line": null,
+           "blocks": [
+            {
+             "kind": "list",
+             "ordered": false,
+             "start": 1,
+             "items": [
+              {
+               "children": [
+                {
+                 "kind": "text",
+                 "text": "c"
+                }
+               ],
+               "task": false,
+               "checked": false,
+               "line": null,
+               "blocks": []
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "- bullet\n  1. first\n  2. second",
+   "blocks": [
+    {
+     "kind": "list",
+     "ordered": false,
+     "start": 1,
+     "items": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "bullet"
+        }
+       ],
+       "task": false,
+       "checked": false,
+       "line": null,
+       "blocks": [
+        {
+         "kind": "list",
+         "ordered": true,
+         "start": 1,
+         "items": [
+          {
+           "children": [
+            {
+             "kind": "text",
+             "text": "first"
+            }
+           ],
+           "task": false,
+           "checked": false,
+           "line": null,
+           "blocks": []
+          },
+          {
+           "children": [
+            {
+             "kind": "text",
+             "text": "second"
+            }
+           ],
+           "task": false,
+           "checked": false,
+           "line": null,
+           "blocks": []
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "- one\n\t- inner",
+   "blocks": [
+    {
+     "kind": "list",
+     "ordered": false,
+     "start": 1,
+     "items": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "one"
+        }
+       ],
+       "task": false,
+       "checked": false,
+       "line": null,
+       "blocks": [
+        {
+         "kind": "list",
+         "ordered": false,
+         "start": 1,
+         "items": [
+          {
+           "children": [
+            {
+             "kind": "text",
+             "text": "inner"
+            }
+           ],
+           "task": false,
+           "checked": false,
+           "line": null,
+           "blocks": []
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "  - only\n  - second",
+   "blocks": [
+    {
+     "kind": "list",
+     "ordered": false,
+     "start": 1,
+     "items": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "only"
+        }
+       ],
+       "task": false,
+       "checked": false,
+       "line": null,
+       "blocks": []
+      },
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "second"
+        }
+       ],
+       "task": false,
+       "checked": false,
+       "line": null,
+       "blocks": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "- one\n      - deep\n      - also deep",
+   "blocks": [
+    {
+     "kind": "list",
+     "ordered": false,
+     "start": 1,
+     "items": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "one"
+        }
+       ],
+       "task": false,
+       "checked": false,
+       "line": null,
+       "blocks": [
+        {
+         "kind": "list",
+         "ordered": false,
+         "start": 1,
+         "items": [
+          {
+           "children": [
+            {
+             "kind": "text",
+             "text": "deep"
+            }
+           ],
+           "task": false,
+           "checked": false,
+           "line": null,
+           "blocks": []
+          },
+          {
+           "children": [
+            {
+             "kind": "text",
+             "text": "also deep"
+            }
+           ],
+           "task": false,
+           "checked": false,
+           "line": null,
+           "blocks": []
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "- level\n  - level\n    - level\n      - level\n        - level\n          - level\n            - level\n              - level\n                - level\n                  - level\n                    - level\n                      - level\n                        - level\n                          - level\n                            - level\n                              - level\n                                - level\n                                  - level\n                                    - level\n                                      - level\n                                        - level\n                                          - level\n                                            - level\n                                              - level\n                                                - level\n                                                  - level\n                                                    - level\n                                                      - level\n                                                        - level\n                                                          - level\n                                                            - level\n                                                              - level\n                                                                - level\n                                                                  - level\n                                                                    - level\n                                                                      - level\n                                                                        - level\n                                                                          - level\n                                                                            - level\n                                                                              - level",
+   "blocks": [
+    {
+     "kind": "list",
+     "ordered": false,
+     "start": 1,
+     "items": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "level"
+        }
+       ],
+       "task": false,
+       "checked": false,
+       "line": null,
+       "blocks": [
+        {
+         "kind": "list",
+         "ordered": false,
+         "start": 1,
+         "items": [
+          {
+           "children": [
+            {
+             "kind": "text",
+             "text": "level"
+            }
+           ],
+           "task": false,
+           "checked": false,
+           "line": null,
+           "blocks": [
+            {
+             "kind": "list",
+             "ordered": false,
+             "start": 1,
+             "items": [
+              {
+               "children": [
+                {
+                 "kind": "text",
+                 "text": "level"
+                }
+               ],
+               "task": false,
+               "checked": false,
+               "line": null,
+               "blocks": [
+                {
+                 "kind": "list",
+                 "ordered": false,
+                 "start": 1,
+                 "items": [
+                  {
+                   "children": [
+                    {
+                     "kind": "text",
+                     "text": "level"
+                    }
+                   ],
+                   "task": false,
+                   "checked": false,
+                   "line": null,
+                   "blocks": [
+                    {
+                     "kind": "list",
+                     "ordered": false,
+                     "start": 1,
+                     "items": [
+                      {
+                       "children": [
+                        {
+                         "kind": "text",
+                         "text": "level"
+                        }
+                       ],
+                       "task": false,
+                       "checked": false,
+                       "line": null,
+                       "blocks": [
+                        {
+                         "kind": "list",
+                         "ordered": false,
+                         "start": 1,
+                         "items": [
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          },
+                          {
+                           "children": [
+                            {
+                             "kind": "text",
+                             "text": "level"
+                            }
+                           ],
+                           "task": false,
+                           "checked": false,
+                           "line": null,
+                           "blocks": []
+                          }
+                         ]
+                        }
+                       ]
+                      }
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "# Title\n\n- [ ] one\n- [x] two",
+   "blocks": [
+    {
+     "kind": "heading",
+     "level": 1,
+     "children": [
+      {
+       "kind": "text",
+       "text": "Title"
+      }
+     ]
+    },
+    {
+     "kind": "list",
+     "ordered": false,
+     "start": 1,
+     "items": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "one"
+        }
+       ],
+       "task": true,
+       "checked": false,
+       "line": null,
+       "blocks": []
+      },
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "two"
+        }
+       ],
+       "task": true,
+       "checked": true,
+       "line": null,
+       "blocks": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "- [ ] parent\n  - [ ] child",
+   "blocks": [
+    {
+     "kind": "list",
+     "ordered": false,
+     "start": 1,
+     "items": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "parent"
+        }
+       ],
+       "task": true,
+       "checked": false,
+       "line": null,
+       "blocks": [
+        {
+         "kind": "list",
+         "ordered": false,
+         "start": 1,
+         "items": [
+          {
+           "children": [
+            {
+             "kind": "text",
+             "text": "child"
+            }
+           ],
+           "task": true,
+           "checked": false,
+           "line": null,
+           "blocks": []
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "> - [ ] quoted",
+   "blocks": [
+    {
+     "kind": "quote",
+     "blocks": [
+      {
+       "kind": "list",
+       "ordered": false,
+       "start": 1,
+       "items": [
+        {
+         "children": [
+          {
+           "kind": "text",
+           "text": "quoted"
+          }
+         ],
+         "task": true,
+         "checked": false,
+         "line": null,
+         "blocks": []
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "text\n\n| a | b |\n| --- | --- |\n| 1 | 2 |",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "text",
+       "text": "text"
+      }
+     ]
+    },
+    {
+     "kind": "table",
+     "align": [
+      null,
+      null
+     ],
+     "header": [
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "a"
+        }
+       ],
+       "raw": "a",
+       "span": 1
+      },
+      {
+       "children": [
+        {
+         "kind": "text",
+         "text": "b"
+        }
+       ],
+       "raw": "b",
+       "span": 1
+      }
+     ],
+     "rows": [
+      [
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "1"
+         }
+        ],
+        "raw": "1",
+        "span": 1
+       },
+       {
+        "children": [
+         {
+          "kind": "text",
+          "text": "2"
+         }
+        ],
+        "raw": "2",
+        "span": 1
+       }
+      ]
+     ],
+     "layout": {
+      "heights": {},
+      "fills": {},
+      "rowspans": {}
+     },
+     "line": null
+    }
+   ]
+  },
+  {
+   "input": "- **bold** and `code` and [link](https://example.com)",
+   "blocks": [
+    {
+     "kind": "list",
+     "ordered": false,
+     "start": 1,
+     "items": [
+      {
+       "children": [
+        {
+         "kind": "strong",
+         "children": [
+          {
+           "kind": "text",
+           "text": "bold"
+          }
+         ]
+        },
+        {
+         "kind": "text",
+         "text": " and "
+        },
+        {
+         "kind": "code",
+         "text": "code"
+        },
+        {
+         "kind": "text",
+         "text": " and "
+        },
+        {
+         "kind": "link",
+         "href": "https://example.com/",
+         "children": [
+          {
+           "kind": "text",
+           "text": "link"
+          }
+         ]
+        }
+       ],
+       "task": false,
+       "checked": false,
+       "line": null,
+       "blocks": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "[a](https://example.com?x=1#top)",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "link",
+       "href": "https://example.com/?x=1#top",
+       "children": [
+        {
+         "kind": "text",
+         "text": "a"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "[a](https://example.com/p?x=1)",
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "children": [
+      {
+       "kind": "link",
+       "href": "https://example.com/p?x=1",
+       "children": [
+        {
+         "kind": "text",
+         "text": "a"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

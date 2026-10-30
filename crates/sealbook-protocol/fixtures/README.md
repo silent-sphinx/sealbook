@@ -20,6 +20,13 @@ both builds already require for the wasm module and the JNI library.
   `ACCENT_COLORS`, Android's `Color.kt` and `AccentKey`, and Firefox's popup
   stylesheet are each held to it by a test, so a colour changes here first.
 
+- `notes/markdown.json` - note bodies and the block tree the reader shows for
+  each. Web and Android each parse every input and compare the tree (without
+  `line`). The web parser is the reference: change a rule there, regenerate with
+  `REGENERATE_MARKDOWN_FIXTURE=1 npx vitest run src/lib/markdownCorpus.test.ts`
+  in `sealbook-web`, then make Android agree. Android has no image inline, so it
+  skips inputs that hold an `attachment:` reference.
+
 - `v1.0.0-account-export.json` — the v1.0.0 release's own account export,
   carrying a content type that release had no parser for and a payload that is
   not JSON. Pins that both the CLI and the web importer still round-trip every
