@@ -24,6 +24,7 @@ mod bookmarks;
 mod calendars;
 mod contact_json;
 mod contact_profile;
+mod contact_search;
 mod contacts;
 mod csv;
 mod error;
@@ -176,6 +177,7 @@ pub use tasks::{
 };
 
 pub use contact_json::{contacts_import, json_import, CoreContactFile};
+pub use contact_search::{ContactIndex, CoreBookName, CoreContactSource};
 pub use csv::{csv_import, csv_parse, csv_rows, csv_write};
 pub use markdown::repair_pipe_tables;
 pub use notes_file::{

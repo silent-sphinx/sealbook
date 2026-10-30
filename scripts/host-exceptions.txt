@@ -18,3 +18,4 @@ mirror | web and Android noteFitsObjectLimit, sortNotes | editor and list respon
 mirror | web markdown.ts and Android Markdown.kt | display parser twin, no shared document tree yet (plan H.3 decision gate) | pipe-tables.json covers the table repair only
 mirror | web sortNotes, web sortTasks | web ignores pins (favouriting was removed there); tasks order by due time, which needs the device zone | web noteParity.test.ts, taskParity.test.ts
 mirror | web and Android calendar event order | orders by start time in the device zone | none, display only
+mirror | web and Android note, bookmark, task and event search | a lowercase substring test per keystroke; note bodies are too large to cross into wasm each time | none, display only

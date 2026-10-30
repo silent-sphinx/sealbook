@@ -2745,3 +2745,35 @@ pub fn core_order_by_recency(
         pinned_first,
     ))
 }
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct CoreContactSourceList(pub Vec<sealbook_core::CoreContactSource>);
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct CoreBookNameList(pub Vec<sealbook_core::CoreBookName>);
+
+/// Every contact, searchable. Built once from the stored cards, then asked per keystroke.
+#[wasm_bindgen]
+pub struct CoreContactIndex {
+    inner: sealbook_core::ContactIndex,
+}
+
+#[wasm_bindgen]
+impl CoreContactIndex {
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        sources: Ts<CoreContactSourceList>,
+        books: Ts<CoreBookNameList>,
+    ) -> Result<CoreContactIndex, JsError> {
+        Ok(CoreContactIndex {
+            inner: sealbook_core::ContactIndex::new(&sources.to_rust()?.0, &books.to_rust()?.0),
+        })
+    }
+
+    /// Ids of the matching contacts, best first; every id for an empty query.
+    pub fn search(&self, query: &str) -> Vec<String> {
+        self.inner.search(query)
+    }
+}
