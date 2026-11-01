@@ -37,7 +37,67 @@ pub fn write_payload(previous: Option<&str>, fields: Value, owned: &[&str]) -> S
     if let Some(previous) = higher_version(previous, &merged) {
         merged.insert("version".into(), Value::String(previous));
     }
-    Value::Object(merged).to_string()
+    natural_json(&Value::Object(merged))
+}
+
+/// Compact JSON with each object's keys in natural order, so `e2` precedes
+/// `e10`. Clients that predate core read numbered entries in file order, and
+/// for keys without digits this is the sorted order `to_string` gives.
+fn natural_json(value: &Value) -> String {
+    match value {
+        Value::Object(object) => {
+            let mut entries: Vec<_> = object.iter().collect();
+            entries.sort_by(|(a, _), (b, _)| natural_cmp(a, b));
+            let body: Vec<String> = entries
+                .into_iter()
+                .map(|(key, value)| {
+                    format!("{}:{}", Value::from(key.as_str()), natural_json(value))
+                })
+                .collect();
+            format!("{{{}}}", body.join(","))
+        }
+        Value::Array(items) => {
+            let body: Vec<String> = items.iter().map(natural_json).collect();
+            format!("[{}]", body.join(","))
+        }
+        scalar => scalar.to_string(),
+    }
+}
+
+fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let (a_bytes, b_bytes) = (a.as_bytes(), b.as_bytes());
+    let (mut i, mut j) = (0, 0);
+    while i < a_bytes.len() && j < b_bytes.len() {
+        if a_bytes[i].is_ascii_digit() && b_bytes[j].is_ascii_digit() {
+            let run = |bytes: &[u8], start: usize| {
+                start
+                    + bytes[start..]
+                        .iter()
+                        .take_while(|b| b.is_ascii_digit())
+                        .count()
+            };
+            let (a_end, b_end) = (run(a_bytes, i), run(b_bytes, j));
+            let trim = |digits: &[u8]| {
+                let zeros = digits.iter().take_while(|&&d| d == b'0').count();
+                digits[zeros..].to_vec()
+            };
+            let (x, y) = (trim(&a_bytes[i..a_end]), trim(&b_bytes[j..b_end]));
+            let order = x.len().cmp(&y.len()).then_with(|| x.cmp(&y));
+            if order.is_ne() {
+                return order;
+            }
+            (i, j) = (a_end, b_end);
+        } else {
+            let order = a_bytes[i].cmp(&b_bytes[j]);
+            if order.is_ne() {
+                return order;
+            }
+            (i, j) = (i + 1, j + 1);
+        }
+    }
+    (a_bytes.len() - i)
+        .cmp(&(b_bytes.len() - j))
+        .then_with(|| a.cmp(b))
 }
 
 /// The version `previous` declares, when it is a later minor of the major this
@@ -242,6 +302,36 @@ pub mod ffi {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn numbered_keys_are_written_in_number_order() {
+        let written = write_payload(
+            None,
+            serde_json::json!({ "emails": { "e10": 10, "e2": 2, "e1": 1 }, "@type": "Card", "a": [{ "x11": 0, "x9": 0 }] }),
+            &["emails", "@type", "a"],
+        );
+        assert_eq!(
+            written,
+            r#"{"@type":"Card","a":[{"x9":0,"x11":0}],"emails":{"e1":1,"e2":2,"e10":10}}"#
+        );
+    }
+
+    #[test]
+    fn keys_without_differing_numbers_keep_sorted_order() {
+        let keys = [
+            "", "a", "a1", "a1b", "ab", "B", "b2", "e01", "e1", "@type", "é", "zz",
+        ];
+        for a in keys {
+            for b in keys {
+                if a.bytes().filter(u8::is_ascii_digit).count() < 2
+                    && b.bytes().filter(u8::is_ascii_digit).count() < 2
+                {
+                    assert_eq!(natural_cmp(a, b), a.cmp(b), "{a} vs {b}");
+                }
+            }
+        }
+        assert_eq!(natural_cmp("e1", "e01"), std::cmp::Ordering::Greater);
+    }
 
     #[test]
     fn the_content_type_then_the_tag_then_the_legacy_shape_names_the_kind() {
