@@ -19,7 +19,7 @@ mod tests {
 
     #[test]
     fn the_default_comes_first_and_the_rest_by_lowercase_name() {
-        let mut items = vec![("c", "beta"), ("a", "Zed"), ("d", "Alpha"), ("b", "zzz")];
+        let mut items = [("c", "beta"), ("a", "Zed"), ("d", "Alpha"), ("b", "zzz")];
         items.sort_by(|x, y| container_order("b", *x, *y));
         let ids: Vec<&str> = items.iter().map(|item| item.0).collect();
         assert_eq!(ids, ["b", "d", "c", "a"]);
