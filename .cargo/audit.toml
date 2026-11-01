@@ -1,0 +1,7 @@
+[advisories]
+ignore = [
+    # crypto-bigint 0.5 arrives only through opaque-ke 4 -> elliptic-curve 0.13.
+    # The OPAQUE suite is Ristretto255 and no NIST curve is in the tree, so none
+    # of its arithmetic runs. Drop once opaque-ke 4.1 ships.
+    "RUSTSEC-2026-0387",
+]

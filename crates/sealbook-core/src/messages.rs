@@ -93,7 +93,7 @@ pub fn attachment_message(refusal: &AttachmentRefusal) -> String {
 
 fn megabytes(bytes: u64) -> String {
     let tenths = (bytes * 10 + 524_288) / 1_048_576;
-    if tenths % 10 == 0 {
+    if tenths.is_multiple_of(10) {
         (tenths / 10).to_string()
     } else {
         format!("{}.{}", tenths / 10, tenths % 10)

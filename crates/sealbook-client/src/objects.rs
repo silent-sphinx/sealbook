@@ -809,6 +809,21 @@ impl SealbookClient {
     }
 }
 
+fn ordered_containers(default_id: &str, rows: Vec<(Uuid, String)>) -> Vec<(Uuid, String)> {
+    let items: Vec<sealbook_core::CoreOrderItem> = rows
+        .iter()
+        .map(|(id, name)| sealbook_core::CoreOrderItem {
+            id: id.to_string(),
+            name: name.clone(),
+            ..Default::default()
+        })
+        .collect();
+    sealbook_core::order_containers(default_id, &items)
+        .iter()
+        .filter_map(|id| rows.iter().find(|(row, _)| row.to_string() == *id).cloned())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{import_chunks, ExportedObject};
@@ -883,19 +898,4 @@ mod tests {
     // The envelope format itself is covered in `sealbook_protocol::envelope`,
     // which is where all three clients read it from. The walk and the row
     // classification are covered in `sealbook_core::sync`.
-}
-
-fn ordered_containers(default_id: &str, rows: Vec<(Uuid, String)>) -> Vec<(Uuid, String)> {
-    let items: Vec<sealbook_core::CoreOrderItem> = rows
-        .iter()
-        .map(|(id, name)| sealbook_core::CoreOrderItem {
-            id: id.to_string(),
-            name: name.clone(),
-            ..Default::default()
-        })
-        .collect();
-    sealbook_core::order_containers(default_id, &items)
-        .iter()
-        .filter_map(|id| rows.iter().find(|(row, _)| row.to_string() == *id).cloned())
-        .collect()
 }
