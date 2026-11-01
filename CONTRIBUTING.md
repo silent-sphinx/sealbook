@@ -47,6 +47,16 @@ cargo clippy --all-targets
 cargo test
 ```
 
+## Where a rule belongs
+
+A new payload field, flow or display rule starts in `sealbook-core`, with a
+fixture under `crates/sealbook-protocol/fixtures/` that every client checks. A
+client change that adds logic deciding data, with no counterpart in core, fails
+review. `scripts/check-host-boundaries.sh --strict` scans for it, and
+`scripts/host-exceptions.txt` lists the few places that are deliberately
+separate, each with its reason. To run the same scenario through web and Android
+against a real server, use `scripts/e2e-hosts.sh`.
+
 ## Developer Certificate of Origin
 
 ```
