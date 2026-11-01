@@ -18,6 +18,13 @@ uniffi::setup_scaffolding!();
 // its scaffolding from the cdylib and bindgen emits no Kotlin for it.
 sealbook_core::uniffi_reexport_scaffolding!();
 
+/// The sealbook commit this library was built from, with `-dirty` when the
+/// tree had uncommitted changes.
+#[uniffi::export]
+pub fn sealbook_commit() -> String {
+    env!("SEALBOOK_COMMIT").into()
+}
+
 // ── Helpers ──
 
 fn b64(bytes: &[u8]) -> String {
