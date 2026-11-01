@@ -277,9 +277,9 @@ fn a_stamp_is_utc_seconds_whatever_form_the_instant_came_in() {
 #[test]
 fn a_long_line_folds_on_octets() {
     let folded = ics_fold(&format!("SUMMARY:{}", "\u{e9}".repeat(40)));
-    for (at, line) in folded.split("\r\n").enumerate() {
+    for line in folded.split("\r\n") {
         let size = line.len();
-        assert!(size <= if at == 0 { 75 } else { 75 }, "{size}");
+        assert!(size <= 75, "{size}");
     }
     assert!(folded.contains("\r\n "));
 }
