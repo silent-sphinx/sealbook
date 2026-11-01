@@ -27,6 +27,14 @@ both builds already require for the wasm module and the JNI library.
   in `sealbook-web`, then make Android agree. Android has no image inline, so it
   skips inputs that hold an `attachment:` reference.
 
+- `live/scenario.json` - the steps of the live-server scenario: register, write
+  two contacts and a note, delete one contact, read back, sign in again, and
+  refuse a wrong password. Not part of `corpus.json`; it needs a server. Run
+  `scripts/e2e-hosts.sh`, which starts one `sealbook-server` and drives web
+  (`src/test/liveServer.test.ts`, wasm under Node) and Android
+  (`LiveServerTest`, native library under a JVM) against it. Both skip when
+  `SEALBOOK_E2E_SERVER` is unset.
+
 - `v1.0.0-account-export.json` — the v1.0.0 release's own account export,
   carrying a content type that release had no parser for and a payload that is
   not JSON. Pins that both the CLI and the web importer still round-trip every

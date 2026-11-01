@@ -1,0 +1,14 @@
+{
+  "password": "correct horse battery staple",
+  "wrong_password": "incorrect horse battery staple",
+  "phrase_words": 24,
+  "contacts": ["Ada Lovelace", "Alan Turing"],
+  "deleted_contact": "Alan Turing",
+  "note": {
+    "title": "Live server note",
+    "body": "A body with **bold** text and a [link](https://example.com/)."
+  },
+  "expect": {
+    "live_objects": 2
+  }
+}
