@@ -541,7 +541,7 @@ fn export_object() -> Value {
         "type": "object",
         "description": "One vault object, carrying its plaintext as payload when that parses as JSON and as text otherwise.",
         "properties": {
-            "id": id("Lowercase hyphenated. An id that is not a UUID is written as given, and refused on import."),
+            "id": id("Lowercase hyphenated. A writer leaves out an object whose id is not a UUID and counts it as unreadable."),
             "contentType": { "type": "string", "minLength": 1 },
             "payload": {
                 "not": { "type": "null" },

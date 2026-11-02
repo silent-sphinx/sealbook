@@ -115,6 +115,7 @@ impl Rule {
                 .map(i64::from),
             nth_weekday: rule
                 .nth_weekday
+                .as_ref()
                 .filter(|nth| (1..=5).contains(&nth.ordinal) && nth.weekday <= 6)
                 .map(|nth| (i64::from(nth.ordinal), i64::from(nth.weekday))),
         }
@@ -384,6 +385,7 @@ mod tests {
         monthly.nth_weekday = Some(CoreNthWeekday {
             ordinal: 5,
             weekday: 1,
+            extra: None,
         });
         monthly.until = Some("2026-12-31".into());
         assert_eq!(

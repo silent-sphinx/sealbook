@@ -418,7 +418,11 @@ pub fn ics_rrule(rule: &str, start: &str) -> Option<CoreRecurrence> {
                     .filter(|_| !by_day.starts_with('-'));
                 if let (Some(weekday), Some(ordinal)) = (parse_weekday(by_day), ordinal) {
                     if (1..=5).contains(&ordinal) {
-                        nth_weekday = Some(CoreNthWeekday { ordinal, weekday });
+                        nth_weekday = Some(CoreNthWeekday {
+                            ordinal,
+                            weekday,
+                            extra: None,
+                        });
                     }
                 }
             }

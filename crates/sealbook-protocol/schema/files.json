@@ -96,7 +96,7 @@
           "type": "string"
         },
         "id": {
-          "description": "Lowercase hyphenated. An id that is not a UUID is written as given, and refused on import.",
+          "description": "Lowercase hyphenated. A writer leaves out an object whose id is not a UUID and counts it as unreadable.",
           "format": "uuid",
           "type": "string"
         },

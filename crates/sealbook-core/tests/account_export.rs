@@ -126,6 +126,11 @@ fn writes() -> Vec<Write> {
             0,
         ),
         write(
+            "an object whose id is not a UUID is left out and counted",
+            vec![object("nope", "a", "{}"), object(A, "a", "{}")],
+            1,
+        ),
+        write(
             "a short backup says how short",
             vec![object(A, "a", "{}")],
             3,
@@ -374,8 +379,13 @@ fn the_fixture_pins_what_the_cases_mean() {
             .find(|w| case.name == format!("round trip: {}", w.name))
             .unwrap();
         let imported = case.imported.as_ref().expect(&case.name);
-        let mut expected: Vec<(String, String)> = source
+        // An id that is not a UUID is left out by the writer and counted.
+        let kept: Vec<_> = source
             .objects
+            .iter()
+            .filter(|o| uuid::Uuid::parse_str(&o.id).is_ok())
+            .collect();
+        let mut expected: Vec<(String, String)> = kept
             .iter()
             .map(|o| (o.id.to_lowercase(), o.content_type.clone()))
             .collect();
@@ -386,6 +396,7 @@ fn the_fixture_pins_what_the_cases_mean() {
             .map(|o| (o.id.clone(), o.content_type.clone()))
             .collect();
         assert_eq!(actual, expected, "{}", case.name);
-        assert_eq!(imported.unreadable, source.unreadable);
+        let dropped = (source.objects.len() - kept.len()) as u32;
+        assert_eq!(imported.unreadable, source.unreadable + dropped);
     }
 }

@@ -330,6 +330,7 @@ fn event_write_cases() -> Vec<(String, CoreCalendarEventDraft)> {
                     nth_weekday: Some(CoreNthWeekday {
                         ordinal: 3,
                         weekday: 2,
+                        extra: None,
                     }),
                     extra: None,
                 }),
