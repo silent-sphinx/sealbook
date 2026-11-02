@@ -201,6 +201,8 @@ enum ContactsCommand {
         book: Option<String>,
     },
     /// Write the contacts as a vCard or CSV file.
+    ///
+    /// The file is plaintext, so it is written 0600.
     Export {
         /// `vcf` or `csv`.
         #[arg(long, default_value = "vcf")]
@@ -708,7 +710,7 @@ async fn main() -> Result<()> {
                     .collect();
                 let data = write_contacts(&format, &drafts, &books)?;
                 match out {
-                    Some(path) => std::fs::write(&path, data)
+                    Some(path) => write_private(&path, data.as_bytes())
                         .with_context(|| format!("write {}", path.display()))?,
                     None => print!("{data}"),
                 }
