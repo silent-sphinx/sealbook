@@ -1,6 +1,8 @@
 pub mod attachment;
-mod b64;
+mod base64url;
 pub mod envelope;
+#[cfg(feature = "schema")]
+pub mod schema;
 pub mod version;
 
 pub use attachment::{
@@ -10,6 +12,7 @@ pub use attachment::{
     MAX_ATTACHMENT_SIZE,
 };
 
+use base64url::b64;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -82,11 +85,13 @@ pub const DEFAULT_BOOKMARK_COLLECTION_ID: Uuid = Uuid::from_u128(5);
 pub const DEFAULT_TASK_LIST_ID: Uuid = Uuid::from_u128(6);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ErrorBody {
     pub error: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RegisterStartRequest {
     pub username: String,
     #[serde(with = "b64")]
@@ -94,12 +99,14 @@ pub struct RegisterStartRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RegisterStartResponse {
     #[serde(with = "b64")]
     pub response: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DevicePublicKeys {
     pub device_id: Uuid,
     #[serde(with = "b64")]
@@ -111,6 +118,7 @@ pub struct DevicePublicKeys {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct KeyWrapBody {
     pub recipient_kind: String,
     pub recipient_id: String,
@@ -122,6 +130,7 @@ pub struct KeyWrapBody {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DualSignatureBody {
     #[serde(with = "b64")]
     pub mldsa: Vec<u8>,
@@ -130,6 +139,7 @@ pub struct DualSignatureBody {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RosterSignerBody {
     Device { device_id: Uuid },
@@ -142,6 +152,7 @@ pub enum RosterSignerBody {
 /// so a client never has to take the server's word for which devices exist. See
 /// `sealbook_crypto::roster`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RosterBody {
     pub roster_seq: u64,
     pub key_epoch: u64,
@@ -291,6 +302,7 @@ impl RosterBody {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RosterQuery {
     /// Return every roster from this sequence on, inclusive. Omitted, only the
     /// newest is returned.
@@ -298,6 +310,7 @@ pub struct RosterQuery {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RosterResponse {
     /// Oldest first.
     pub rosters: Vec<RosterBody>,
@@ -311,6 +324,7 @@ pub struct RosterResponse {
 /// presents to fetch its phrase key wrap. The verification keys are separate so
 /// the server never has to hand them out before a proof is supplied.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PhraseRecoveryBody {
     #[serde(with = "b64")]
     pub mldsa_pk: Vec<u8>,
@@ -322,6 +336,7 @@ pub struct PhraseRecoveryBody {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RegisterFinishRequest {
     pub username: String,
     #[serde(with = "b64")]
@@ -344,6 +359,7 @@ pub struct RegisterFinishRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RegisterFinishResponse {
     pub account_id: Uuid,
     pub collection_id: Uuid,
@@ -354,12 +370,14 @@ pub struct RegisterFinishResponse {
 /// This step is unauthenticated and reveals nothing: an unknown username or
 /// device gets a challenge sealed to a dummy key of the same shape.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct LoginChallengeRequest {
     pub username: String,
     pub device_id: Uuid,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct LoginChallengeResponse {
     pub challenge_id: Uuid,
     #[serde(with = "b64")]
@@ -374,6 +392,7 @@ pub struct LoginChallengeResponse {
 /// and `device_signature` both check out. Without this, anyone could harvest an
 /// OPRF evaluation for any username and attack the password offline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct LoginStartRequest {
     pub challenge_id: Uuid,
     pub username: String,
@@ -386,6 +405,7 @@ pub struct LoginStartRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct LoginStartResponse {
     pub login_id: Uuid,
     #[serde(with = "b64")]
@@ -393,6 +413,7 @@ pub struct LoginStartResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct LoginFinishRequest {
     pub login_id: Uuid,
     pub username: String,
@@ -403,6 +424,7 @@ pub struct LoginFinishRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct LoginFinishResponse {
     pub account_id: Uuid,
     pub collection_id: Uuid,
@@ -431,6 +453,7 @@ pub struct LoginFinishResponse {
 /// server could serve an old ciphertext under the current revision number and
 /// every check would still pass.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ManifestEntry {
     pub id: Uuid,
     pub revision: u64,
@@ -447,6 +470,7 @@ pub struct ManifestEntry {
 /// re-derives the digest from what it is served and compares, which is what
 /// detects a withheld, rolled-back or substituted object.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ManifestBody {
     /// Monotonic per collection. A write must present exactly current + 1, which
     /// serialises concurrent writers and stops a manifest being replayed.
@@ -466,6 +490,7 @@ pub struct ManifestBody {
 /// A client that holds no local state fetches this, verifies the signature and
 /// the digest, and can then trust the entry set as the collection's true shape.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ManifestResponse {
     pub manifest: Option<ManifestBody>,
     pub entries: Vec<ManifestEntry>,
@@ -473,6 +498,7 @@ pub struct ManifestResponse {
 
 /// Which buckets of the manifest a caller wants the entries of.
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ManifestBucketQuery {
     /// The buckets to serve, as concatenated two-digit hex: `manifest_bucket_of`
     /// of each object the caller is about to write, so `03` for one and `031f`
@@ -523,6 +549,7 @@ pub fn parse_bucket_query(buckets: &str) -> Option<Vec<u8>> {
 /// server withholding an object from a served bucket fails the first check, and
 /// one editing a bucket digest fails the second.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ManifestBucketsResponse {
     pub manifest: Option<ManifestBody>,
     /// The 256 bucket digests concatenated, 32 bytes each.
@@ -538,6 +565,7 @@ pub struct ManifestBucketsResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PutObjectRequest {
     pub id: Uuid,
     /// The revision this write claims, which must be the collection's next one.
@@ -556,6 +584,7 @@ pub struct PutObjectRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PutObjectResponse {
     pub revision: u64,
 }
@@ -587,6 +616,7 @@ pub const MAX_BATCH_BYTES: usize = MAX_PADDED_OBJECT_SIZE;
 /// The same fields `PutObjectRequest` carries per object, without the manifest:
 /// a batch signs one manifest for the state all of them together produce.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BatchObject {
     pub id: Uuid,
     /// Revisions a batch assigns, which must run consecutively from the
@@ -613,6 +643,7 @@ pub struct BatchObject {
 /// What it changes is how much one request can carry, which is what an import
 /// needs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PutObjectsRequest {
     /// At least one and at most `MAX_BATCH_OBJECTS`, each id appearing once.
     pub objects: Vec<BatchObject>,
@@ -622,6 +653,7 @@ pub struct PutObjectsRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PutObjectsResponse {
     /// The revision the first object in the batch took.
     pub first_revision: u64,
@@ -630,6 +662,7 @@ pub struct PutObjectsResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ChangesQuery {
     pub after: Option<u64>,
     /// Most objects to return. Clamped to `MAX_CHANGES_LIMIT`; defaults to
@@ -651,6 +684,7 @@ pub const DEFAULT_CHANGES_LIMIT: usize = 500;
 pub const MAX_CHANGES_LIMIT: usize = 2000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ObjectChange {
     pub id: Uuid,
     pub revision: u64,
@@ -664,6 +698,7 @@ pub struct ObjectChange {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ChangesResponse {
     pub latest_revision: u64,
     /// Bumped whenever the collection key is rotated. A client whose cached key
@@ -696,6 +731,7 @@ pub struct ChangesResponse {
 
 /// The requesting device's current collection-key wrap.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CollectionKeysResponse {
     pub key_epoch: u64,
     pub key_wraps: Vec<KeyWrapBody>,
@@ -703,6 +739,7 @@ pub struct CollectionKeysResponse {
 
 /// One object re-encrypted under the new collection key.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RotatedObject {
     pub id: Uuid,
     /// Revisions a rotation assigns, which must run consecutively from the
@@ -728,6 +765,7 @@ pub struct RotatedObject {
 /// * finishing a recovery, where the phrase that was just used — and anyone who
 ///   has ever seen it — must stop being able to decrypt.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RotateRequest {
     /// Must be exactly one greater than the collection's current epoch.
     pub key_epoch: u64,
@@ -760,6 +798,7 @@ pub struct RotateRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RotateResponse {
     pub key_epoch: u64,
     pub latest_revision: u64,
@@ -773,6 +812,7 @@ pub fn valid_username(username: &str) -> bool {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PairJoinRequest {
     pub username: String,
     pub device: DevicePublicKeys,
@@ -780,6 +820,7 @@ pub struct PairJoinRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PairJoinResponse {
     pub pair_id: Uuid,
     pub pair_code: String,
@@ -792,6 +833,7 @@ pub struct PairJoinResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PairStatusResponse {
     pub pair_id: Uuid,
     pub status: String,
@@ -805,6 +847,7 @@ pub struct PairStatusResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PairApproveRequest {
     pub wrap: KeyWrapBody,
     pub grant: DualSignatureBody,
@@ -824,6 +867,7 @@ pub struct PairApproveRequest {
 /// registration response of the same shape. The response carries no material
 /// derived from the existing password, so it cannot be harvested to attack it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RecoverStartRequest {
     pub username: String,
     #[serde(with = "b64")]
@@ -833,6 +877,7 @@ pub struct RecoverStartRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RecoverStartResponse {
     pub wrap: KeyWrapBody,
     pub recovery_id: Uuid,
@@ -850,6 +895,7 @@ pub struct RecoverStartResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RecoverFinishRequest {
     pub username: String,
     pub recovery_id: Uuid,
@@ -876,6 +922,7 @@ pub struct RecoverFinishRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RecoverFinishResponse {
     pub account_id: Uuid,
     pub collection_id: Uuid,
@@ -887,6 +934,7 @@ pub struct RecoverFinishResponse {
 /// includes this challenge, not by the age of a session. A bearer token alone is
 /// no longer enough to change the password, rename the account or delete it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AccountChallengeResponse {
     pub challenge_id: Uuid,
     #[serde(with = "b64")]
@@ -894,6 +942,7 @@ pub struct AccountChallengeResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ChangeUsernameRequest {
     pub new_username: String,
     #[serde(with = "b64")]
@@ -907,6 +956,7 @@ pub struct ChangeUsernameRequest {
 /// Deleting an account needs a device signature too, so that a stolen token
 /// cannot destroy the vault.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DeleteAccountRequest {
     pub challenge_id: Uuid,
     #[serde(with = "b64")]
@@ -915,6 +965,7 @@ pub struct DeleteAccountRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ChangePasswordRequest {
     pub password_change_id: Uuid,
     #[serde(with = "b64")]
@@ -932,12 +983,14 @@ pub struct ChangePasswordRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ChangePasswordStartRequest {
     #[serde(with = "b64")]
     pub request: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ChangePasswordStartResponse {
     pub password_change_id: Uuid,
     #[serde(with = "b64")]
@@ -949,6 +1002,7 @@ pub struct ChangePasswordStartResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SimpleStatusResponse {
     pub status: String,
 }
