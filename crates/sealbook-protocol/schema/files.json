@@ -1,0 +1,207 @@
+{
+  "$defs": {
+    "AccountExport": {
+      "description": "The whole vault in one file. Keys are written sorted, so an unchanged vault exports to the same bytes from any client.",
+      "properties": {
+        "@type": {
+          "const": "SealbookAccountExport"
+        },
+        "account": {
+          "properties": {
+            "accountId": {
+              "description": "The account.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "collectionId": {
+              "description": "The account's collection.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "deviceId": {
+              "description": "The device that wrote the file.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "server": {
+              "type": "string"
+            },
+            "username": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "server",
+            "username",
+            "accountId",
+            "collectionId",
+            "deviceId"
+          ],
+          "type": "object"
+        },
+        "exportedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "objectCount": {
+          "description": "The length of objects.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "objects": {
+          "description": "Sorted by contentType then id, byte for byte.",
+          "items": {
+            "$ref": "#/$defs/ExportObject"
+          },
+          "type": "array"
+        },
+        "unreadable": {
+          "description": "Written only when the exporting device could not open some objects, so an import can say the restore is incomplete.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "version": {
+          "description": "Written as 1.0. A reader refuses another major and accepts a later minor.",
+          "pattern": "^[0-9]+\\.[0-9]+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "@type",
+        "version",
+        "exportedAt",
+        "account",
+        "objectCount",
+        "objects"
+      ],
+      "type": "object"
+    },
+    "ExportObject": {
+      "description": "One vault object, carrying its plaintext as payload when that parses as JSON and as text otherwise.",
+      "oneOf": [
+        {
+          "required": [
+            "payload"
+          ]
+        },
+        {
+          "required": [
+            "text"
+          ]
+        }
+      ],
+      "properties": {
+        "contentType": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "id": {
+          "description": "Lowercase hyphenated. An id that is not a UUID is written as given, and refused on import.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "payload": {
+          "description": "The stored plaintext, parsed; urn:sealbook:schema:payloads describes it by content type.",
+          "not": {
+            "type": "null"
+          }
+        },
+        "text": {
+          "description": "The stored plaintext verbatim, when it is not JSON or is the JSON null.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "contentType"
+      ],
+      "type": "object"
+    },
+    "NotesExport": {
+      "description": "Every note, and the notebooks, as a JSON backup. An import also reads a bare array of notes.",
+      "properties": {
+        "exportedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "notebooks": {
+          "items": {
+            "properties": {
+              "id": {
+                "description": "The notebook.",
+                "format": "uuid",
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "notes": {
+          "description": "Pinned first, then most recently edited, then by title.",
+          "items": {
+            "properties": {
+              "body": {
+                "type": "string"
+              },
+              "createdAt": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "notebook": {
+                "description": "The notebook's name, for a person reading the file.",
+                "type": "string"
+              },
+              "notebookId": {
+                "description": "The note's notebook. An import files the note under the notebook it is given instead.",
+                "format": "uuid",
+                "type": "string"
+              },
+              "pinned": {
+                "description": "Written only when set.",
+                "type": "boolean"
+              },
+              "title": {
+                "type": "string"
+              },
+              "updatedAt": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "body",
+              "notebookId",
+              "notebook"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "version": {
+          "const": "1.0",
+          "description": "An import does not read it."
+        }
+      },
+      "required": [
+        "version",
+        "exportedAt",
+        "notebooks",
+        "notes"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "urn:sealbook:schema:files",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The JSON documents a client writes for a person to keep and import again.",
+  "title": "Sealbook export files"
+}

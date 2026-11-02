@@ -4,8 +4,13 @@
 //! payload and readers walk a `serde_json::Value`. So the schema is declared
 //! here, beside the `*_KEYS` it has to agree with, and checked in as
 //! `sealbook-protocol/schema/payloads.json` for readers outside Rust.
+//!
+//! The JSON files a client writes for a person to keep are described the same
+//! way, in `sealbook-protocol/schema/files.json`.
 
 use serde_json::{json, Map, Value};
+
+use sealbook_protocol::{ACCOUNT_EXPORT_TYPE, ACCOUNT_EXPORT_VERSION};
 
 use crate::{
     ACCENTS, ACCOUNT_SETTINGS_CONTENT_TYPE, ACCOUNT_SETTINGS_KEYS, ADDRESS_BOOK_CONTENT_TYPE,
@@ -19,6 +24,7 @@ use crate::{
 };
 
 pub const PAYLOAD_SCHEMA_ID: &str = "urn:sealbook:schema:payloads";
+pub const FILE_SCHEMA_ID: &str = "urn:sealbook:schema:files";
 
 /// Each stored type: its `$defs` name, content type and owned keys.
 pub const PAYLOAD_TYPES: &[(&str, &str, &[&str])] = &[
@@ -473,4 +479,113 @@ fn account_settings() -> Value {
         }),
         &["features", "contactMode", "accent"],
     )
+}
+
+/// The account export and the notes JSON backup under `$defs`.
+pub fn file_schema() -> Value {
+    json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": FILE_SCHEMA_ID,
+        "title": "Sealbook export files",
+        "description": "The JSON documents a client writes for a person to keep and import again.",
+        "$defs": {
+            "AccountExport": account_export(),
+            "ExportObject": export_object(),
+            "NotesExport": notes_export(),
+        },
+    })
+}
+
+fn account_export() -> Value {
+    json!({
+        "type": "object",
+        "description": "The whole vault in one file. Keys are written sorted, so an unchanged vault exports to the same bytes from any client.",
+        "properties": {
+            "@type": { "const": ACCOUNT_EXPORT_TYPE },
+            "version": {
+                "type": "string",
+                "pattern": "^[0-9]+\\.[0-9]+$",
+                "description": format!("Written as {ACCOUNT_EXPORT_VERSION}. A reader refuses another major and accepts a later minor."),
+            },
+            "exportedAt": timestamp(),
+            "account": {
+                "type": "object",
+                "properties": {
+                    "server": string(),
+                    "username": string(),
+                    "accountId": id("The account."),
+                    "collectionId": id("The account's collection."),
+                    "deviceId": id("The device that wrote the file."),
+                },
+                "required": ["server", "username", "accountId", "collectionId", "deviceId"],
+            },
+            "objectCount": { "type": "integer", "minimum": 0, "description": "The length of objects." },
+            "objects": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/ExportObject" },
+                "description": "Sorted by contentType then id, byte for byte.",
+            },
+            "unreadable": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Written only when the exporting device could not open some objects, so an import can say the restore is incomplete.",
+            },
+        },
+        "required": ["@type", "version", "exportedAt", "account", "objectCount", "objects"],
+    })
+}
+
+fn export_object() -> Value {
+    json!({
+        "type": "object",
+        "description": "One vault object, carrying its plaintext as payload when that parses as JSON and as text otherwise.",
+        "properties": {
+            "id": id("Lowercase hyphenated. An id that is not a UUID is written as given, and refused on import."),
+            "contentType": { "type": "string", "minLength": 1 },
+            "payload": {
+                "not": { "type": "null" },
+                "description": "The stored plaintext, parsed; urn:sealbook:schema:payloads describes it by content type.",
+            },
+            "text": text("The stored plaintext verbatim, when it is not JSON or is the JSON null."),
+        },
+        "required": ["id", "contentType"],
+        "oneOf": [{ "required": ["payload"] }, { "required": ["text"] }],
+    })
+}
+
+fn notes_export() -> Value {
+    json!({
+        "type": "object",
+        "description": "Every note, and the notebooks, as a JSON backup. An import also reads a bare array of notes.",
+        "properties": {
+            "version": { "const": "1.0", "description": "An import does not read it." },
+            "exportedAt": timestamp(),
+            "notebooks": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": { "id": id("The notebook."), "name": string() },
+                    "required": ["id", "name"],
+                },
+            },
+            "notes": {
+                "type": "array",
+                "description": "Pinned first, then most recently edited, then by title.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": string(),
+                        "body": string(),
+                        "notebookId": id("The note's notebook. An import files the note under the notebook it is given instead."),
+                        "notebook": text("The notebook's name, for a person reading the file."),
+                        "pinned": { "type": "boolean", "description": "Written only when set." },
+                        "createdAt": timestamp(),
+                        "updatedAt": timestamp(),
+                    },
+                    "required": ["title", "body", "notebookId", "notebook"],
+                },
+            },
+        },
+        "required": ["version", "exportedAt", "notebooks", "notes"],
+    })
 }
