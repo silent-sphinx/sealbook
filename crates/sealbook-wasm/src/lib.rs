@@ -2368,6 +2368,14 @@ pub fn core_recurrence_next(
     ))
 }
 
+/// How many objects each consecutive batch write takes, for writes whose
+/// plaintexts are this many UTF-8 bytes long.
+#[wasm_bindgen]
+pub fn core_write_batches(payload_lengths: Vec<u32>) -> Vec<u32> {
+    let lengths: Vec<u64> = payload_lengths.into_iter().map(u64::from).collect();
+    sealbook_core::write_batches(&lengths)
+}
+
 /// Which payload type an opened object is.
 #[wasm_bindgen]
 pub fn core_payload_kind(

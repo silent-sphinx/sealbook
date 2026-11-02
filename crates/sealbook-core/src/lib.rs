@@ -20,6 +20,7 @@
 mod account_export;
 mod attachments;
 mod auth;
+mod batch;
 mod bookmarks;
 mod calendars;
 mod contact_json;
@@ -87,6 +88,7 @@ pub use auth::{
     AuthRequest, CoreDeviceSecrets, LoggedIn, LoginStarting, OpaqueStart, PasswordChange,
     PasswordChangeStarted, RecoverStarted, Recovering, RegisterIdentity, Registering,
 };
+pub use batch::write_batches;
 pub use bookmarks::{
     bookmark_collection_name_by_id, bookmark_collection_parse, bookmark_collection_tone,
     bookmark_collection_write, bookmark_parse, bookmark_write, default_bookmark_collection_id,
