@@ -26,9 +26,8 @@
 //! frequency this build does not know comes back in
 //! [`CoreTask::unreadable_recurrence`] for the writer to put back verbatim.
 //!
-//! What is deliberately not here is the rolling forward of a recurring task.
-//! That is a date walk that `recurrence.ts` and Android's `EventSpan.kt` also
-//! do, and it moves in phase 9 with them.
+//! What ticking, moving and deleting a task do to the tasks around it is in
+//! `task_rules`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};

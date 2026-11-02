@@ -20,7 +20,7 @@ use crate::{
     CONTACT_ATTACHMENTS_PROP, CONTACT_KEYS, CONTACT_MODES, CONTACT_PROFILE_PROP, FEATURES,
     JSCONTACT_CONTENT_TYPE, MAX_BOOKMARK_TAGS, MAX_PROFILE_ENTRIES, MAX_TASK_COMPLETIONS,
     NOTEBOOK_CONTENT_TYPE, NOTEBOOK_KEYS, NOTE_CONTENT_TYPE, NOTE_KEYS, PROFILE_KEYS,
-    TASK_CONTENT_TYPE, TASK_KEYS, TASK_LIST_CONTENT_TYPE, TASK_LIST_KEYS,
+    TASK_CONTENT_TYPE, TASK_EXPORT_TYPE, TASK_KEYS, TASK_LIST_CONTENT_TYPE, TASK_LIST_KEYS,
 };
 
 pub const PAYLOAD_SCHEMA_ID: &str = "urn:sealbook:schema:payloads";
@@ -481,7 +481,7 @@ fn account_settings() -> Value {
     )
 }
 
-/// The account export and the notes JSON backup under `$defs`.
+/// The account export, the notes JSON backup and the task export under `$defs`.
 pub fn file_schema() -> Value {
     json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -492,6 +492,7 @@ pub fn file_schema() -> Value {
             "AccountExport": account_export(),
             "ExportObject": export_object(),
             "NotesExport": notes_export(),
+            "TasksExport": tasks_export(),
         },
     })
 }
@@ -587,5 +588,44 @@ fn notes_export() -> Value {
             },
         },
         "required": ["version", "exportedAt", "notebooks", "notes"],
+    })
+}
+
+fn tasks_export() -> Value {
+    let list = json!({
+        "type": "object",
+        "properties": {
+            "id": id("The list."),
+            "name": string(),
+            "parentId": id("The list this one sits under."),
+            "color": text("An accent key or a CSS colour."),
+        },
+        "required": ["id", "name"],
+    });
+    json!({
+        "type": "object",
+        "description": "Every task, and the task lists, as a JSON file. An import also reads a bare array of tasks, and files every task under the one list it is given.",
+        "properties": {
+            "@type": { "const": TASK_EXPORT_TYPE },
+            "version": { "const": 1, "description": "An import does not read it." },
+            "exportedAt": timestamp(),
+            "lists": { "type": "array", "items": list },
+            "tasks": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "description": "Read on import as a stored Task payload is, so the payload schema's rules apply.",
+                    "properties": {
+                        "id": text("The task's id in the vault it came from. A subtask's parentId points at it."),
+                        "title": { "type": "string", "minLength": 1, "description": "An entry without one is skipped." },
+                        "listName": text("The task's list, for a person reading the file."),
+                        "parentId": text("The id of the task this one sits under, in this file."),
+                        "recurrence": { "type": "object", "description": "As the stored payload holds it." },
+                    },
+                    "required": ["id", "title", "listName"],
+                },
+            },
+        },
+        "required": ["@type", "version", "exportedAt", "lists", "tasks"],
     })
 }

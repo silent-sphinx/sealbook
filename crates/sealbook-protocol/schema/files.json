@@ -198,6 +198,94 @@
         "notes"
       ],
       "type": "object"
+    },
+    "TasksExport": {
+      "description": "Every task, and the task lists, as a JSON file. An import also reads a bare array of tasks, and files every task under the one list it is given.",
+      "properties": {
+        "@type": {
+          "const": "sealbook-task-export"
+        },
+        "exportedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "lists": {
+          "items": {
+            "properties": {
+              "color": {
+                "description": "An accent key or a CSS colour.",
+                "type": "string"
+              },
+              "id": {
+                "description": "The list.",
+                "format": "uuid",
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "parentId": {
+                "description": "The list this one sits under.",
+                "format": "uuid",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "tasks": {
+          "items": {
+            "description": "Read on import as a stored Task payload is, so the payload schema's rules apply.",
+            "properties": {
+              "id": {
+                "description": "The task's id in the vault it came from. A subtask's parentId points at it.",
+                "type": "string"
+              },
+              "listName": {
+                "description": "The task's list, for a person reading the file.",
+                "type": "string"
+              },
+              "parentId": {
+                "description": "The id of the task this one sits under, in this file.",
+                "type": "string"
+              },
+              "recurrence": {
+                "description": "As the stored payload holds it.",
+                "type": "object"
+              },
+              "title": {
+                "description": "An entry without one is skipped.",
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "listName"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "version": {
+          "const": 1,
+          "description": "An import does not read it."
+        }
+      },
+      "required": [
+        "@type",
+        "version",
+        "exportedAt",
+        "lists",
+        "tasks"
+      ],
+      "type": "object"
     }
   },
   "$id": "urn:sealbook:schema:files",

@@ -2297,6 +2297,141 @@ pub fn core_task_list_tone(lists: Ts<CoreTaskListList>, id: &str) -> Result<Stri
 
 #[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
 #[serde(transparent)]
+pub struct CoreTaskVec(pub Vec<CoreTask>);
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct CoreTaskOrderItemList(pub Vec<sealbook_core::CoreTaskOrderItem>);
+
+/// The task and every task under it, the task first.
+#[wasm_bindgen]
+pub fn core_task_subtree(tasks: Ts<CoreTaskVec>, id: &str) -> Result<Vec<String>, JsError> {
+    Ok(sealbook_core::task_subtree(&tasks.to_rust()?.0, id))
+}
+
+#[wasm_bindgen]
+pub fn core_task_can_move(
+    tasks: Ts<CoreTaskVec>,
+    id: &str,
+    parent_id: Option<String>,
+) -> Result<bool, JsError> {
+    Ok(sealbook_core::task_can_move(
+        &tasks.to_rust()?.0,
+        id,
+        parent_id,
+    ))
+}
+
+/// Whether a list may move under `parent_id`. The default list stays at the top.
+#[wasm_bindgen]
+pub fn core_task_list_can_move(
+    lists: Ts<CoreTaskListList>,
+    id: &str,
+    parent_id: Option<String>,
+) -> Result<bool, JsError> {
+    Ok(sealbook_core::task_list_can_move(
+        &lists.to_rust()?.0,
+        id,
+        parent_id,
+    ))
+}
+
+#[wasm_bindgen]
+pub fn core_task_reopen(task: Ts<CoreTask>) -> Result<Ts<CoreTaskDraft>, JsError> {
+    Ok(sealbook_core::task_reopen(&task.to_rust()?).into_ts()?)
+}
+
+/// Ticks a task: a recurring one rolls on and reopens its done subtasks.
+#[wasm_bindgen]
+pub fn core_task_complete(
+    task: Ts<CoreTask>,
+    tasks: Ts<CoreTaskVec>,
+    clock: Ts<sealbook_core::CoreTaskClock>,
+) -> Result<Ts<sealbook_core::CoreTaskCompletion>, JsError> {
+    Ok(
+        sealbook_core::task_complete(&task.to_rust()?, &tasks.to_rust()?.0, &clock.to_rust()?)
+            .into_ts()?,
+    )
+}
+
+/// Deleting a task: its subtasks move up to its parent.
+#[wasm_bindgen]
+pub fn core_task_remove_plan(
+    tasks: Ts<CoreTaskVec>,
+    id: &str,
+) -> Result<Ts<sealbook_core::CoreTaskPlan>, JsError> {
+    Ok(sealbook_core::task_remove_plan(&tasks.to_rust()?.0, id).into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_task_move_plan(
+    tasks: Ts<CoreTaskVec>,
+    id: &str,
+    parent_id: Option<String>,
+) -> Result<Ts<sealbook_core::CoreTaskPlan>, JsError> {
+    Ok(sealbook_core::task_move_plan(&tasks.to_rust()?.0, id, parent_id).into_ts()?)
+}
+
+/// The subtasks that follow a task edited into another list.
+#[wasm_bindgen]
+pub fn core_task_relist_plan(
+    tasks: Ts<CoreTaskVec>,
+    id: &str,
+    task_list_id: &str,
+) -> Result<Ts<sealbook_core::CoreTaskPlan>, JsError> {
+    Ok(sealbook_core::task_relist_plan(&tasks.to_rust()?.0, id, task_list_id).into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_task_list_move_plan(
+    lists: Ts<CoreTaskListList>,
+    id: &str,
+    parent_id: Option<String>,
+) -> Result<Ts<sealbook_core::CoreTaskPlan>, JsError> {
+    Ok(sealbook_core::task_list_move_plan(&lists.to_rust()?.0, id, parent_id).into_ts()?)
+}
+
+/// Deleting a list: its lists and tasks move up to its parent.
+#[wasm_bindgen]
+pub fn core_task_list_remove_plan(
+    lists: Ts<CoreTaskListList>,
+    tasks: Ts<CoreTaskVec>,
+    id: &str,
+) -> Result<Ts<sealbook_core::CoreTaskPlan>, JsError> {
+    Ok(
+        sealbook_core::task_list_remove_plan(&lists.to_rust()?.0, &tasks.to_rust()?.0, id)
+            .into_ts()?,
+    )
+}
+
+#[wasm_bindgen]
+pub fn core_order_tasks(items: Ts<CoreTaskOrderItemList>) -> Result<Vec<String>, JsError> {
+    Ok(sealbook_core::order_tasks(&items.to_rust()?.0))
+}
+
+#[wasm_bindgen]
+pub fn core_task_export(
+    tasks: Ts<CoreTaskVec>,
+    lists: Ts<CoreTaskListList>,
+    now: &str,
+) -> Result<String, JsError> {
+    Ok(sealbook_core::task_export(
+        &tasks.to_rust()?.0,
+        &lists.to_rust()?.0,
+        now,
+    ))
+}
+
+/// The tasks in an export file, parents first. Throws with a sentence to show.
+#[wasm_bindgen]
+pub fn core_task_import(text: &str) -> Result<Ts<sealbook_core::CoreTaskImport>, JsError> {
+    Ok(sealbook_core::task_import(text)
+        .map_err(core_err)?
+        .into_ts()?)
+}
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
 pub struct CoreCalendarList(pub Vec<CoreCalendar>);
 
 /// Every key a calendar writer owns, and every key an event writer owns: the

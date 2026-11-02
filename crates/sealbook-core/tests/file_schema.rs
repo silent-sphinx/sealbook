@@ -1,5 +1,5 @@
 //! The export file schema against what the writers produce: the account export
-//! fixtures and the notes JSON backup.
+//! fixtures, the notes JSON backup and the task export.
 //!
 //! Run `REGENERATE_SCHEMA=1 cargo test -p sealbook-core -- --ignored
 //! regenerate` to rewrite it after a deliberate format change.
@@ -116,6 +116,27 @@ fn a_notes_backup_meets_the_schema() {
         let text = notes_write_json(&notes, &notebooks, "2026-10-30T00:00:00Z");
         let document: Value = serde_json::from_str(&text).unwrap();
         assert_eq!(errors("NotesExport", &document), Vec::<String>::new());
+    }
+}
+
+#[test]
+fn a_task_export_meets_the_schema() {
+    let lists = vec![task_list_parse(
+        &default_task_list_id(),
+        r#"{"name":"Inbox","color":"blue"}"#,
+    )];
+    let tasks = vec![
+        task_parse("p", r#"{"title":"Plain"}"#),
+        task_parse(
+            "c",
+            r#"{"title":"Full","parentId":"p","dueDate":"2026-11-02","priority":2,
+                "tags":["home"],"recurrence":{"frequency":"weekly"},"done":true}"#,
+        ),
+    ];
+    for tasks in [vec![], tasks] {
+        let document: Value =
+            serde_json::from_str(&task_export(&tasks, &lists, "2026-11-02T00:00:00Z")).unwrap();
+        assert_eq!(errors("TasksExport", &document), Vec::<String>::new());
     }
 }
 

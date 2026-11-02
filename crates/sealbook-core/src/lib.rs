@@ -46,7 +46,9 @@ pub mod schema;
 mod settings;
 mod state;
 mod sync;
+mod task_rules;
 mod tasks;
+mod tree;
 mod vcard;
 
 // uniffi's scaffolding and custom types have to sit in the crate root.
@@ -171,6 +173,14 @@ pub use sync::{
     changes_page_read, changes_request, latest_revisions, open_row, open_stored, require_key_epoch,
     walk_page, walk_start, ChangesPage, CoreSealedRow, RowOutcome, RowRef, StoredRow,
     UnreadableReason, WalkCursor, WalkOutcome, WalkStep, CHANGES_PAGE_LIMIT, SYNC_RESTART_LIMIT,
+};
+pub use task_rules::{
+    order_tasks, task_can_move, task_complete, task_export, task_import, task_list_can_move,
+    task_list_move_plan, task_list_remove_plan, task_move_plan, task_relist_plan, task_remove_plan,
+    task_reopen, task_subtree, CoreImportedTask, CoreTaskClock, CoreTaskCompletion, CoreTaskImport,
+    CoreTaskListWrite, CoreTaskOrderItem, CoreTaskPlan, CoreTaskWrite,
+    DEFAULT_TASK_LIST_REMOVE_REFUSAL, TASK_EXPORT_TYPE, TASK_IMPORT_REFUSAL,
+    TASK_LIST_MOVE_REFUSAL, TASK_MOVE_REFUSAL,
 };
 pub use tasks::{
     default_task_list_id, normalize_due_date, resolve_task_list_id, task_list_name_by_id,
