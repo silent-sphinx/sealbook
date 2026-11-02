@@ -41,6 +41,7 @@ mod payload;
 mod recurrence;
 mod roster;
 mod rotation;
+pub mod schema;
 mod settings;
 mod state;
 mod sync;

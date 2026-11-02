@@ -2643,6 +2643,7 @@ name = "sealbook-core"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "jsonschema",
  "sealbook-crypto",
  "sealbook-protocol",
  "serde",
