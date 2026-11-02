@@ -69,8 +69,8 @@ fn ck_from_b64(s: &str) -> Result<CollectionKey, JsError> {
     Ok(CollectionKey::from_bytes(key))
 }
 
-#[derive(Serialize)]
-struct Enrollment {
+#[derive(Serialize, Tsify)]
+pub struct Enrollment {
     device_id: String,
     hpke_sk: String,
     hpke_pk: String,
@@ -112,7 +112,7 @@ struct WrapIn {
 /// material without a round trip. Production registers through
 /// `core_new_registration`.
 #[wasm_bindgen]
-pub fn create_enrollment(password: &str) -> Result<String, JsError> {
+pub fn create_enrollment(password: &str) -> Result<Ts<Enrollment>, JsError> {
     let (hpke_sk, hpke_pk) = generate_device_hpke().map_err(js_err)?;
     let (sign_sk, sign_pk) = generate_device_signing().map_err(js_err)?;
     let ck = CollectionKey::generate();
@@ -130,7 +130,7 @@ pub fn create_enrollment(password: &str) -> Result<String, JsError> {
     );
     let sig = sign(&sign_sk, &transcript).map_err(js_err)?;
     let phrase_recovery = phrase_recovery_public(&phrase_entropy).map_err(js_err)?;
-    serde_json::to_string(&Enrollment {
+    Ok(Enrollment {
         device_id: device_id.to_string(),
         hpke_sk: b64(hpke_sk.as_bytes()),
         hpke_pk: b64(&hpke_pk.0),
@@ -156,8 +156,8 @@ pub fn create_enrollment(password: &str) -> Result<String, JsError> {
         phrase_ciphersuite: PHRASE_CIPHERSUITE,
         xwing_ciphersuite: XWING_CIPHERSUITE,
         recovery_ciphersuite: RECOVERY_CIPHERSUITE,
-    })
-    .map_err(js_err)
+    }
+    .into_ts()?)
 }
 
 #[wasm_bindgen]
@@ -206,8 +206,8 @@ pub fn unwrap_ck(
     Err(JsError::new("no collection key wrap"))
 }
 
-#[derive(Serialize)]
-struct EncryptedOut {
+#[derive(Serialize, Tsify)]
+pub struct EncryptedOut {
     nonce: String,
     ciphertext: String,
     padded_size: usize,
@@ -219,17 +219,17 @@ pub fn encrypt_contact(
     object_id: &str,
     collection_id: &str,
     plaintext: &str,
-) -> Result<String, JsError> {
+) -> Result<Ts<EncryptedOut>, JsError> {
     let object_id = parse_uuid(object_id)?;
     let collection_id = parse_uuid(collection_id)?;
     let aad = object_aad(object_id.as_bytes(), collection_id.as_bytes());
     let enc = encrypt_object(&ck_from_b64(ck_b64)?, plaintext.as_bytes(), &aad).map_err(js_err)?;
-    serde_json::to_string(&EncryptedOut {
+    Ok(EncryptedOut {
         nonce: b64(&enc.nonce),
         ciphertext: b64(&enc.ciphertext),
         padded_size: enc.padded_size,
-    })
-    .map_err(js_err)
+    }
+    .into_ts()?)
 }
 
 #[wasm_bindgen]
@@ -300,8 +300,11 @@ pub fn payload_schema_version() -> String {
     sealbook_protocol::PAYLOAD_SCHEMA_VERSION.to_string()
 }
 
-#[derive(Serialize)]
-struct OpenedOut {
+/// One object's plaintext after its sealed envelope has been opened.
+#[derive(Serialize, Tsify)]
+pub struct OpenedObject {
+    /// Authenticated by the AEAD along with the payload, so this is the type to
+    /// parse by rather than the label the server serves.
     #[serde(rename = "contentType")]
     content_type: String,
     tombstone: bool,
@@ -315,18 +318,18 @@ pub fn seal_object(
     collection_id: &str,
     content_type: &str,
     payload: &str,
-) -> Result<String, JsError> {
+) -> Result<Ts<EncryptedOut>, JsError> {
     let object_id = parse_uuid(object_id)?;
     let collection_id = parse_uuid(collection_id)?;
     let aad = object_aad(object_id.as_bytes(), collection_id.as_bytes());
     let plain = seal_envelope(content_type, payload.as_bytes());
     let enc = encrypt_object(&ck_from_b64(ck_b64)?, &plain, &aad).map_err(js_err)?;
-    serde_json::to_string(&EncryptedOut {
+    Ok(EncryptedOut {
         nonce: b64(&enc.nonce),
         ciphertext: b64(&enc.ciphertext),
         padded_size: enc.padded_size,
-    })
-    .map_err(js_err)
+    }
+    .into_ts()?)
 }
 
 /// Decrypts an object and opens its envelope.
@@ -338,7 +341,7 @@ pub fn open_object(
     nonce_b64: &str,
     ciphertext_b64: &str,
     padded_size: usize,
-) -> Result<String, JsError> {
+) -> Result<Ts<OpenedObject>, JsError> {
     let plain = decrypt_contact_bytes(
         ck_b64,
         object_id,
@@ -352,7 +355,7 @@ pub fn open_object(
             content_type,
             tombstone,
             payload,
-        } => OpenedOut {
+        } => OpenedObject {
             content_type,
             tombstone,
             payload: text(payload)?,
@@ -363,7 +366,7 @@ pub fn open_object(
             ))
         }
     };
-    serde_json::to_string(&opened).map_err(js_err)
+    Ok(opened.into_ts()?)
 }
 
 fn text(bytes: Vec<u8>) -> Result<String, JsError> {
@@ -381,8 +384,8 @@ pub fn new_uuid() -> String {
     Uuid::new_v4().to_string()
 }
 
-#[derive(Serialize)]
-struct DeviceOut {
+#[derive(Serialize, Tsify)]
+pub struct DeviceOut {
     device_id: String,
     hpke_sk: String,
     hpke_pk: String,
@@ -395,7 +398,7 @@ struct DeviceOut {
 }
 
 #[wasm_bindgen]
-pub fn create_device() -> Result<String, JsError> {
+pub fn create_device() -> Result<Ts<DeviceOut>, JsError> {
     let (hpke_sk, hpke_pk) = generate_device_hpke().map_err(js_err)?;
     let (sign_sk, sign_pk) = generate_device_signing().map_err(js_err)?;
     let device_id = Uuid::new_v4();
@@ -406,7 +409,7 @@ pub fn create_device() -> Result<String, JsError> {
         &hpke_pk.0,
     );
     let sig = sign(&sign_sk, &transcript).map_err(js_err)?;
-    serde_json::to_string(&DeviceOut {
+    Ok(DeviceOut {
         device_id: device_id.to_string(),
         hpke_sk: b64(hpke_sk.as_bytes()),
         hpke_pk: b64(&hpke_pk.0),
@@ -416,8 +419,8 @@ pub fn create_device() -> Result<String, JsError> {
         ed25519_pk: b64(&sign_pk.ed25519_pk),
         enrollment_mldsa: b64(&sig.mldsa),
         enrollment_ed25519: b64(&sig.ed25519),
-    })
-    .map_err(js_err)
+    }
+    .into_ts()?)
 }
 
 #[wasm_bindgen]
