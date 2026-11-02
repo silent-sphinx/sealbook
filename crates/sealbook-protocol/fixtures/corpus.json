@@ -444,6 +444,16 @@
             "raw"
           ],
           "expect": "settings"
+        },
+        {
+          "table": "sealed_rows",
+          "op": "sealed.open_row",
+          "args": [
+            "key",
+            "collection_id",
+            "row"
+          ],
+          "expect": "outcome"
         }
       ]
     }
