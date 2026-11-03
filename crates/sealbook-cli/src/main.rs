@@ -769,7 +769,7 @@ async fn main() -> Result<()> {
                             id,
                             &CoreAddressBookDraft {
                                 name: name.clone(),
-                                raw: None,
+                                ..Default::default()
                             },
                         )
                         .await
@@ -1526,6 +1526,7 @@ fn write_contacts(
                 .map(|(id, name)| sealbook_client::CoreAddressBook {
                     id: id.to_string(),
                     name: name.clone(),
+                    archived: false,
                     readable: true,
                     raw: String::new(),
                 })

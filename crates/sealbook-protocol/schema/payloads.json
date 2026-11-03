@@ -105,6 +105,10 @@
         "@type": {
           "const": "AddressBook"
         },
+        "archived": {
+          "description": "Written only when true.",
+          "type": "boolean"
+        },
         "name": {
           "type": "string"
         },
@@ -239,6 +243,10 @@
         "color": {
           "description": "An accent key or a CSS colour.",
           "type": "string"
+        },
+        "hideFromAll": {
+          "description": "Written only when true.",
+          "type": "boolean"
         },
         "name": {
           "type": "string"

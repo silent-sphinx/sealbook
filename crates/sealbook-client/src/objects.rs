@@ -145,7 +145,7 @@ impl SealbookClient {
             DEFAULT_ADDRESS_BOOK_ID,
             &CoreAddressBookDraft {
                 name: DEFAULT_ADDRESS_BOOK_NAME.to_string(),
-                raw: None,
+                ..Default::default()
             },
         )
         .await?;

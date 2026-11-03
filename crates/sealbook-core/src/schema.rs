@@ -74,13 +74,13 @@ pub fn payload_schema() -> Value {
         ("Note", note()),
         ("Notebook", named("Notebook")),
         ("Bookmark", bookmark()),
-        ("BookmarkCollection", nested_container("BookmarkCollection")),
+        ("BookmarkCollection", bookmark_collection()),
         ("Task", task()),
         ("TaskList", nested_container("TaskList")),
         ("Calendar", calendar()),
         ("CalendarEvent", calendar_event()),
         ("Card", card()),
-        ("AddressBook", named("AddressBook")),
+        ("AddressBook", address_book()),
         ("AccountSettings", account_settings()),
     ] {
         defs.insert(name.into(), schema);
@@ -234,6 +234,17 @@ fn named(type_name: &str) -> Value {
     payload(type_name, json!({ "name": string() }), &["name"])
 }
 
+fn address_book() -> Value {
+    payload(
+        "AddressBook",
+        json!({
+            "name": string(),
+            "archived": { "type": "boolean", "description": "Written only when true." },
+        }),
+        &["name"],
+    )
+}
+
 fn nested_container(type_name: &str) -> Value {
     payload(
         type_name,
@@ -241,6 +252,19 @@ fn nested_container(type_name: &str) -> Value {
             "name": string(),
             "parentId": id("The container this one sits under."),
             "color": text("An accent key or a CSS colour."),
+        }),
+        &["name"],
+    )
+}
+
+fn bookmark_collection() -> Value {
+    payload(
+        "BookmarkCollection",
+        json!({
+            "name": string(),
+            "parentId": id("The container this one sits under."),
+            "color": text("An accent key or a CSS colour."),
+            "hideFromAll": { "type": "boolean", "description": "Written only when true." },
         }),
         &["name"],
     )

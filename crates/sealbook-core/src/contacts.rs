@@ -118,7 +118,7 @@ pub const CONTACT_KEYS: &[&str] = &[
 ];
 
 /// Every key an address book writer owns.
-pub const ADDRESS_BOOK_KEYS: &[&str] = &["@type", "version", "name"];
+pub const ADDRESS_BOOK_KEYS: &[&str] = &["@type", "version", "name", "archived"];
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -370,6 +370,10 @@ pub struct CoreContact {
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct CoreAddressBookDraft {
     pub name: String,
+    /// Written only when set, so a book never archived is byte-identical to one
+    /// from a build predating the field.
+    #[serde(default)]
+    pub archived: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<String>,
 }
@@ -380,6 +384,7 @@ pub struct CoreAddressBookDraft {
 pub struct CoreAddressBook {
     pub id: String,
     pub name: String,
+    pub archived: bool,
     pub readable: bool,
     pub raw: String,
 }
@@ -1224,6 +1229,11 @@ pub fn address_book_parse(id: &str, raw: &str) -> CoreAddressBook {
                     UNTITLED_ADDRESS_BOOK_NAME.to_string()
                 }
             }),
+        archived: object
+            .as_ref()
+            .and_then(|object| object.get("archived"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         readable: object.as_ref().map(declared_readable).unwrap_or(true),
         raw: raw.to_string(),
     }
@@ -1232,13 +1242,16 @@ pub fn address_book_parse(id: &str, raw: &str) -> CoreAddressBook {
 /// Serialises an address book, merging onto whatever `draft.raw` carried.
 pub fn address_book_write(draft: &CoreAddressBookDraft) -> Result<String, CoreError> {
     refuse_newer_major(draft.raw.as_deref())?;
+    let mut fields = Map::new();
+    fields.insert("@type".into(), json!("AddressBook"));
+    fields.insert("version".into(), json!(PAYLOAD_SCHEMA_VERSION));
+    fields.insert("name".into(), json!(draft.name.trim()));
+    if draft.archived {
+        fields.insert("archived".into(), json!(true));
+    }
     Ok(write_payload(
         draft.raw.as_deref(),
-        json!({
-            "@type": "AddressBook",
-            "version": PAYLOAD_SCHEMA_VERSION,
-            "name": draft.name.trim(),
-        }),
+        Value::Object(fields),
         ADDRESS_BOOK_KEYS,
     ))
 }

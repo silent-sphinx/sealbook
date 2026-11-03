@@ -457,7 +457,7 @@ async fn address_books_are_encrypted_and_hidden_from_contact_list() {
             work_id,
             &sealbook_client::CoreAddressBookDraft {
                 name: "Work".into(),
-                raw: None,
+                ..Default::default()
             },
         )
         .await
