@@ -36,7 +36,8 @@
     "address_book_keys": [
       "@type",
       "version",
-      "name"
+      "name",
+      "archived"
     ],
     "profile_keys": [
       "@type",
@@ -1931,7 +1932,8 @@
     {
       "case": "an address book created from scratch",
       "draft": {
-        "name": "  Family  "
+        "name": "  Family  ",
+        "archived": false
       },
       "payload": "{\"@type\":\"AddressBook\",\"name\":\"Family\",\"version\":\"1.0\"}"
     },
@@ -1939,9 +1941,19 @@
       "case": "a rename that keeps a key from a later build",
       "draft": {
         "name": "Relatives",
+        "archived": false,
         "raw": "{\"@type\":\"AddressBook\",\"name\":\"Family\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
       },
       "payload": "{\"@type\":\"AddressBook\",\"name\":\"Relatives\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
+    },
+    {
+      "case": "an archive that keeps a key from a later build",
+      "draft": {
+        "name": "Relatives",
+        "archived": true,
+        "raw": "{\"@type\":\"AddressBook\",\"name\":\"Family\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
+      },
+      "payload": "{\"@type\":\"AddressBook\",\"archived\":true,\"name\":\"Relatives\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
     }
   ],
   "address_book_parses": [
@@ -1952,6 +1964,7 @@
       "address_book": {
         "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "name": "Family",
+        "archived": false,
         "readable": true,
         "raw": "{\"@type\":\"AddressBook\",\"name\":\"Family\"}"
       }
@@ -1963,6 +1976,7 @@
       "address_book": {
         "id": "00000000-0000-0000-0000-000000000001",
         "name": "Default Address Book",
+        "archived": false,
         "readable": true,
         "raw": "{}"
       }
@@ -1974,6 +1988,7 @@
       "address_book": {
         "id": "00000000-0000-0000-0000-000000000001",
         "name": "Mine",
+        "archived": false,
         "readable": true,
         "raw": "{\"name\":\"Mine\"}"
       }
@@ -1985,8 +2000,21 @@
       "address_book": {
         "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "name": "Untitled Address Book",
+        "archived": false,
         "readable": true,
         "raw": "{\"name\":\"  \"}"
+      }
+    },
+    {
+      "case": "an archived book",
+      "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "raw": "{\"@type\":\"AddressBook\",\"name\":\"Family\",\"archived\":true}",
+      "address_book": {
+        "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "name": "Family",
+        "archived": true,
+        "readable": true,
+        "raw": "{\"@type\":\"AddressBook\",\"name\":\"Family\",\"archived\":true}"
       }
     },
     {
@@ -1996,6 +2024,7 @@
       "address_book": {
         "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "name": "Untitled Address Book",
+        "archived": false,
         "readable": true,
         "raw": "garbage"
       }
@@ -2007,6 +2036,7 @@
       "address_book": {
         "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "name": "future",
+        "archived": false,
         "readable": false,
         "raw": "{\"@type\":\"AddressBook\",\"version\":\"2.0\",\"name\":\"future\"}"
       }

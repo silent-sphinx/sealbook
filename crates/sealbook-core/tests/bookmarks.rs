@@ -281,6 +281,14 @@ fn collection_write_cases() -> Vec<(String, CoreBookmarkCollectionDraft)> {
             },
         ),
         (
+            "a collection hidden from all bookmarks".into(),
+            CoreBookmarkCollectionDraft {
+                name: "Work".into(),
+                hide_from_all: true,
+                ..Default::default()
+            },
+        ),
+        (
             "moving to the top level clears the parent".into(),
             CoreBookmarkCollectionDraft {
                 parent_id: None,
@@ -306,6 +314,16 @@ fn collection_parse_cases() -> Vec<(String, String, String)> {
             "any other collection, unnamed".into(),
             CHILD.into(),
             "not json".into(),
+        ),
+        (
+            "a collection hidden from all bookmarks".into(),
+            CHILD.into(),
+            r#"{"name":"Work","hideFromAll":true}"#.into(),
+        ),
+        (
+            "a non-boolean hideFromAll reads as shown".into(),
+            CHILD.into(),
+            r#"{"name":"Work","hideFromAll":"yes"}"#.into(),
         ),
         (
             "an empty parent and colour read as none".into(),

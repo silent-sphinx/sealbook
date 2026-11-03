@@ -660,6 +660,7 @@ fn book_write_cases() -> Vec<(String, CoreAddressBookDraft)> {
             "an address book created from scratch".into(),
             CoreAddressBookDraft {
                 name: "  Family  ".into(),
+                archived: false,
                 raw: None,
             },
         ),
@@ -667,6 +668,15 @@ fn book_write_cases() -> Vec<(String, CoreAddressBookDraft)> {
             "a rename that keeps a key from a later build".into(),
             CoreAddressBookDraft {
                 name: "Relatives".into(),
+                archived: false,
+                raw: Some(stored.clone()),
+            },
+        ),
+        (
+            "an archive that keeps a key from a later build".into(),
+            CoreAddressBookDraft {
+                name: "Relatives".into(),
+                archived: true,
                 raw: Some(stored),
             },
         ),
@@ -688,6 +698,11 @@ fn book_parse_cases() -> Vec<(String, String, String)> {
             r#"{"name":"Mine"}"#,
         ),
         case("any other book, unnamed", BOOK.into(), r#"{"name":"  "}"#),
+        case(
+            "an archived book",
+            BOOK.into(),
+            r#"{"@type":"AddressBook","name":"Family","archived":true}"#,
+        ),
         case("a payload that is not JSON at all", BOOK.into(), "garbage"),
         case(
             "a payload from a newer schema major",
@@ -814,6 +829,7 @@ fn a_payload_from_a_newer_schema_major_is_read_but_never_written_over() {
     assert!(!address_book_parse(BOOK, future).readable);
     let refused = address_book_write(&CoreAddressBookDraft {
         name: "edited".into(),
+        archived: false,
         raw: Some(future.into()),
     })
     .expect_err("refuses");

@@ -58,7 +58,7 @@ pub const BOOKMARK_KEYS: &[&str] = &[
     "updatedAt",
 ];
 
-pub const BOOKMARK_COLLECTION_KEYS: &[&str] = &["@type", "version", "name", "parentId", "color"];
+pub const BOOKMARK_COLLECTION_KEYS: &[&str] = &["@type", "version", "name", "parentId", "color", "hideFromAll"];
 
 /// Tones for a collection that has never been given a colour.
 const COLLECTION_TONES: &[&str] = &[
@@ -215,6 +215,9 @@ pub struct CoreBookmarkCollectionDraft {
     /// Only a top-level collection carries one; see [`collection_tone`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// Written only when true.
+    #[serde(default)]
+    pub hide_from_all: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<String>,
 }
@@ -229,6 +232,8 @@ pub struct CoreBookmarkCollection {
     pub parent_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    #[serde(default)]
+    pub hide_from_all: bool,
     pub readable: bool,
     pub raw: String,
 }
@@ -239,6 +244,7 @@ impl CoreBookmarkCollection {
             name: self.name.clone(),
             parent_id: self.parent_id.clone(),
             color: self.color.clone(),
+            hide_from_all: self.hide_from_all,
             raw: Some(self.raw.clone()),
         }
     }
@@ -348,6 +354,11 @@ pub fn bookmark_collection_parse(id: &str, raw: &str) -> CoreBookmarkCollection 
         name: read("name").unwrap_or_else(|| fallback_collection_name(id)),
         parent_id: read("parentId"),
         color: read("color"),
+        hide_from_all: object
+            .as_ref()
+            .and_then(|object| object.get("hideFromAll"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         readable: object.as_ref().map(declared_readable).unwrap_or(true),
         raw: raw.to_string(),
     }
@@ -372,6 +383,9 @@ pub fn bookmark_collection_write(draft: &CoreBookmarkCollectionDraft) -> Result<
     }
     if let Some(color) = present(&draft.color) {
         fields.insert("color".into(), json!(color));
+    }
+    if draft.hide_from_all {
+        fields.insert("hideFromAll".into(), json!(true));
     }
     Ok(write_payload(
         draft.raw.as_deref(),
