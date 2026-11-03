@@ -98,6 +98,22 @@ fn call(op: &str, args: &[Value]) -> Value {
         ))),
         "settings.write" => out(settings_write(&arg(args, 0))),
         "settings.parse" => out::<_, String>(Ok(settings_parse(&arg::<String>(args, 0)))),
+        "offline.outbox_push" => out::<_, String>(Ok(arg::<Vec<PendingWrite>>(args, 0)
+            .into_iter()
+            .fold(Outbox::default(), |outbox, write| outbox_push(&outbox, write)))),
+        "offline.local_view" => out::<_, String>(Ok(local_view(&arg(args, 0), &arg(args, 1)))),
+        "offline.merge" => out::<_, String>(Ok(merge_payload(
+            &arg::<String>(args, 0),
+            arg::<Option<String>>(args, 1).as_deref(),
+            &arg::<String>(args, 2),
+            &arg::<String>(args, 3),
+            &arg::<String>(args, 4),
+        ))),
+        "offline.flush_plan" => out::<_, String>(Ok(flush_plan(
+            &arg(args, 0),
+            &arg(args, 1),
+            &arg::<String>(args, 2),
+        ))),
         other => panic!("the corpus names an operation this host lacks: {other}"),
     }
 }

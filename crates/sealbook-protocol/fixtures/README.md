@@ -257,7 +257,8 @@ added as each type moves into `sealbook-core`.
 `corpus.json` is the contract for the payload fixtures: the tasks, bookmarks,
 notes, calendars, contacts and settings files under `payloads/`. A client that
 runs every table it lists, and gets every expected value, reads and writes those
-payloads as the others do. The rest of this directory (rosters, manifests,
+payloads as the others do, plus the offline queue and merge rules in
+`offline/offline.json`. The rest of this directory (rosters, manifests,
 changes, rotation, pairing, auth, attachments) is protocol and is read by
 hand-written tests.
 
@@ -296,7 +297,11 @@ Every `op` names one function of `sealbook-core`, in the form `<type>.<verb>`:
 `write` takes a draft (and the clock when the table passes `$now`) and returns
 the payload text, `parse` takes an id and the stored text and returns the
 record; `tone` and `normalize_due` are the two rules that are not a payload
-read or write. Rust calls them directly, the web through the wasm
+read or write. The `offline.*` operations are the queue and merge rules:
+`offline.outbox_push` folds a row's `pushes` through `outbox_push` from an empty
+outbox, the one operation a runner composes rather than calls once, and
+`offline.merge` returns the outcome in serde's tagged form with an absent
+`payload` as `null`. Rust calls them directly, the web through the wasm
 module and Android through uniffi, so a client does not implement an operation:
 it binds it. A runner that meets an `op` it does not know fails the run, so a
 fixture cannot name one a host has not wired.
@@ -377,6 +382,5 @@ catches.
   case per rule, including a conflicted copy, a container conflict and
   attachments; `flush` holds the plan for a queued write against each state the
   server's copy can be in. Generated from core by the ignored `regenerate` test
-  in `sealbook-core/tests/offline.rs`, which says how to run it. Not yet in
-  `corpus.json`: web and Android read it with their own runners once their
-  outboxes exist.
+  in `sealbook-core/tests/offline.rs`, which says how to run it. Listed in
+  `corpus.json` under four `offline.*` operations.

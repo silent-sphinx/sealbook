@@ -10,5 +10,16 @@
   },
   "expect": {
     "live_objects": 2
+  },
+  "offline": {
+    "base": {
+      "title": "Offline plan",
+      "body": "one\ntwo\nthree"
+    },
+    "local_title": "Offline plan, edited here",
+    "remote_body": "one\nTWO\nthree",
+    "conflict_local_title": "Mine",
+    "conflict_remote_title": "Theirs",
+    "copy_title_prefix": "Mine (conflict, "
   }
 }
