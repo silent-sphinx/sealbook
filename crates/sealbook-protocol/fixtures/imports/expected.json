@@ -251,6 +251,9 @@
       "@type": "Card",
       "addresses": {
         "a1": {
+          "contexts": {
+            "private": true
+          },
           "country": "United Kingdom",
           "locality": "London",
           "postCode": "SW1Y 4JH",

@@ -361,7 +361,29 @@
         "addresses": {
           "additionalProperties": {
             "properties": {
+              "contexts": {
+                "properties": {
+                  "private": {
+                    "type": "boolean"
+                  },
+                  "work": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              },
               "country": {
+                "type": "string"
+              },
+              "features": {
+                "properties": {
+                  "mobile": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              },
+              "label": {
                 "type": "string"
               },
               "locality": {

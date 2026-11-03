@@ -100,7 +100,9 @@ fn call(op: &str, args: &[Value]) -> Value {
         "settings.parse" => out::<_, String>(Ok(settings_parse(&arg::<String>(args, 0)))),
         "offline.outbox_push" => out::<_, String>(Ok(arg::<Vec<PendingWrite>>(args, 0)
             .into_iter()
-            .fold(Outbox::default(), |outbox, write| outbox_push(&outbox, write)))),
+            .fold(Outbox::default(), |outbox, write| {
+                outbox_push(&outbox, write)
+            }))),
         "offline.local_view" => out::<_, String>(Ok(local_view(&arg(args, 0), &arg(args, 1)))),
         "offline.merge" => out::<_, String>(Ok(merge_payload(
             &arg::<String>(args, 0),

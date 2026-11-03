@@ -41,10 +41,10 @@ pub use sealbook_core::{
     notes_write_json, notes_write_markdown, repair_pipe_tables, vcard_import, vcard_write,
     CoreAddressBook, CoreAddressBookDraft, CoreBookmark, CoreBookmarkCollection,
     CoreBookmarkCollectionDraft, CoreBookmarkDraft, CoreCalendar, CoreCalendarDraft,
-    CoreCalendarEvent, CoreCalendarEventDraft, CoreChannelKind, CoreContact, CoreContactChannel,
-    CoreContactDraft, CoreContactFile, CoreContactImport, CoreExportAccount, CoreExportObject,
-    CoreIcsEvent, CoreNote, CoreNoteAttachment, CoreNoteDraft, CoreNotebook, CoreOrderItem,
-    CoreRecurrence, PairPoll, PAIR_POLL_INTERVAL_MS,
+    CoreCalendarEvent, CoreCalendarEventDraft, CoreChannelKind, CoreContact, CoreContactAddress,
+    CoreContactChannel, CoreContactDraft, CoreContactFile, CoreContactImport, CoreExportAccount,
+    CoreExportObject, CoreIcsEvent, CoreNote, CoreNoteAttachment, CoreNoteDraft, CoreNotebook,
+    CoreOrderItem, CoreRecurrence, PairPoll, PAIR_POLL_INTERVAL_MS,
 };
 
 pub use sealbook_protocol::{
