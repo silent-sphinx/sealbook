@@ -2932,3 +2932,141 @@ impl CoreContactIndex {
         self.inner.search(query)
     }
 }
+
+// ── Core: offline vault, outbox and flush ──
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct LocalObjectList(pub Vec<sealbook_core::LocalObject>);
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct FlushWriteList(pub Vec<sealbook_core::FlushWrite>);
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct StringList(pub Vec<String>);
+
+#[wasm_bindgen]
+pub fn core_local_vault_write(vault: Ts<sealbook_core::LocalVault>) -> Result<String, JsError> {
+    Ok(sealbook_core::local_vault_write(&vault.to_rust()?))
+}
+
+#[wasm_bindgen]
+pub fn core_local_vault_read(raw: &str) -> Result<Ts<sealbook_core::LocalVault>, JsError> {
+    Ok(sealbook_core::local_vault_read(raw)
+        .map_err(core_err)?
+        .into_ts()?)
+}
+
+/// Folds the rows a walk read into the vault, newest revision winning.
+#[wasm_bindgen]
+pub fn core_local_vault_apply(
+    vault: Ts<sealbook_core::LocalVault>,
+    rows: Ts<LocalObjectList>,
+    latest_revision: u64,
+    key_epoch: u64,
+) -> Result<Ts<sealbook_core::LocalVault>, JsError> {
+    Ok(sealbook_core::local_vault_apply(
+        &vault.to_rust()?,
+        &rows.to_rust()?.0,
+        latest_revision,
+        key_epoch,
+    )
+    .into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_outbox_write(outbox: Ts<sealbook_core::Outbox>) -> Result<String, JsError> {
+    Ok(sealbook_core::outbox_write(&outbox.to_rust()?))
+}
+
+#[wasm_bindgen]
+pub fn core_outbox_read(raw: &str) -> Result<Ts<sealbook_core::Outbox>, JsError> {
+    Ok(sealbook_core::outbox_read(raw)
+        .map_err(core_err)?
+        .into_ts()?)
+}
+
+/// Queues a write, combining it with one already queued for the same id.
+#[wasm_bindgen]
+pub fn core_outbox_push(
+    outbox: Ts<sealbook_core::Outbox>,
+    write: Ts<sealbook_core::PendingWrite>,
+) -> Result<Ts<sealbook_core::Outbox>, JsError> {
+    Ok(sealbook_core::outbox_push(&outbox.to_rust()?, write.to_rust()?).into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_outbox_settle(
+    outbox: Ts<sealbook_core::Outbox>,
+    ids: Ts<StringList>,
+) -> Result<Ts<sealbook_core::Outbox>, JsError> {
+    Ok(sealbook_core::outbox_settle(&outbox.to_rust()?, &ids.to_rust()?.0).into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_outbox_fail(
+    outbox: Ts<sealbook_core::Outbox>,
+    ids: Ts<StringList>,
+    reason: &str,
+) -> Result<Ts<sealbook_core::Outbox>, JsError> {
+    Ok(sealbook_core::outbox_fail(&outbox.to_rust()?, &ids.to_rust()?.0, reason).into_ts()?)
+}
+
+/// The live objects to list: the vault with the queued writes laid over it.
+#[wasm_bindgen]
+pub fn core_local_view(
+    vault: Ts<sealbook_core::LocalVault>,
+    outbox: Ts<sealbook_core::Outbox>,
+) -> Result<Ts<LocalObjectList>, JsError> {
+    Ok(LocalObjectList(sealbook_core::local_view(
+        &vault.to_rust()?,
+        &outbox.to_rust()?,
+    ))
+    .into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_merge_payload(
+    content_type: &str,
+    base: Option<String>,
+    local: &str,
+    remote: &str,
+    date: &str,
+) -> Result<Ts<sealbook_core::MergeOutcome>, JsError> {
+    Ok(
+        sealbook_core::merge_payload(content_type, base.as_deref(), local, remote, date)
+            .into_ts()?,
+    )
+}
+
+/// What each queued write becomes against a vault just brought up to date.
+#[wasm_bindgen]
+pub fn core_flush_plan(
+    outbox: Ts<sealbook_core::Outbox>,
+    vault: Ts<sealbook_core::LocalVault>,
+    date: &str,
+) -> Result<Ts<sealbook_core::FlushPlan>, JsError> {
+    Ok(sealbook_core::flush_plan(&outbox.to_rust()?, &vault.to_rust()?, date).into_ts()?)
+}
+
+/// Whether a batch's objects still hold what the plan expected, just before
+/// the batch is signed.
+#[wasm_bindgen]
+pub fn core_write_guard(
+    writes: Ts<FlushWriteList>,
+    entries: Ts<CoreManifestEntryList>,
+    attempt: u32,
+) -> Result<Ts<sealbook_core::FlushGuard>, JsError> {
+    Ok(
+        sealbook_core::write_guard(&writes.to_rust()?.0, &entries.to_rust()?.0, attempt)
+            .map_err(core_err)?
+            .into_ts()?,
+    )
+}
+
+#[wasm_bindgen]
+pub fn core_flush_failure(status: u16) -> Result<Ts<sealbook_core::FlushFailure>, JsError> {
+    Ok(sealbook_core::flush_failure(status).into_ts()?)
+}

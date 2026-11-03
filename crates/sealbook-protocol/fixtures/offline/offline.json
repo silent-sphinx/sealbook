@@ -1,0 +1,849 @@
+{
+  "date": "2026-11-03",
+  "outbox": [
+    {
+      "case": "a second edit keeps the first base and the first place",
+      "vault": {
+        "version": 1,
+        "latest_revision": 5,
+        "key_epoch": 1,
+        "objects": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "content_type": "application/sealbook.note+json",
+            "revision": 4,
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"a\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+          },
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000002",
+            "content_type": "application/sealbook.note+json",
+            "revision": 5,
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"b\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Other\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+          }
+        ]
+      },
+      "pushes": [
+        {
+          "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+          "content_type": "application/sealbook.note+json",
+          "tombstone": false,
+          "payload": "{\"@type\":\"Note\",\"body\":\"a\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan v2\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+          "base": {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "content_type": "application/sealbook.note+json",
+            "revision": 4,
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"a\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+          },
+          "queued_at": "2026-11-03T09:00:00.000Z"
+        },
+        {
+          "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000003",
+          "content_type": "application/sealbook.note+json",
+          "tombstone": false,
+          "payload": "{\"@type\":\"Note\",\"body\":\"\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"New\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+          "queued_at": "2026-11-03T09:00:00.000Z"
+        },
+        {
+          "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+          "content_type": "application/sealbook.note+json",
+          "tombstone": false,
+          "payload": "{\"@type\":\"Note\",\"body\":\"a\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan v3\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+          "base": {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "content_type": "application/sealbook.note+json",
+            "revision": 4,
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"a\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan v2\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+          },
+          "queued_at": "2026-11-03T09:00:00.000Z"
+        }
+      ],
+      "outbox": {
+        "version": 1,
+        "writes": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "content_type": "application/sealbook.note+json",
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"a\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan v3\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+            "base": {
+              "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+              "content_type": "application/sealbook.note+json",
+              "revision": 4,
+              "tombstone": false,
+              "payload": "{\"@type\":\"Note\",\"body\":\"a\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+            },
+            "queued_at": "2026-11-03T09:00:00.000Z"
+          },
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000003",
+            "content_type": "application/sealbook.note+json",
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"New\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+            "queued_at": "2026-11-03T09:00:00.000Z"
+          }
+        ],
+        "failed": []
+      },
+      "view": [
+        {
+          "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000002",
+          "content_type": "application/sealbook.note+json",
+          "revision": 5,
+          "tombstone": false,
+          "payload": "{\"@type\":\"Note\",\"body\":\"b\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Other\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+        },
+        {
+          "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+          "content_type": "application/sealbook.note+json",
+          "revision": 4,
+          "tombstone": false,
+          "payload": "{\"@type\":\"Note\",\"body\":\"a\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan v3\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+        },
+        {
+          "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000003",
+          "content_type": "application/sealbook.note+json",
+          "revision": 0,
+          "tombstone": false,
+          "payload": "{\"@type\":\"Note\",\"body\":\"\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"New\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+        }
+      ]
+    },
+    {
+      "case": "deleting an unsent create leaves nothing queued",
+      "vault": {
+        "version": 1,
+        "latest_revision": 5,
+        "key_epoch": 1,
+        "objects": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "content_type": "application/sealbook.note+json",
+            "revision": 4,
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"a\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+          },
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000002",
+            "content_type": "application/sealbook.note+json",
+            "revision": 5,
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"b\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Other\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+          }
+        ]
+      },
+      "pushes": [
+        {
+          "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000003",
+          "content_type": "application/sealbook.note+json",
+          "tombstone": false,
+          "payload": "{\"@type\":\"Note\",\"body\":\"\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"New\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+          "queued_at": "2026-11-03T09:00:00.000Z"
+        },
+        {
+          "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000003",
+          "content_type": "application/sealbook.note+json",
+          "tombstone": true,
+          "payload": "",
+          "queued_at": "2026-11-03T09:00:00.000Z"
+        }
+      ],
+      "outbox": {
+        "version": 1,
+        "writes": [],
+        "failed": []
+      },
+      "view": [
+        {
+          "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+          "content_type": "application/sealbook.note+json",
+          "revision": 4,
+          "tombstone": false,
+          "payload": "{\"@type\":\"Note\",\"body\":\"a\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+        },
+        {
+          "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000002",
+          "content_type": "application/sealbook.note+json",
+          "revision": 5,
+          "tombstone": false,
+          "payload": "{\"@type\":\"Note\",\"body\":\"b\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Other\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+        }
+      ]
+    },
+    {
+      "case": "a queued delete hides the object",
+      "vault": {
+        "version": 1,
+        "latest_revision": 5,
+        "key_epoch": 1,
+        "objects": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "content_type": "application/sealbook.note+json",
+            "revision": 4,
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"a\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+          },
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000002",
+            "content_type": "application/sealbook.note+json",
+            "revision": 5,
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"b\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Other\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+          }
+        ]
+      },
+      "pushes": [
+        {
+          "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000002",
+          "content_type": "application/sealbook.note+json",
+          "tombstone": true,
+          "payload": "",
+          "base": {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000002",
+            "content_type": "application/sealbook.note+json",
+            "revision": 5,
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"b\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Other\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+          },
+          "queued_at": "2026-11-03T09:00:00.000Z"
+        }
+      ],
+      "outbox": {
+        "version": 1,
+        "writes": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000002",
+            "content_type": "application/sealbook.note+json",
+            "tombstone": true,
+            "payload": "",
+            "base": {
+              "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000002",
+              "content_type": "application/sealbook.note+json",
+              "revision": 5,
+              "tombstone": false,
+              "payload": "{\"@type\":\"Note\",\"body\":\"b\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Other\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+            },
+            "queued_at": "2026-11-03T09:00:00.000Z"
+          }
+        ],
+        "failed": []
+      },
+      "view": [
+        {
+          "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+          "content_type": "application/sealbook.note+json",
+          "revision": 4,
+          "tombstone": false,
+          "payload": "{\"@type\":\"Note\",\"body\":\"a\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+        }
+      ]
+    }
+  ],
+  "merge": [
+    {
+      "case": "different fields changed on each side both land",
+      "content_type": "application/sealbook.note+json",
+      "base": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+      "local": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan A\",\"updatedAt\":\"2026-11-02T10:00:00.000Z\",\"version\":\"1.0\"}",
+      "remote": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"elsewhere\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-02T11:00:00.000Z\",\"version\":\"1.0\"}",
+      "outcome": {
+        "Merged": {
+          "payload": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"elsewhere\",\"title\":\"Plan A\",\"updatedAt\":\"2026-11-02T11:00:00.000Z\",\"version\":\"1.0\"}",
+          "overwrote": false
+        }
+      }
+    },
+    {
+      "case": "body edits on different lines merge",
+      "content_type": "application/sealbook.note+json",
+      "base": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+      "local": "{\"@type\":\"Note\",\"body\":\"ONE\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-02T10:00:00.000Z\",\"version\":\"1.0\"}",
+      "remote": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\\nthree\\nFOUR\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-02T11:00:00.000Z\",\"version\":\"1.0\"}",
+      "outcome": {
+        "Merged": {
+          "payload": "{\"@type\":\"Note\",\"body\":\"ONE\\ntwo\\nthree\\nFOUR\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-02T11:00:00.000Z\",\"version\":\"1.0\"}",
+          "overwrote": false
+        }
+      }
+    },
+    {
+      "case": "the same line changed two ways is a conflicted copy",
+      "content_type": "application/sealbook.note+json",
+      "base": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+      "local": "{\"@type\":\"Note\",\"body\":\"one\\nTWO\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-02T10:00:00.000Z\",\"version\":\"1.0\"}",
+      "remote": "{\"@type\":\"Note\",\"body\":\"one\\n2\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-02T11:00:00.000Z\",\"version\":\"1.0\"}",
+      "outcome": {
+        "Conflict": {
+          "payload": null,
+          "copy": "{\"@type\":\"Note\",\"body\":\"one\\nTWO\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan (conflict, 2026-11-03)\",\"updatedAt\":\"2026-11-02T10:00:00.000Z\",\"version\":\"1.0\"}"
+        }
+      }
+    },
+    {
+      "case": "a title conflict makes a copy even when the body merges",
+      "content_type": "application/sealbook.note+json",
+      "base": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+      "local": "{\"@type\":\"Note\",\"body\":\"ONE\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan A\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+      "remote": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\\nthree\\nFOUR\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan B\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+      "outcome": {
+        "Conflict": {
+          "payload": "{\"@type\":\"Note\",\"body\":\"ONE\\ntwo\\nthree\\nFOUR\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan B\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+          "copy": "{\"@type\":\"Note\",\"body\":\"ONE\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan A (conflict, 2026-11-03)\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+        }
+      }
+    },
+    {
+      "case": "the same edit on both sides needs nothing",
+      "content_type": "application/sealbook.note+json",
+      "base": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+      "local": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Same\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+      "remote": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Same\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+      "outcome": "Same"
+    },
+    {
+      "case": "a key this build does not know survives",
+      "content_type": "application/sealbook.note+json",
+      "base": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+      "local": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\",\"x-future\":{\"kept\":true}}",
+      "remote": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Renamed\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+      "outcome": {
+        "Merged": {
+          "payload": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Renamed\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\",\"x-future\":{\"kept\":true}}",
+          "overwrote": false
+        }
+      }
+    },
+    {
+      "case": "a photo removed on either side stays removed, an added one is kept",
+      "content_type": "application/sealbook.note+json",
+      "base": "{\"@type\":\"Note\",\"attachments\":[{\"adk\":\"k\",\"byteSize\":10,\"chunkCount\":1,\"chunkSize\":10,\"contentHash\":\"h\",\"filename\":\"p1.jpg\",\"id\":\"p1\",\"mimeType\":\"image/jpeg\"},{\"adk\":\"k\",\"byteSize\":10,\"chunkCount\":1,\"chunkSize\":10,\"contentHash\":\"h\",\"filename\":\"p2.jpg\",\"id\":\"p2\",\"mimeType\":\"image/jpeg\"}],\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+      "local": "{\"@type\":\"Note\",\"attachments\":[{\"adk\":\"k\",\"byteSize\":10,\"chunkCount\":1,\"chunkSize\":10,\"contentHash\":\"h\",\"filename\":\"p1.jpg\",\"id\":\"p1\",\"mimeType\":\"image/jpeg\"},{\"adk\":\"k\",\"byteSize\":10,\"chunkCount\":1,\"chunkSize\":10,\"contentHash\":\"h\",\"filename\":\"p2.jpg\",\"id\":\"p2\",\"mimeType\":\"image/jpeg\"},{\"adk\":\"k\",\"byteSize\":10,\"chunkCount\":1,\"chunkSize\":10,\"contentHash\":\"h\",\"filename\":\"p3.jpg\",\"id\":\"p3\",\"mimeType\":\"image/jpeg\"}],\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+      "remote": "{\"@type\":\"Note\",\"attachments\":[{\"adk\":\"k\",\"byteSize\":10,\"chunkCount\":1,\"chunkSize\":10,\"contentHash\":\"h\",\"filename\":\"p2.jpg\",\"id\":\"p2\",\"mimeType\":\"image/jpeg\"}],\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+      "outcome": {
+        "Merged": {
+          "payload": "{\"@type\":\"Note\",\"attachments\":[{\"adk\":\"k\",\"byteSize\":10,\"chunkCount\":1,\"chunkSize\":10,\"contentHash\":\"h\",\"filename\":\"p2.jpg\",\"id\":\"p2\",\"mimeType\":\"image/jpeg\"},{\"adk\":\"k\",\"byteSize\":10,\"chunkCount\":1,\"chunkSize\":10,\"contentHash\":\"h\",\"filename\":\"p3.jpg\",\"id\":\"p3\",\"mimeType\":\"image/jpeg\"}],\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+          "overwrote": false
+        }
+      }
+    },
+    {
+      "case": "a contact's conflicted copy is renamed in name.full",
+      "content_type": "application/jscontact+json",
+      "base": "{\"@type\":\"Card\",\"name\":{\"full\":\"Ada Lovelace\"},\"version\":\"1.0\"}",
+      "local": "{\"@type\":\"Card\",\"name\":{\"full\":\"Ada King\"},\"version\":\"1.0\"}",
+      "remote": "{\"@type\":\"Card\",\"name\":{\"full\":\"Augusta Ada\"},\"version\":\"1.0\"}",
+      "outcome": {
+        "Conflict": {
+          "payload": null,
+          "copy": "{\"@type\":\"Card\",\"name\":{\"full\":\"Ada King (conflict, 2026-11-03)\"},\"version\":\"1.0\"}"
+        }
+      }
+    },
+    {
+      "case": "a container conflict keeps this device's value",
+      "content_type": "application/sealbook.notebook+json",
+      "base": "{\"@type\":\"Notebook\",\"name\":\"Work\",\"version\":\"1.0\"}",
+      "local": "{\"@type\":\"Notebook\",\"name\":\"Work (old)\",\"version\":\"1.0\"}",
+      "remote": "{\"@type\":\"Notebook\",\"name\":\"Office\",\"version\":\"1.0\"}",
+      "outcome": {
+        "Merged": {
+          "payload": "{\"@type\":\"Notebook\",\"name\":\"Work (old)\",\"version\":\"1.0\"}",
+          "overwrote": true
+        }
+      }
+    },
+    {
+      "case": "settings created on two devices merge per key, this device winning",
+      "content_type": "application/sealbook.settings+json",
+      "base": null,
+      "local": "{\"@type\":\"Settings\",\"accent\":\"rose\",\"contactMode\":\"basic\",\"features\":[\"contacts\",\"notes\"],\"version\":\"1.0\"}",
+      "remote": "{\"@type\":\"Settings\",\"accent\":\"green\",\"contactMode\":\"detailed\",\"features\":[\"contacts\",\"notes\"],\"version\":\"1.0\"}",
+      "outcome": {
+        "Merged": {
+          "payload": "{\"@type\":\"Settings\",\"accent\":\"rose\",\"contactMode\":\"basic\",\"features\":[\"contacts\",\"notes\"],\"version\":\"1.0\"}",
+          "overwrote": true
+        }
+      }
+    },
+    {
+      "case": "an edit that removes a key keeps it removed",
+      "content_type": "application/sealbook.task+json",
+      "base": "{\"@type\":\"Task\",\"dueDate\":\"2026-11-05\",\"notes\":\"x\",\"title\":\"Call\"}",
+      "local": "{\"@type\":\"Task\",\"notes\":\"x\",\"title\":\"Call\"}",
+      "remote": "{\"@type\":\"Task\",\"dueDate\":\"2026-11-05\",\"notes\":\"x\\ny\",\"title\":\"Call\"}",
+      "outcome": {
+        "Merged": {
+          "payload": "{\"@type\":\"Task\",\"notes\":\"x\\ny\",\"title\":\"Call\"}",
+          "overwrote": false
+        }
+      }
+    },
+    {
+      "case": "the later updatedAt wins without a conflict",
+      "content_type": "application/sealbook.bookmark+json",
+      "base": "{\"@type\":\"Bookmark\",\"updatedAt\":\"2026-11-01T00:00:00.000Z\",\"url\":\"https://a.example\"}",
+      "local": "{\"@type\":\"Bookmark\",\"updatedAt\":\"2026-11-03T00:00:00.000Z\",\"url\":\"https://a.example\"}",
+      "remote": "{\"@type\":\"Bookmark\",\"title\":\"A\",\"updatedAt\":\"2026-11-02T00:00:00.000Z\",\"url\":\"https://a.example\"}",
+      "outcome": {
+        "Merged": {
+          "payload": "{\"@type\":\"Bookmark\",\"title\":\"A\",\"updatedAt\":\"2026-11-03T00:00:00.000Z\",\"url\":\"https://a.example\"}",
+          "overwrote": false
+        }
+      }
+    }
+  ],
+  "flush": [
+    {
+      "case": "an unchanged object is written over its revision",
+      "vault": {
+        "version": 1,
+        "latest_revision": 9,
+        "key_epoch": 1,
+        "objects": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "content_type": "application/sealbook.note+json",
+            "revision": 4,
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+          }
+        ]
+      },
+      "outbox": {
+        "version": 1,
+        "writes": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "content_type": "application/sealbook.note+json",
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"one\\nTWO\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+            "base": {
+              "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+              "content_type": "application/sealbook.note+json",
+              "revision": 4,
+              "tombstone": false,
+              "payload": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+            },
+            "queued_at": "2026-11-03T09:00:00.000Z"
+          }
+        ],
+        "failed": []
+      },
+      "plan": {
+        "writes": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "content_type": "application/sealbook.note+json",
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"one\\nTWO\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+            "expect_revision": 4,
+            "settles": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "copy": false
+          }
+        ],
+        "dropped": []
+      }
+    },
+    {
+      "case": "a create expects nothing there",
+      "vault": {
+        "version": 1,
+        "latest_revision": 9,
+        "key_epoch": 1,
+        "objects": []
+      },
+      "outbox": {
+        "version": 1,
+        "writes": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000003",
+            "content_type": "application/sealbook.note+json",
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"New\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+            "queued_at": "2026-11-03T09:00:00.000Z"
+          }
+        ],
+        "failed": []
+      },
+      "plan": {
+        "writes": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000003",
+            "content_type": "application/sealbook.note+json",
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"New\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+            "settles": "0a6f4c1e-1b2c-4d3e-8f40-000000000003",
+            "copy": false
+          }
+        ],
+        "dropped": []
+      }
+    },
+    {
+      "case": "a remote change to another field is merged in",
+      "vault": {
+        "version": 1,
+        "latest_revision": 9,
+        "key_epoch": 1,
+        "objects": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "content_type": "application/sealbook.note+json",
+            "revision": 9,
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan (renamed)\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+          }
+        ]
+      },
+      "outbox": {
+        "version": 1,
+        "writes": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "content_type": "application/sealbook.note+json",
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"one\\nTWO\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+            "base": {
+              "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+              "content_type": "application/sealbook.note+json",
+              "revision": 4,
+              "tombstone": false,
+              "payload": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+            },
+            "queued_at": "2026-11-03T09:00:00.000Z"
+          }
+        ],
+        "failed": []
+      },
+      "plan": {
+        "writes": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "content_type": "application/sealbook.note+json",
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"one\\nTWO\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan (renamed)\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+            "expect_revision": 9,
+            "settles": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "copy": false
+          }
+        ],
+        "dropped": []
+      }
+    },
+    {
+      "case": "a remote change to the same line writes a copy",
+      "vault": {
+        "version": 1,
+        "latest_revision": 9,
+        "key_epoch": 1,
+        "objects": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "content_type": "application/sealbook.note+json",
+            "revision": 9,
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"one\\n2\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+          }
+        ]
+      },
+      "outbox": {
+        "version": 1,
+        "writes": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "content_type": "application/sealbook.note+json",
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"one\\nTWO\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+            "base": {
+              "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+              "content_type": "application/sealbook.note+json",
+              "revision": 4,
+              "tombstone": false,
+              "payload": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+            },
+            "queued_at": "2026-11-03T09:00:00.000Z"
+          }
+        ],
+        "failed": []
+      },
+      "plan": {
+        "writes": [
+          {
+            "id": "b9db1d12-c7ae-5cd7-bbbd-0fbd619ceadc",
+            "content_type": "application/sealbook.note+json",
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"one\\nTWO\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan (conflict, 2026-11-03)\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+            "settles": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "copy": true,
+            "notice": "\"Plan\" was changed on this device and on another one. This device's version was saved as \"Plan (conflict, 2026-11-03)\"."
+          }
+        ],
+        "dropped": []
+      }
+    },
+    {
+      "case": "an edit to an object deleted elsewhere brings it back",
+      "vault": {
+        "version": 1,
+        "latest_revision": 9,
+        "key_epoch": 1,
+        "objects": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "content_type": "application/sealbook.note+json",
+            "revision": 9,
+            "tombstone": true,
+            "payload": ""
+          }
+        ]
+      },
+      "outbox": {
+        "version": 1,
+        "writes": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "content_type": "application/sealbook.note+json",
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"one\\nTWO\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+            "base": {
+              "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+              "content_type": "application/sealbook.note+json",
+              "revision": 4,
+              "tombstone": false,
+              "payload": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+            },
+            "queued_at": "2026-11-03T09:00:00.000Z"
+          }
+        ],
+        "failed": []
+      },
+      "plan": {
+        "writes": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "content_type": "application/sealbook.note+json",
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"one\\nTWO\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+            "settles": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "copy": false,
+            "notice": "\"Plan\" was deleted on another device. Your edit brought it back."
+          }
+        ],
+        "dropped": []
+      }
+    },
+    {
+      "case": "a delete of an object changed elsewhere is dropped",
+      "vault": {
+        "version": 1,
+        "latest_revision": 9,
+        "key_epoch": 1,
+        "objects": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "content_type": "application/sealbook.note+json",
+            "revision": 9,
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"one\\n2\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+          }
+        ]
+      },
+      "outbox": {
+        "version": 1,
+        "writes": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "content_type": "application/sealbook.note+json",
+            "tombstone": true,
+            "payload": "",
+            "base": {
+              "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+              "content_type": "application/sealbook.note+json",
+              "revision": 4,
+              "tombstone": false,
+              "payload": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+            },
+            "queued_at": "2026-11-03T09:00:00.000Z"
+          }
+        ],
+        "failed": []
+      },
+      "plan": {
+        "writes": [],
+        "dropped": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "notice": "\"Plan\" was changed on another device, so it wasn't deleted."
+          }
+        ]
+      }
+    },
+    {
+      "case": "a delete of an object deleted elsewhere needs nothing",
+      "vault": {
+        "version": 1,
+        "latest_revision": 9,
+        "key_epoch": 1,
+        "objects": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "content_type": "application/sealbook.note+json",
+            "revision": 9,
+            "tombstone": true,
+            "payload": ""
+          }
+        ]
+      },
+      "outbox": {
+        "version": 1,
+        "writes": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "content_type": "application/sealbook.note+json",
+            "tombstone": true,
+            "payload": "",
+            "base": {
+              "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+              "content_type": "application/sealbook.note+json",
+              "revision": 4,
+              "tombstone": false,
+              "payload": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+            },
+            "queued_at": "2026-11-03T09:00:00.000Z"
+          }
+        ],
+        "failed": []
+      },
+      "plan": {
+        "writes": [],
+        "dropped": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001"
+          }
+        ]
+      }
+    },
+    {
+      "case": "an edit already on the server is dropped",
+      "vault": {
+        "version": 1,
+        "latest_revision": 9,
+        "key_epoch": 1,
+        "objects": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "content_type": "application/sealbook.note+json",
+            "revision": 9,
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"one\\nTWO\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+          }
+        ]
+      },
+      "outbox": {
+        "version": 1,
+        "writes": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "content_type": "application/sealbook.note+json",
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"one\\nTWO\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+            "base": {
+              "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+              "content_type": "application/sealbook.note+json",
+              "revision": 4,
+              "tombstone": false,
+              "payload": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+            },
+            "queued_at": "2026-11-03T09:00:00.000Z"
+          }
+        ],
+        "failed": []
+      },
+      "plan": {
+        "writes": [],
+        "dropped": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001"
+          }
+        ]
+      }
+    },
+    {
+      "case": "a renamed notebook deleted elsewhere comes back before the note created in it",
+      "vault": {
+        "version": 1,
+        "latest_revision": 9,
+        "key_epoch": 1,
+        "objects": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000010",
+            "content_type": "application/sealbook.notebook+json",
+            "revision": 9,
+            "tombstone": true,
+            "payload": ""
+          },
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
+            "content_type": "application/sealbook.note+json",
+            "revision": 4,
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+          }
+        ]
+      },
+      "outbox": {
+        "version": 1,
+        "writes": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000010",
+            "content_type": "application/sealbook.notebook+json",
+            "tombstone": false,
+            "payload": "{\"@type\":\"Notebook\",\"name\":\"Trip 2026\",\"version\":\"1.0\"}",
+            "base": {
+              "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000010",
+              "content_type": "application/sealbook.notebook+json",
+              "revision": 3,
+              "tombstone": false,
+              "payload": "{\"@type\":\"Notebook\",\"name\":\"Trip\",\"version\":\"1.0\"}"
+            },
+            "queued_at": "2026-11-03T09:00:00.000Z"
+          },
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000002",
+            "content_type": "application/sealbook.note+json",
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Packing\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+            "queued_at": "2026-11-03T09:00:00.000Z"
+          }
+        ],
+        "failed": []
+      },
+      "plan": {
+        "writes": [
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000010",
+            "content_type": "application/sealbook.notebook+json",
+            "tombstone": false,
+            "payload": "{\"@type\":\"Notebook\",\"name\":\"Trip 2026\",\"version\":\"1.0\"}",
+            "settles": "0a6f4c1e-1b2c-4d3e-8f40-000000000010",
+            "copy": false,
+            "notice": "\"Trip 2026\" was deleted on another device. Your edit brought it back."
+          },
+          {
+            "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000002",
+            "content_type": "application/sealbook.note+json",
+            "tombstone": false,
+            "payload": "{\"@type\":\"Note\",\"body\":\"\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Packing\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+            "settles": "0a6f4c1e-1b2c-4d3e-8f40-000000000002",
+            "copy": false
+          }
+        ],
+        "dropped": []
+      }
+    }
+  ]
+}

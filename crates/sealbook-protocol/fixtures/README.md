@@ -370,3 +370,13 @@ catches.
   client's own parser and core's writer. Held by `importParity.test.ts` and
   Android's `ImportParityTest`.
 
+
+- `offline/offline.json` - the outbox, the three-way merge and the flush plan
+  for offline editing. `outbox` pushes writes in order and holds the combined
+  outbox and the listed view; `merge` holds `merge_payload`'s outcome for one
+  case per rule, including a conflicted copy, a container conflict and
+  attachments; `flush` holds the plan for a queued write against each state the
+  server's copy can be in. Generated from core by the ignored `regenerate` test
+  in `sealbook-core/tests/offline.rs`, which says how to run it. Not yet in
+  `corpus.json`: web and Android read it with their own runners once their
+  outboxes exist.

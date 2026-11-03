@@ -29,13 +29,16 @@ mod contact_search;
 mod contacts;
 mod csv;
 mod error;
+mod flush;
 mod http;
 mod ics;
 mod manifest;
 mod markdown;
+mod merge;
 mod messages;
 mod notes;
 mod notes_file;
+mod offline;
 mod order;
 mod pairing;
 mod payload;
@@ -123,6 +126,10 @@ pub use contacts::{
     PROFILE_KEYS, UNNAMED_CONTACT_NAME, UNTITLED_ADDRESS_BOOK_NAME,
 };
 pub use error::CoreError;
+pub use flush::{
+    flush_failure, flush_plan, write_guard, FlushDrop, FlushFailure, FlushGuard, FlushPlan,
+    FlushWrite,
+};
 pub use http::{Header, HttpRequest, HttpResponse, Method, Step};
 pub use ics::{
     ics_fold, ics_parse, ics_rrule, ics_stamp, ics_write, CoreIcsEvent, CoreIcsExportEvent,
@@ -194,13 +201,21 @@ pub use contact_json::{contacts_import, json_import, CoreContactFile};
 pub use contact_search::{ContactIndex, CoreBookName, CoreContactSource};
 pub use csv::{csv_import, csv_parse, csv_rows, csv_write};
 pub use markdown::repair_pipe_tables;
+pub use merge::{conflict_copy, conflict_copy_id, merge_payload, MergeOutcome};
 pub use messages::{
-    attachment_message, auth_message, collection_busy_message, error_message, pair_message,
-    recovery_pending_message, roster_too_old_message, rotation_message,
+    attachment_message, auth_message, collection_busy_message, conflict_copy_title, error_message,
+    offline_conflict_message, offline_delete_kept_message, offline_overwrote_message,
+    offline_restored_message, pair_message, recovery_pending_message, roster_too_old_message,
+    rotation_message,
 };
 pub use notes_file::{
     notes_import, notes_write_json, notes_write_markdown, CoreNoteFile, CoreNoteFileEntry,
     CoreNoteSkipped,
+};
+pub use offline::{
+    local_vault_apply, local_vault_read, local_vault_write, local_view, outbox_fail, outbox_push,
+    outbox_read, outbox_settle, outbox_write, FailedWrite, LocalObject, LocalVault, Outbox,
+    PendingWrite, LOCAL_VAULT_VERSION, OUTBOX_VERSION,
 };
 pub use order::{name_key, order_by_name, order_by_recency, order_containers, CoreOrderItem};
 pub use sealbook_protocol::{PAYLOAD_SCHEMA_VERSION, PROTOCOL_VERSION};
