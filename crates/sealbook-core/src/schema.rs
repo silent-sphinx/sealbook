@@ -19,8 +19,9 @@ use crate::{
     CALENDAR_EVENT_CONTENT_TYPE, CALENDAR_EVENT_KEYS, CALENDAR_KEYS, CONTACT_ARCHIVED_PROP,
     CONTACT_ATTACHMENTS_PROP, CONTACT_KEYS, CONTACT_MODES, CONTACT_PROFILE_PROP, FEATURES,
     JSCONTACT_CONTENT_TYPE, MAX_BOOKMARK_TAGS, MAX_PROFILE_ENTRIES, MAX_TASK_COMPLETIONS,
-    NOTEBOOK_CONTENT_TYPE, NOTEBOOK_KEYS, NOTE_CONTENT_TYPE, NOTE_KEYS, PROFILE_KEYS,
-    TASK_CONTENT_TYPE, TASK_EXPORT_TYPE, TASK_KEYS, TASK_LIST_CONTENT_TYPE, TASK_LIST_KEYS,
+    NOTEBOOK_CONTENT_TYPE, NOTEBOOK_KEYS, NOTE_CONTENT_TYPE, NOTE_KEYS, PERIOD_CURRENT_PROP,
+    PERIOD_END_PROP, PERIOD_START_PROP, PROFILE_KEYS, TASK_CONTENT_TYPE, TASK_EXPORT_TYPE,
+    TASK_KEYS, TASK_LIST_CONTENT_TYPE, TASK_LIST_KEYS, WORK_NOTE_PROP,
 };
 
 pub const PAYLOAD_SCHEMA_ID: &str = "urn:sealbook:schema:payloads";
@@ -363,8 +364,17 @@ fn card() -> Value {
                 "contexts": flags(&["work", "private"]),
                 "features": flags(&["mobile"]),
                 "label": string(),
+                PERIOD_START_PROP: string(),
+                PERIOD_END_PROP: string(),
+                PERIOD_CURRENT_PROP: { "type": "boolean" },
             }))),
-            "organizations": map_of(object(json!({ "name": string() }))),
+            "organizations": map_of(object(json!({
+                "name": string(),
+                PERIOD_START_PROP: string(),
+                PERIOD_END_PROP: string(),
+                PERIOD_CURRENT_PROP: { "type": "boolean" },
+                WORK_NOTE_PROP: string(),
+            }))),
             "titles": map_of(object(json!({
                 "name": string(),
                 "kind": { "const": "title" },

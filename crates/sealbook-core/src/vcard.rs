@@ -361,7 +361,7 @@ fn build(props: &[Prop], book: &str) -> Option<CoreContactDraft> {
                     region: some(field(&parts, 4)),
                     postcode: some(field(&parts, 5)),
                     country: some(field(&parts, 6)),
-                    extra: None,
+                    ..Default::default()
                 };
                 if !row.is_blank() {
                     addresses.push(row);
@@ -428,6 +428,7 @@ fn build(props: &[Prop], book: &str) -> Option<CoreContactDraft> {
             organization,
             title: some(&title),
             extra: None,
+            ..Default::default()
         }]
     };
 
@@ -542,7 +543,7 @@ fn card(c: &CoreContactDraft) -> String {
     }
 
     for address in &c.addresses {
-        if address.is_blank() {
+        if address.is_blank() || !(address.current || address.end.is_none()) {
             continue;
         }
         let part = |value: &Option<String>| escape(value.as_deref().map(trim).unwrap_or(""));
@@ -566,7 +567,11 @@ fn card(c: &CoreContactDraft) -> String {
         ));
     }
 
-    for work in &c.work {
+    for work in c
+        .work
+        .iter()
+        .filter(|work| work.current || work.end.is_none())
+    {
         let organization = trim(&work.organization);
         if !organization.is_empty() {
             lines.push(format!("ORG:{}", escape(organization)));

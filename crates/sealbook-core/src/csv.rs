@@ -325,6 +325,7 @@ fn read(row: &Row, default_book: &str) -> Option<CoreContactDraft> {
             organization: organization.unwrap_or_default(),
             title,
             extra: None,
+            ..Default::default()
         }]
     } else {
         Vec::new()
@@ -372,7 +373,7 @@ fn read(row: &Row, default_book: &str) -> Option<CoreContactDraft> {
             "home country",
             "address 1 - country",
         ]),
-        extra: None,
+        ..Default::default()
     };
     let mut addresses = if address.is_blank() {
         Vec::new()
@@ -614,6 +615,7 @@ pub(crate) fn work_of(entry: &Map<String, Value>) -> Option<CoreContactWork> {
         organization: organization.unwrap_or_default(),
         title,
         extra: None,
+        ..Default::default()
     })
 }
 
@@ -636,7 +638,7 @@ fn address_of(entry: &Map<String, Value>) -> Option<CoreContactAddress> {
         region: text(entry, "region"),
         postcode: text(entry, "postcode"),
         country: text(entry, "country"),
-        extra: None,
+        ..Default::default()
     };
     (!address.is_blank()).then_some(address)
 }

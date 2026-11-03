@@ -331,6 +331,7 @@ mod tests {
                     organization: "Analytical Engines".into(),
                     title: None,
                     extra: None,
+                    ..Default::default()
                 }],
                 ..Default::default()
             },
