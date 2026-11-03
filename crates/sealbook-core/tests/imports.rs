@@ -232,7 +232,8 @@ fn rules_keep_what_the_protocol_can_say() {
         nth.nth_weekday,
         Some(CoreNthWeekday {
             ordinal: 3,
-            weekday: 2
+            weekday: 2,
+            extra: None,
         })
     );
     assert_eq!(

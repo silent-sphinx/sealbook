@@ -30,6 +30,7 @@ ed25519-dalek = { version = "2", features = ["rand_core", "zeroize"] }
 hex = "0.4"
 keyring = "3"
 hkdf = "0.12"
+jiff = "0.2"
 hmac = "0.12"
 hpke = { version = "0.14", default-features = false, features = ["x25519", "mlkem", "hkdfsha2", "getrandom", "chacha", "alloc"] }
 ml-dsa = { version = "0.1", features = ["getrandom"] }
@@ -46,7 +47,7 @@ thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "fs", "io-util", "sync", "time", "signal"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
 zeroize = { version = "1", features = ["zeroize_derive"] }
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "logging", "std", "prefer-post-quantum"] }
 rustls-pki-types = "1"

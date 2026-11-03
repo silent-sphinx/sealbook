@@ -1,0 +1,1236 @@
+{
+  "$defs": {
+    "AccountSettings": {
+      "properties": {
+        "@type": {
+          "const": "AccountSettings"
+        },
+        "accent": {
+          "enum": [
+            "blue",
+            "cyan",
+            "green",
+            "amber",
+            "rose",
+            "purple"
+          ]
+        },
+        "contactMode": {
+          "enum": [
+            "basic",
+            "detailed"
+          ]
+        },
+        "features": {
+          "anyOf": [
+            {
+              "properties": {
+                "contacts": {
+                  "const": true
+                }
+              }
+            },
+            {
+              "properties": {
+                "calendar": {
+                  "const": true
+                }
+              }
+            },
+            {
+              "properties": {
+                "notes": {
+                  "const": true
+                }
+              }
+            },
+            {
+              "properties": {
+                "bookmarks": {
+                  "const": true
+                }
+              }
+            },
+            {
+              "properties": {
+                "tasks": {
+                  "const": true
+                }
+              }
+            }
+          ],
+          "description": "One flag per feature, at least one on. A flag from a later build rides through as stored.",
+          "properties": {
+            "bookmarks": {
+              "type": "boolean"
+            },
+            "calendar": {
+              "type": "boolean"
+            },
+            "contacts": {
+              "type": "boolean"
+            },
+            "notes": {
+              "type": "boolean"
+            },
+            "tasks": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "contacts",
+            "calendar",
+            "notes",
+            "bookmarks",
+            "tasks"
+          ],
+          "type": "object"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        }
+      },
+      "required": [
+        "@type",
+        "version",
+        "features",
+        "contactMode",
+        "accent"
+      ],
+      "type": "object",
+      "x-sealbook-content-type": "application/sealbook.settings+json"
+    },
+    "AddressBook": {
+      "properties": {
+        "@type": {
+          "const": "AddressBook"
+        },
+        "archived": {
+          "description": "Written only when true.",
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        }
+      },
+      "required": [
+        "@type",
+        "version",
+        "name"
+      ],
+      "type": "object",
+      "x-sealbook-content-type": "application/sealbook.addressbook+json"
+    },
+    "Attachment": {
+      "description": "A binary stored outside the sealed-object set, chunked and sealed under adk.",
+      "properties": {
+        "adk": {
+          "description": "Attachment data key, base64url.",
+          "type": "string"
+        },
+        "byteSize": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "chunkCount": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "chunkSize": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "contentHash": {
+          "description": "Rolled-up content hash, base64url.",
+          "type": "string"
+        },
+        "displayWidth": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "filename": {
+          "type": "string"
+        },
+        "height": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "mimeType": {
+          "type": "string"
+        },
+        "thumbnail": {
+          "description": "A small inline preview, as a data URI.",
+          "type": "string"
+        },
+        "width": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "filename",
+        "mimeType",
+        "byteSize",
+        "adk",
+        "contentHash",
+        "chunkSize",
+        "chunkCount"
+      ],
+      "type": "object"
+    },
+    "Bookmark": {
+      "properties": {
+        "@type": {
+          "const": "Bookmark"
+        },
+        "collectionId": {
+          "description": "Carried as stored when it is not a UUID.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "createdAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 32,
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        }
+      },
+      "required": [
+        "@type",
+        "version",
+        "url",
+        "title",
+        "collectionId",
+        "createdAt",
+        "updatedAt"
+      ],
+      "type": "object",
+      "x-sealbook-content-type": "application/sealbook.bookmark+json"
+    },
+    "BookmarkCollection": {
+      "properties": {
+        "@type": {
+          "const": "BookmarkCollection"
+        },
+        "color": {
+          "description": "An accent key or a CSS colour.",
+          "type": "string"
+        },
+        "hideFromAll": {
+          "description": "Written only when true.",
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "The container this one sits under.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        }
+      },
+      "required": [
+        "@type",
+        "version",
+        "name"
+      ],
+      "type": "object",
+      "x-sealbook-content-type": "application/sealbook.bookmark-collection+json"
+    },
+    "Calendar": {
+      "properties": {
+        "@type": {
+          "const": "Calendar"
+        },
+        "archived": {
+          "description": "Written only when true.",
+          "type": "boolean"
+        },
+        "color": {
+          "description": "A CSS colour.",
+          "type": "string"
+        },
+        "favorite": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        }
+      },
+      "required": [
+        "@type",
+        "version",
+        "name",
+        "color",
+        "favorite"
+      ],
+      "type": "object",
+      "x-sealbook-content-type": "application/sealbook.calendar+json"
+    },
+    "CalendarEvent": {
+      "properties": {
+        "@type": {
+          "const": "CalendarEvent"
+        },
+        "calendarId": {
+          "description": "Absent is no calendar.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "end": {
+          "type": "string"
+        },
+        "location": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "participants": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "recurrence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Recurrence"
+            },
+            {
+              "type": "object"
+            }
+          ],
+          "description": "A rule this build cannot read is written back as it was stored."
+        },
+        "start": {
+          "description": "YYYY-MM-DD for an all-day event, or a date and time with a T.",
+          "type": "string"
+        },
+        "timezone": {
+          "description": "An IANA zone name.",
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        }
+      },
+      "required": [
+        "@type",
+        "version",
+        "title",
+        "start"
+      ],
+      "type": "object",
+      "x-sealbook-content-type": "application/sealbook.calendar-event+json"
+    },
+    "Card": {
+      "properties": {
+        "@type": {
+          "const": "Card"
+        },
+        "addresses": {
+          "additionalProperties": {
+            "properties": {
+              "contexts": {
+                "properties": {
+                  "private": {
+                    "type": "boolean"
+                  },
+                  "work": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              },
+              "country": {
+                "type": "string"
+              },
+              "features": {
+                "properties": {
+                  "mobile": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              },
+              "label": {
+                "type": "string"
+              },
+              "locality": {
+                "type": "string"
+              },
+              "postCode": {
+                "type": "string"
+              },
+              "region": {
+                "type": "string"
+              },
+              "sealbook:current": {
+                "type": "boolean"
+              },
+              "sealbook:end": {
+                "type": "string"
+              },
+              "sealbook:start": {
+                "type": "string"
+              },
+              "street": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "type": "object"
+        },
+        "anniversaries": {
+          "additionalProperties": {
+            "properties": {
+              "date": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "birth",
+                  "wedding",
+                  "other"
+                ]
+              },
+              "label": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "object"
+        },
+        "avatar": {
+          "description": "Read from older cards. Owned, so a write clears it; never written.",
+          "type": "string"
+        },
+        "created": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "Read from older cards. Owned, so a write clears it; never written.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "displayName": {
+          "description": "Read from older cards. Owned, so a write clears it; never written.",
+          "type": "string"
+        },
+        "emails": {
+          "additionalProperties": {
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "contexts": {
+                "properties": {
+                  "private": {
+                    "type": "boolean"
+                  },
+                  "work": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              },
+              "features": {
+                "properties": {
+                  "mobile": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              },
+              "label": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "object"
+        },
+        "fullName": {
+          "description": "Read from older cards. Owned, so a write clears it; never written.",
+          "type": "string"
+        },
+        "media": {
+          "additionalProperties": {
+            "properties": {
+              "href": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "uri": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "object"
+        },
+        "name": {
+          "properties": {
+            "full": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "nickNames": {
+          "additionalProperties": {
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "object"
+        },
+        "nicknames": {
+          "additionalProperties": {
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "description": "Read from older cards. Owned, so a write clears it; never written.",
+          "type": "object"
+        },
+        "notes": {
+          "additionalProperties": {
+            "properties": {
+              "note": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "object"
+        },
+        "onlineServices": {
+          "additionalProperties": {
+            "properties": {
+              "service": {
+                "type": "string"
+              },
+              "user": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "object"
+        },
+        "organizations": {
+          "additionalProperties": {
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "sealbook:current": {
+                "type": "boolean"
+              },
+              "sealbook:end": {
+                "type": "string"
+              },
+              "sealbook:note": {
+                "type": "string"
+              },
+              "sealbook:start": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "object"
+        },
+        "phones": {
+          "additionalProperties": {
+            "properties": {
+              "contexts": {
+                "properties": {
+                  "private": {
+                    "type": "boolean"
+                  },
+                  "work": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              },
+              "features": {
+                "properties": {
+                  "mobile": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              },
+              "label": {
+                "type": "string"
+              },
+              "number": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "object"
+        },
+        "photo": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "properties": {
+                "href": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "uri": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          ],
+          "description": "Read from older cards. Owned, so a write clears it; never written."
+        },
+        "photos": {
+          "additionalProperties": {
+            "properties": {
+              "href": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "uri": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "description": "Read from older cards. Owned, so a write clears it; never written.",
+          "type": "object"
+        },
+        "pronouns": {
+          "description": "Read from older cards. Owned, so a write clears it; never written.",
+          "type": "string"
+        },
+        "sealbook:addressBookId": {
+          "description": "Carried as stored when it is not a UUID.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "sealbook:archived": {
+          "description": "Written only when true.",
+          "type": "boolean"
+        },
+        "sealbook:attachments": {
+          "items": {
+            "$ref": "#/$defs/Attachment"
+          },
+          "type": "array"
+        },
+        "sealbook:profile": {
+          "$ref": "#/$defs/Profile"
+        },
+        "speakToAs": {
+          "properties": {
+            "pronouns": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "titles": {
+          "additionalProperties": {
+            "properties": {
+              "kind": {
+                "const": "title"
+              },
+              "name": {
+                "type": "string"
+              },
+              "organization": {
+                "description": "The id of an entry in organizations.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "object"
+        },
+        "updated": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "updatedAt": {
+          "description": "Read from older cards. Owned, so a write clears it; never written.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        }
+      },
+      "required": [
+        "@type",
+        "version",
+        "name",
+        "sealbook:addressBookId",
+        "created",
+        "updated"
+      ],
+      "type": "object",
+      "x-sealbook-content-type": "application/jscontact+json"
+    },
+    "Note": {
+      "properties": {
+        "@type": {
+          "const": "Note"
+        },
+        "attachments": {
+          "items": {
+            "$ref": "#/$defs/Attachment"
+          },
+          "type": "array"
+        },
+        "body": {
+          "description": "Markdown, whitespace as typed.",
+          "type": "string"
+        },
+        "createdAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "notebookId": {
+          "description": "Carried as stored when it is not a UUID.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "parentId": {
+          "description": "The note this one sits under. Absent at the notebook's top level.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "pinned": {
+          "description": "Owned only by a write that manages pinning; any other write carries it.",
+          "type": "boolean"
+        },
+        "title": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        }
+      },
+      "required": [
+        "@type",
+        "version",
+        "title",
+        "body",
+        "notebookId",
+        "createdAt",
+        "updatedAt"
+      ],
+      "type": "object",
+      "x-sealbook-conditionally-owned": [
+        "pinned"
+      ],
+      "x-sealbook-content-type": "application/sealbook.note+json"
+    },
+    "Notebook": {
+      "properties": {
+        "@type": {
+          "const": "Notebook"
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        }
+      },
+      "required": [
+        "@type",
+        "version",
+        "name"
+      ],
+      "type": "object",
+      "x-sealbook-content-type": "application/sealbook.notebook+json"
+    },
+    "Profile": {
+      "description": "The relationship-manager sections of a card. A section a later build adds rides through under its own key.",
+      "properties": {
+        "@type": {
+          "const": "SealbookProfile"
+        },
+        "career": {
+          "items": {
+            "properties": {
+              "end": {
+                "type": "string"
+              },
+              "note": {
+                "type": "string"
+              },
+              "organization": {
+                "type": "string"
+              },
+              "start": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "colleagues": {
+          "items": {
+            "properties": {
+              "contactId": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "note": {
+                "type": "string"
+              },
+              "relation": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "custom": {
+          "items": {
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "family": {
+          "items": {
+            "properties": {
+              "contactId": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "note": {
+                "type": "string"
+              },
+              "relation": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "food": {
+          "items": {
+            "properties": {
+              "note": {
+                "type": "string"
+              },
+              "polarity": {
+                "enum": [
+                  "like",
+                  "dislike"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "friends": {
+          "items": {
+            "properties": {
+              "contactId": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "note": {
+                "type": "string"
+              },
+              "relation": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "howWeMet": {
+          "type": "string"
+        },
+        "interests": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "music": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "pets": {
+          "items": {
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "note": {
+                "type": "string"
+              },
+              "species": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "relationships": {
+          "items": {
+            "properties": {
+              "current": {
+                "type": "boolean"
+              },
+              "end": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "note": {
+                "type": "string"
+              },
+              "start": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "timeline": {
+          "items": {
+            "properties": {
+              "date": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        }
+      },
+      "required": [
+        "@type",
+        "version"
+      ],
+      "type": "object"
+    },
+    "Recurrence": {
+      "properties": {
+        "count": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "dayOfMonth": {
+          "maximum": 31,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "frequency": {
+          "enum": [
+            "daily",
+            "weekly",
+            "monthly",
+            "yearly"
+          ]
+        },
+        "interval": {
+          "description": "Absent is every period.",
+          "minimum": 2,
+          "type": "integer"
+        },
+        "nthWeekday": {
+          "properties": {
+            "ordinal": {
+              "maximum": 5,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "weekday": {
+              "maximum": 6,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "until": {
+          "type": "string"
+        },
+        "weekdays": {
+          "items": {
+            "maximum": 6,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "frequency"
+      ],
+      "type": "object"
+    },
+    "Task": {
+      "properties": {
+        "@type": {
+          "const": "Task"
+        },
+        "completedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "completions": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 50,
+          "type": "array"
+        },
+        "createdAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "done": {
+          "description": "Written only when true.",
+          "type": "boolean"
+        },
+        "dueDate": {
+          "description": "YYYY-MM-DD for a day, or with T and a time of day for a moment.",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}(T.+)?$",
+          "type": "string",
+          "x-sealbook-rule": "The day must be on the calendar; core's normalize_due_date is the check."
+        },
+        "notes": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "The task this one sits under.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "priority": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "recurrence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Recurrence"
+            },
+            {
+              "type": "object"
+            }
+          ],
+          "description": "A rule this build cannot read is written back as it was stored."
+        },
+        "recurrenceAnchor": {
+          "description": "YYYY-MM-DD for a day, or with T and a time of day for a moment.",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}(T.+)?$",
+          "type": "string",
+          "x-sealbook-rule": "The day must be on the calendar; core's normalize_due_date is the check."
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 32,
+          "type": "array"
+        },
+        "taskListId": {
+          "description": "Carried as stored when it is not a UUID.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        }
+      },
+      "required": [
+        "@type",
+        "version",
+        "title",
+        "taskListId",
+        "createdAt",
+        "updatedAt"
+      ],
+      "type": "object",
+      "x-sealbook-content-type": "application/sealbook.task+json"
+    },
+    "TaskList": {
+      "properties": {
+        "@type": {
+          "const": "TaskList"
+        },
+        "color": {
+          "description": "An accent key or a CSS colour.",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "The container this one sits under.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        }
+      },
+      "required": [
+        "@type",
+        "version",
+        "name"
+      ],
+      "type": "object",
+      "x-sealbook-content-type": "application/sealbook.task-list+json"
+    },
+    "Version": {
+      "description": "Payload schema version, major.minor.",
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "type": "string"
+    }
+  },
+  "$id": "urn:sealbook:schema:payloads",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The plaintext inside each sealed object, by content type.",
+  "title": "Sealbook stored payloads",
+  "x-sealbook-rules": [
+    "Describes what a writer produces. Readers are lenient: a field of the wrong type reads as absent, and a payload that is not an object still lists under a fallback title.",
+    "A key the writer does not own is carried through an edit unchanged, so every payload accepts additional properties.",
+    "An optional field that is absent is omitted, never written as null.",
+    "A writer refuses to edit a payload whose version declares a major it does not read, and keeps a later minor of its own major.",
+    "Keys of the JSContact maps (e1, e2, ...) are read in natural order, so e2 precedes e10.",
+    "format is an annotation: core writes the timestamps and ids it is given without checking them."
+  ]
+}

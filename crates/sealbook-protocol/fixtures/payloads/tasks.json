@@ -300,6 +300,55 @@
         "raw": "{\"@type\":\"Task\",\"title\":\"t\",\"dueDate\":\"2026-11-01\",\"recurrence\":{\"frequency\":\"hourly\",\"interval\":3},\"recurrenceAnchor\":\"2026-11-01\"}"
       },
       "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"dueDate\":\"2026-11-01\",\"recurrence\":{\"frequency\":\"hourly\",\"interval\":3},\"recurrenceAnchor\":\"2026-11-01\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"t\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a rule's out-of-range days are not written",
+      "draft": {
+        "title": "Pay rent",
+        "notes": "",
+        "done": false,
+        "completions": [],
+        "due_date": "2026-11-01",
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006",
+        "recurrence": {
+          "frequency": "monthly",
+          "interval": 2,
+          "weekdays": [
+            1,
+            9
+          ],
+          "day_of_month": 40,
+          "nth_weekday": {
+            "ordinal": 6,
+            "weekday": 2
+          }
+        }
+      },
+      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"dueDate\":\"2026-11-01\",\"recurrence\":{\"frequency\":\"monthly\",\"interval\":2,\"weekdays\":[1]},\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "keys unknown inside nthWeekday are written back",
+      "draft": {
+        "title": "t",
+        "notes": "",
+        "done": false,
+        "completions": [],
+        "due_date": "2026-11-03",
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006",
+        "recurrence": {
+          "frequency": "monthly",
+          "weekdays": [],
+          "nth_weekday": {
+            "ordinal": 1,
+            "weekday": 2,
+            "extra": "{\"futureNth\":\"x\"}"
+          }
+        },
+        "raw": "{\"@type\":\"Task\",\"title\":\"t\",\"dueDate\":\"2026-11-03\",\"recurrence\":{\"frequency\":\"monthly\",\"nthWeekday\":{\"ordinal\":1,\"weekday\":2,\"futureNth\":\"x\"}}}"
+      },
+      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"dueDate\":\"2026-11-03\",\"recurrence\":{\"frequency\":\"monthly\",\"nthWeekday\":{\"futureNth\":\"x\",\"ordinal\":1,\"weekday\":2}},\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"t\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
     }
   ],
   "parses": [
@@ -578,6 +627,32 @@
         },
         "readable": true,
         "raw": "{\"@type\":\"Task\",\"version\":\"1.7\",\"title\":\"t\",\"dueDate\":\"2026-11-01\",\"recurrence\":{\"frequency\":\"weekly\",\"futureRule\":{\"n\":1}},\"futureKey\":[1]}"
+      }
+    },
+    {
+      "case": "a repeat rule with keys unknown inside nthWeekday",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "raw": "{\"title\":\"t\",\"recurrence\":{\"frequency\":\"monthly\",\"nthWeekday\":{\"ordinal\":1,\"weekday\":2,\"futureNth\":\"x\"}}}",
+      "task": {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "title": "t",
+        "derived_title": false,
+        "notes": "",
+        "done": false,
+        "completions": [],
+        "tags": [],
+        "task_list_id": "00000000-0000-0000-0000-000000000006",
+        "recurrence": {
+          "frequency": "monthly",
+          "weekdays": [],
+          "nth_weekday": {
+            "ordinal": 1,
+            "weekday": 2,
+            "extra": "{\"futureNth\":\"x\"}"
+          }
+        },
+        "readable": true,
+        "raw": "{\"title\":\"t\",\"recurrence\":{\"frequency\":\"monthly\",\"nthWeekday\":{\"ordinal\":1,\"weekday\":2,\"futureNth\":\"x\"}}}"
       }
     },
     {

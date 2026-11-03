@@ -257,7 +257,8 @@ added as each type moves into `sealbook-core`.
 `corpus.json` is the contract for the payload fixtures: the tasks, bookmarks,
 notes, calendars, contacts and settings files under `payloads/`. A client that
 runs every table it lists, and gets every expected value, reads and writes those
-payloads as the others do. The rest of this directory (rosters, manifests,
+payloads as the others do, plus the offline queue and merge rules in
+`offline/offline.json`. The rest of this directory (rosters, manifests,
 changes, rotation, pairing, auth, attachments) is protocol and is read by
 hand-written tests.
 
@@ -296,7 +297,11 @@ Every `op` names one function of `sealbook-core`, in the form `<type>.<verb>`:
 `write` takes a draft (and the clock when the table passes `$now`) and returns
 the payload text, `parse` takes an id and the stored text and returns the
 record; `tone` and `normalize_due` are the two rules that are not a payload
-read or write. Rust calls them directly, the web through the wasm
+read or write. The `offline.*` operations are the queue and merge rules:
+`offline.outbox_push` folds a row's `pushes` through `outbox_push` from an empty
+outbox, the one operation a runner composes rather than calls once, and
+`offline.merge` returns the outcome in serde's tagged form with an absent
+`payload` as `null`. Rust calls them directly, the web through the wasm
 module and Android through uniffi, so a client does not implement an operation:
 it binds it. A runner that meets an `op` it does not know fails the run, so a
 fixture cannot name one a host has not wired.
@@ -316,12 +321,11 @@ Firefox imports the web library and does not run its own.
 
 The cases that decide whether two implementations drift live in the tables:
 
-- unknown keys at the top level, and inside contact entries, repeat rules and
-  work, date and social entries, are kept on a save;
+- unknown keys at the top level, and inside contact entries, repeat rules, a
+  rule's `nthWeekday`, and work, date and social entries, are kept on a save;
 - a stored later minor version is kept on a save, and is not stamped back to 1.0;
 - a payload from a newer major is read for display and refused on write, with
-  `PayloadSchema`;
-- unknown keys inside `nthWeekday` are dropped today. This is the one known gap.
+  `PayloadSchema`.
 
 ### Fuzzed cases
 
@@ -330,7 +334,15 @@ The cases that decide whether two implementations drift live in the tables:
 astral and bidirectional text), and every write row's draft is perturbed
 (padded, blank, repeated or dropped text, dropped or nulled fields, duplicated
 list entries). Core's output for each mutant is the expected value, and a draft
-core cannot read is dropped. Write rows carry their own `now`. It is listed in the manifest like any other file, so no host needs code
+core cannot read is dropped. Write rows carry their own `now`.
+
+The `sealed_rows` table does the same for sealed objects, through `open_row`:
+well-formed rows of several envelopes (a payload, an empty one, a sealed
+tombstone, a future envelope version, a damaged envelope, a payload that is not
+UTF-8), each also with a flipped ciphertext or nonce bit, truncated, a padded
+size off by one, under another object id, collection or key, a short nonce, a
+row-level tombstone, and ciphertext that is not base64. The nonces come from the
+system generator, so regenerating changes the bytes but not the outcomes. It is listed in the manifest like any other file, so no host needs code
 for it. Regenerate with a seed to hunt for a divergence:
 
 ```
@@ -338,7 +350,8 @@ FUZZ_SEED=12345 cargo test -p sealbook-core --test corpus -- --ignored regenerat
 ```
 
 A seed that makes a host disagree with core is kept by committing the file it
-wrote.
+wrote. The web and Android repositories each run this nightly (`fuzz.yml`),
+with the date as the seed, against their pinned core.
 
 ### Adding a case
 
@@ -362,3 +375,12 @@ catches.
   client's own parser and core's writer. Held by `importParity.test.ts` and
   Android's `ImportParityTest`.
 
+
+- `offline/offline.json` - the outbox, the three-way merge and the flush plan
+  for offline editing. `outbox` pushes writes in order and holds the combined
+  outbox and the listed view; `merge` holds `merge_payload`'s outcome for one
+  case per rule, including a conflicted copy, a container conflict and
+  attachments; `flush` holds the plan for a queued write against each state the
+  server's copy can be in. Generated from core by the ignored `regenerate` test
+  in `sealbook-core/tests/offline.rs`, which says how to run it. Listed in
+  `corpus.json` under four `offline.*` operations.

@@ -213,7 +213,7 @@ fn build(props: &[Prop], book: &str) -> Option<CoreContactDraft> {
     let mut phones = Vec::new();
     let mut dates = Vec::new();
     let mut socials = Vec::new();
-    let mut address = None;
+    let mut addresses = Vec::new();
     let mut organization = String::new();
     let mut title = String::new();
 
@@ -340,21 +340,31 @@ fn build(props: &[Prop], book: &str) -> Option<CoreContactDraft> {
                 } else {
                     ""
                 };
+                let kind = prop
+                    .param("TYPE")
+                    .or_else(|| prop.params.first().map(|(key, _)| key.as_str()))
+                    .unwrap_or("")
+                    .to_lowercase();
+                let (kind, label) = if kind.contains("work") {
+                    (CoreChannelKind::Work, None)
+                } else if kind.contains("home") || kind.is_empty() || kind == "postal" {
+                    (CoreChannelKind::Home, None)
+                } else {
+                    (CoreChannelKind::Custom, Some(kind))
+                };
                 let row = CoreContactAddress {
+                    kind,
+                    label,
                     street1: some(street1),
                     street2: some(street2),
                     locality: some(field(&parts, 3)),
                     region: some(field(&parts, 4)),
                     postcode: some(field(&parts, 5)),
                     country: some(field(&parts, 6)),
+                    ..Default::default()
                 };
-                if row.street1.is_some()
-                    || row.locality.is_some()
-                    || row.region.is_some()
-                    || row.postcode.is_some()
-                    || row.country.is_some()
-                {
-                    address = Some(row);
+                if !row.is_blank() {
+                    addresses.push(row);
                 }
             }
             "ORG" => organization = field(&fields(&prop.value), 0).to_string(),
@@ -418,6 +428,7 @@ fn build(props: &[Prop], book: &str) -> Option<CoreContactDraft> {
             organization,
             title: some(&title),
             extra: None,
+            ..Default::default()
         }]
     };
 
@@ -427,7 +438,7 @@ fn build(props: &[Prop], book: &str) -> Option<CoreContactDraft> {
         pronouns: some(&pronouns),
         emails,
         phones,
-        address,
+        addresses,
         work,
         dates,
         socials,
@@ -531,24 +542,36 @@ fn card(c: &CoreContactDraft) -> String {
         ));
     }
 
-    if let Some(address) = &c.address {
-        let part = |value: &Option<String>| escape(value.as_deref().unwrap_or(""));
+    for address in &c.addresses {
+        if address.is_blank() || !(address.current || address.end.is_none()) {
+            continue;
+        }
+        let part = |value: &Option<String>| escape(value.as_deref().map(trim).unwrap_or(""));
         let (extended, street) = (part(&address.street2), part(&address.street1));
         let (locality, region) = (part(&address.locality), part(&address.region));
         let (postcode, country) = (part(&address.postcode), part(&address.country));
-        if !(street.is_empty()
-            && locality.is_empty()
-            && region.is_empty()
-            && postcode.is_empty()
-            && country.is_empty())
-        {
-            lines.push(format!(
-                "ADR;TYPE=HOME:;{extended};{street};{locality};{region};{postcode};{country}"
-            ));
-        }
+        let label: String = address
+            .label
+            .as_deref()
+            .unwrap_or("")
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '-')
+            .collect();
+        let kind = match address.kind {
+            CoreChannelKind::Work => "WORK".to_string(),
+            CoreChannelKind::Custom if !label.is_empty() => label.to_uppercase(),
+            _ => "HOME".to_string(),
+        };
+        lines.push(format!(
+            "ADR;TYPE={kind}:;{extended};{street};{locality};{region};{postcode};{country}"
+        ));
     }
 
-    for work in &c.work {
+    for work in c
+        .work
+        .iter()
+        .filter(|work| work.current || work.end.is_none())
+    {
         let organization = trim(&work.organization);
         if !organization.is_empty() {
             lines.push(format!("ORG:{}", escape(organization)));

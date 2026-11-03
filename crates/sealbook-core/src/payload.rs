@@ -43,7 +43,7 @@ pub fn write_payload(previous: Option<&str>, fields: Value, owned: &[&str]) -> S
 /// Compact JSON with each object's keys in natural order, so `e2` precedes
 /// `e10`. Clients that predate core read numbered entries in file order, and
 /// for keys without digits this is the sorted order `to_string` gives.
-fn natural_json(value: &Value) -> String {
+pub(crate) fn natural_json(value: &Value) -> String {
     match value {
         Value::Object(object) => {
             let mut entries: Vec<_> = object.iter().collect();

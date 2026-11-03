@@ -263,6 +263,32 @@ fn write_cases() -> Vec<(String, CoreTaskDraft)> {
             )
             .draft(),
         ),
+        (
+            "a rule's out-of-range days are not written".into(),
+            CoreTaskDraft {
+                due_date: Some("2026-11-01".into()),
+                recurrence: Some(CoreRecurrence {
+                    frequency: CoreRecurrenceFrequency::Monthly,
+                    weekdays: vec![1, 9],
+                    day_of_month: Some(40),
+                    nth_weekday: Some(CoreNthWeekday {
+                        ordinal: 6,
+                        weekday: 2,
+                        extra: None,
+                    }),
+                    ..weekly()
+                }),
+                ..blank()
+            },
+        ),
+        (
+            "keys unknown inside nthWeekday are written back".into(),
+            task_parse(
+                TASK,
+                r#"{"@type":"Task","title":"t","dueDate":"2026-11-03","recurrence":{"frequency":"monthly","nthWeekday":{"ordinal":1,"weekday":2,"futureNth":"x"}}}"#,
+            )
+            .draft(),
+        ),
     ]
 }
 
@@ -316,6 +342,11 @@ fn parse_cases() -> Vec<(String, String, String)> {
         case(
             "a newer minor with keys unknown at the top and inside the repeat rule",
             r#"{"@type":"Task","version":"1.7","title":"t","dueDate":"2026-11-01","recurrence":{"frequency":"weekly","futureRule":{"n":1}},"futureKey":[1]}"#.into(),
+        ),
+        case(
+            "a repeat rule with keys unknown inside nthWeekday",
+            r#"{"title":"t","recurrence":{"frequency":"monthly","nthWeekday":{"ordinal":1,"weekday":2,"futureNth":"x"}}}"#
+                .into(),
         ),
         case(
             "a payload from a newer schema major",

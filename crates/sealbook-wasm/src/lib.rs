@@ -69,8 +69,8 @@ fn ck_from_b64(s: &str) -> Result<CollectionKey, JsError> {
     Ok(CollectionKey::from_bytes(key))
 }
 
-#[derive(Serialize)]
-struct Enrollment {
+#[derive(Serialize, Tsify)]
+pub struct Enrollment {
     device_id: String,
     hpke_sk: String,
     hpke_pk: String,
@@ -112,7 +112,7 @@ struct WrapIn {
 /// material without a round trip. Production registers through
 /// `core_new_registration`.
 #[wasm_bindgen]
-pub fn create_enrollment(password: &str) -> Result<String, JsError> {
+pub fn create_enrollment(password: &str) -> Result<Ts<Enrollment>, JsError> {
     let (hpke_sk, hpke_pk) = generate_device_hpke().map_err(js_err)?;
     let (sign_sk, sign_pk) = generate_device_signing().map_err(js_err)?;
     let ck = CollectionKey::generate();
@@ -130,7 +130,7 @@ pub fn create_enrollment(password: &str) -> Result<String, JsError> {
     );
     let sig = sign(&sign_sk, &transcript).map_err(js_err)?;
     let phrase_recovery = phrase_recovery_public(&phrase_entropy).map_err(js_err)?;
-    serde_json::to_string(&Enrollment {
+    Ok(Enrollment {
         device_id: device_id.to_string(),
         hpke_sk: b64(hpke_sk.as_bytes()),
         hpke_pk: b64(&hpke_pk.0),
@@ -156,8 +156,8 @@ pub fn create_enrollment(password: &str) -> Result<String, JsError> {
         phrase_ciphersuite: PHRASE_CIPHERSUITE,
         xwing_ciphersuite: XWING_CIPHERSUITE,
         recovery_ciphersuite: RECOVERY_CIPHERSUITE,
-    })
-    .map_err(js_err)
+    }
+    .into_ts()?)
 }
 
 #[wasm_bindgen]
@@ -206,8 +206,8 @@ pub fn unwrap_ck(
     Err(JsError::new("no collection key wrap"))
 }
 
-#[derive(Serialize)]
-struct EncryptedOut {
+#[derive(Serialize, Tsify)]
+pub struct EncryptedOut {
     nonce: String,
     ciphertext: String,
     padded_size: usize,
@@ -219,17 +219,17 @@ pub fn encrypt_contact(
     object_id: &str,
     collection_id: &str,
     plaintext: &str,
-) -> Result<String, JsError> {
+) -> Result<Ts<EncryptedOut>, JsError> {
     let object_id = parse_uuid(object_id)?;
     let collection_id = parse_uuid(collection_id)?;
     let aad = object_aad(object_id.as_bytes(), collection_id.as_bytes());
     let enc = encrypt_object(&ck_from_b64(ck_b64)?, plaintext.as_bytes(), &aad).map_err(js_err)?;
-    serde_json::to_string(&EncryptedOut {
+    Ok(EncryptedOut {
         nonce: b64(&enc.nonce),
         ciphertext: b64(&enc.ciphertext),
         padded_size: enc.padded_size,
-    })
-    .map_err(js_err)
+    }
+    .into_ts()?)
 }
 
 #[wasm_bindgen]
@@ -300,8 +300,11 @@ pub fn payload_schema_version() -> String {
     sealbook_protocol::PAYLOAD_SCHEMA_VERSION.to_string()
 }
 
-#[derive(Serialize)]
-struct OpenedOut {
+/// One object's plaintext after its sealed envelope has been opened.
+#[derive(Serialize, Tsify)]
+pub struct OpenedObject {
+    /// Authenticated by the AEAD along with the payload, so this is the type to
+    /// parse by rather than the label the server serves.
     #[serde(rename = "contentType")]
     content_type: String,
     tombstone: bool,
@@ -315,18 +318,18 @@ pub fn seal_object(
     collection_id: &str,
     content_type: &str,
     payload: &str,
-) -> Result<String, JsError> {
+) -> Result<Ts<EncryptedOut>, JsError> {
     let object_id = parse_uuid(object_id)?;
     let collection_id = parse_uuid(collection_id)?;
     let aad = object_aad(object_id.as_bytes(), collection_id.as_bytes());
     let plain = seal_envelope(content_type, payload.as_bytes());
     let enc = encrypt_object(&ck_from_b64(ck_b64)?, &plain, &aad).map_err(js_err)?;
-    serde_json::to_string(&EncryptedOut {
+    Ok(EncryptedOut {
         nonce: b64(&enc.nonce),
         ciphertext: b64(&enc.ciphertext),
         padded_size: enc.padded_size,
-    })
-    .map_err(js_err)
+    }
+    .into_ts()?)
 }
 
 /// Decrypts an object and opens its envelope.
@@ -338,7 +341,7 @@ pub fn open_object(
     nonce_b64: &str,
     ciphertext_b64: &str,
     padded_size: usize,
-) -> Result<String, JsError> {
+) -> Result<Ts<OpenedObject>, JsError> {
     let plain = decrypt_contact_bytes(
         ck_b64,
         object_id,
@@ -352,7 +355,7 @@ pub fn open_object(
             content_type,
             tombstone,
             payload,
-        } => OpenedOut {
+        } => OpenedObject {
             content_type,
             tombstone,
             payload: text(payload)?,
@@ -363,7 +366,7 @@ pub fn open_object(
             ))
         }
     };
-    serde_json::to_string(&opened).map_err(js_err)
+    Ok(opened.into_ts()?)
 }
 
 fn text(bytes: Vec<u8>) -> Result<String, JsError> {
@@ -381,8 +384,8 @@ pub fn new_uuid() -> String {
     Uuid::new_v4().to_string()
 }
 
-#[derive(Serialize)]
-struct DeviceOut {
+#[derive(Serialize, Tsify)]
+pub struct DeviceOut {
     device_id: String,
     hpke_sk: String,
     hpke_pk: String,
@@ -395,7 +398,7 @@ struct DeviceOut {
 }
 
 #[wasm_bindgen]
-pub fn create_device() -> Result<String, JsError> {
+pub fn create_device() -> Result<Ts<DeviceOut>, JsError> {
     let (hpke_sk, hpke_pk) = generate_device_hpke().map_err(js_err)?;
     let (sign_sk, sign_pk) = generate_device_signing().map_err(js_err)?;
     let device_id = Uuid::new_v4();
@@ -406,7 +409,7 @@ pub fn create_device() -> Result<String, JsError> {
         &hpke_pk.0,
     );
     let sig = sign(&sign_sk, &transcript).map_err(js_err)?;
-    serde_json::to_string(&DeviceOut {
+    Ok(DeviceOut {
         device_id: device_id.to_string(),
         hpke_sk: b64(hpke_sk.as_bytes()),
         hpke_pk: b64(&hpke_pk.0),
@@ -416,8 +419,8 @@ pub fn create_device() -> Result<String, JsError> {
         ed25519_pk: b64(&sign_pk.ed25519_pk),
         enrollment_mldsa: b64(&sig.mldsa),
         enrollment_ed25519: b64(&sig.ed25519),
-    })
-    .map_err(js_err)
+    }
+    .into_ts()?)
 }
 
 #[wasm_bindgen]
@@ -2294,6 +2297,141 @@ pub fn core_task_list_tone(lists: Ts<CoreTaskListList>, id: &str) -> Result<Stri
 
 #[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
 #[serde(transparent)]
+pub struct CoreTaskVec(pub Vec<CoreTask>);
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct CoreTaskOrderItemList(pub Vec<sealbook_core::CoreTaskOrderItem>);
+
+/// The task and every task under it, the task first.
+#[wasm_bindgen]
+pub fn core_task_subtree(tasks: Ts<CoreTaskVec>, id: &str) -> Result<Vec<String>, JsError> {
+    Ok(sealbook_core::task_subtree(&tasks.to_rust()?.0, id))
+}
+
+#[wasm_bindgen]
+pub fn core_task_can_move(
+    tasks: Ts<CoreTaskVec>,
+    id: &str,
+    parent_id: Option<String>,
+) -> Result<bool, JsError> {
+    Ok(sealbook_core::task_can_move(
+        &tasks.to_rust()?.0,
+        id,
+        parent_id,
+    ))
+}
+
+/// Whether a list may move under `parent_id`. The default list stays at the top.
+#[wasm_bindgen]
+pub fn core_task_list_can_move(
+    lists: Ts<CoreTaskListList>,
+    id: &str,
+    parent_id: Option<String>,
+) -> Result<bool, JsError> {
+    Ok(sealbook_core::task_list_can_move(
+        &lists.to_rust()?.0,
+        id,
+        parent_id,
+    ))
+}
+
+#[wasm_bindgen]
+pub fn core_task_reopen(task: Ts<CoreTask>) -> Result<Ts<CoreTaskDraft>, JsError> {
+    Ok(sealbook_core::task_reopen(&task.to_rust()?).into_ts()?)
+}
+
+/// Ticks a task: a recurring one rolls on and reopens its done subtasks.
+#[wasm_bindgen]
+pub fn core_task_complete(
+    task: Ts<CoreTask>,
+    tasks: Ts<CoreTaskVec>,
+    clock: Ts<sealbook_core::CoreTaskClock>,
+) -> Result<Ts<sealbook_core::CoreTaskCompletion>, JsError> {
+    Ok(
+        sealbook_core::task_complete(&task.to_rust()?, &tasks.to_rust()?.0, &clock.to_rust()?)
+            .into_ts()?,
+    )
+}
+
+/// Deleting a task: its subtasks move up to its parent.
+#[wasm_bindgen]
+pub fn core_task_remove_plan(
+    tasks: Ts<CoreTaskVec>,
+    id: &str,
+) -> Result<Ts<sealbook_core::CoreTaskPlan>, JsError> {
+    Ok(sealbook_core::task_remove_plan(&tasks.to_rust()?.0, id).into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_task_move_plan(
+    tasks: Ts<CoreTaskVec>,
+    id: &str,
+    parent_id: Option<String>,
+) -> Result<Ts<sealbook_core::CoreTaskPlan>, JsError> {
+    Ok(sealbook_core::task_move_plan(&tasks.to_rust()?.0, id, parent_id).into_ts()?)
+}
+
+/// The subtasks that follow a task edited into another list.
+#[wasm_bindgen]
+pub fn core_task_relist_plan(
+    tasks: Ts<CoreTaskVec>,
+    id: &str,
+    task_list_id: &str,
+) -> Result<Ts<sealbook_core::CoreTaskPlan>, JsError> {
+    Ok(sealbook_core::task_relist_plan(&tasks.to_rust()?.0, id, task_list_id).into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_task_list_move_plan(
+    lists: Ts<CoreTaskListList>,
+    id: &str,
+    parent_id: Option<String>,
+) -> Result<Ts<sealbook_core::CoreTaskPlan>, JsError> {
+    Ok(sealbook_core::task_list_move_plan(&lists.to_rust()?.0, id, parent_id).into_ts()?)
+}
+
+/// Deleting a list: its lists and tasks move up to its parent.
+#[wasm_bindgen]
+pub fn core_task_list_remove_plan(
+    lists: Ts<CoreTaskListList>,
+    tasks: Ts<CoreTaskVec>,
+    id: &str,
+) -> Result<Ts<sealbook_core::CoreTaskPlan>, JsError> {
+    Ok(
+        sealbook_core::task_list_remove_plan(&lists.to_rust()?.0, &tasks.to_rust()?.0, id)
+            .into_ts()?,
+    )
+}
+
+#[wasm_bindgen]
+pub fn core_order_tasks(items: Ts<CoreTaskOrderItemList>) -> Result<Vec<String>, JsError> {
+    Ok(sealbook_core::order_tasks(&items.to_rust()?.0))
+}
+
+#[wasm_bindgen]
+pub fn core_task_export(
+    tasks: Ts<CoreTaskVec>,
+    lists: Ts<CoreTaskListList>,
+    now: &str,
+) -> Result<String, JsError> {
+    Ok(sealbook_core::task_export(
+        &tasks.to_rust()?.0,
+        &lists.to_rust()?.0,
+        now,
+    ))
+}
+
+/// The tasks in an export file, parents first. Throws with a sentence to show.
+#[wasm_bindgen]
+pub fn core_task_import(text: &str) -> Result<Ts<sealbook_core::CoreTaskImport>, JsError> {
+    Ok(sealbook_core::task_import(text)
+        .map_err(core_err)?
+        .into_ts()?)
+}
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
 pub struct CoreCalendarList(pub Vec<CoreCalendar>);
 
 /// Every key a calendar writer owns, and every key an event writer owns: the
@@ -2363,6 +2501,14 @@ pub fn core_recurrence_next(
         &rule.to_rust()?,
         after,
     ))
+}
+
+/// How many objects each consecutive batch write takes, for writes whose
+/// plaintexts are this many UTF-8 bytes long.
+#[wasm_bindgen]
+pub fn core_write_batches(payload_lengths: Vec<u32>) -> Vec<u32> {
+    let lengths: Vec<u64> = payload_lengths.into_iter().map(u64::from).collect();
+    sealbook_core::write_batches(&lengths)
 }
 
 /// Which payload type an opened object is.
@@ -2785,4 +2931,142 @@ impl CoreContactIndex {
     pub fn search(&self, query: &str) -> Vec<String> {
         self.inner.search(query)
     }
+}
+
+// ── Core: offline vault, outbox and flush ──
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct LocalObjectList(pub Vec<sealbook_core::LocalObject>);
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct FlushWriteList(pub Vec<sealbook_core::FlushWrite>);
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct StringList(pub Vec<String>);
+
+#[wasm_bindgen]
+pub fn core_local_vault_write(vault: Ts<sealbook_core::LocalVault>) -> Result<String, JsError> {
+    Ok(sealbook_core::local_vault_write(&vault.to_rust()?))
+}
+
+#[wasm_bindgen]
+pub fn core_local_vault_read(raw: &str) -> Result<Ts<sealbook_core::LocalVault>, JsError> {
+    Ok(sealbook_core::local_vault_read(raw)
+        .map_err(core_err)?
+        .into_ts()?)
+}
+
+/// Folds the rows a walk read into the vault, newest revision winning.
+#[wasm_bindgen]
+pub fn core_local_vault_apply(
+    vault: Ts<sealbook_core::LocalVault>,
+    rows: Ts<LocalObjectList>,
+    latest_revision: u64,
+    key_epoch: u64,
+) -> Result<Ts<sealbook_core::LocalVault>, JsError> {
+    Ok(sealbook_core::local_vault_apply(
+        &vault.to_rust()?,
+        &rows.to_rust()?.0,
+        latest_revision,
+        key_epoch,
+    )
+    .into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_outbox_write(outbox: Ts<sealbook_core::Outbox>) -> Result<String, JsError> {
+    Ok(sealbook_core::outbox_write(&outbox.to_rust()?))
+}
+
+#[wasm_bindgen]
+pub fn core_outbox_read(raw: &str) -> Result<Ts<sealbook_core::Outbox>, JsError> {
+    Ok(sealbook_core::outbox_read(raw)
+        .map_err(core_err)?
+        .into_ts()?)
+}
+
+/// Queues a write, combining it with one already queued for the same id.
+#[wasm_bindgen]
+pub fn core_outbox_push(
+    outbox: Ts<sealbook_core::Outbox>,
+    write: Ts<sealbook_core::PendingWrite>,
+) -> Result<Ts<sealbook_core::Outbox>, JsError> {
+    Ok(sealbook_core::outbox_push(&outbox.to_rust()?, write.to_rust()?).into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_outbox_settle(
+    outbox: Ts<sealbook_core::Outbox>,
+    ids: Ts<StringList>,
+) -> Result<Ts<sealbook_core::Outbox>, JsError> {
+    Ok(sealbook_core::outbox_settle(&outbox.to_rust()?, &ids.to_rust()?.0).into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_outbox_fail(
+    outbox: Ts<sealbook_core::Outbox>,
+    ids: Ts<StringList>,
+    reason: &str,
+) -> Result<Ts<sealbook_core::Outbox>, JsError> {
+    Ok(sealbook_core::outbox_fail(&outbox.to_rust()?, &ids.to_rust()?.0, reason).into_ts()?)
+}
+
+/// The live objects to list: the vault with the queued writes laid over it.
+#[wasm_bindgen]
+pub fn core_local_view(
+    vault: Ts<sealbook_core::LocalVault>,
+    outbox: Ts<sealbook_core::Outbox>,
+) -> Result<Ts<LocalObjectList>, JsError> {
+    Ok(LocalObjectList(sealbook_core::local_view(
+        &vault.to_rust()?,
+        &outbox.to_rust()?,
+    ))
+    .into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_merge_payload(
+    content_type: &str,
+    base: Option<String>,
+    local: &str,
+    remote: &str,
+    date: &str,
+) -> Result<Ts<sealbook_core::MergeOutcome>, JsError> {
+    Ok(
+        sealbook_core::merge_payload(content_type, base.as_deref(), local, remote, date)
+            .into_ts()?,
+    )
+}
+
+/// What each queued write becomes against a vault just brought up to date.
+#[wasm_bindgen]
+pub fn core_flush_plan(
+    outbox: Ts<sealbook_core::Outbox>,
+    vault: Ts<sealbook_core::LocalVault>,
+    date: &str,
+) -> Result<Ts<sealbook_core::FlushPlan>, JsError> {
+    Ok(sealbook_core::flush_plan(&outbox.to_rust()?, &vault.to_rust()?, date).into_ts()?)
+}
+
+/// Whether a batch's objects still hold what the plan expected, just before
+/// the batch is signed.
+#[wasm_bindgen]
+pub fn core_write_guard(
+    writes: Ts<FlushWriteList>,
+    entries: Ts<CoreManifestEntryList>,
+    attempt: u32,
+) -> Result<Ts<sealbook_core::FlushGuard>, JsError> {
+    Ok(
+        sealbook_core::write_guard(&writes.to_rust()?.0, &entries.to_rust()?.0, attempt)
+            .map_err(core_err)?
+            .into_ts()?,
+    )
+}
+
+#[wasm_bindgen]
+pub fn core_flush_failure(status: u16) -> Result<Ts<sealbook_core::FlushFailure>, JsError> {
+    Ok(sealbook_core::flush_failure(status).into_ts()?)
 }

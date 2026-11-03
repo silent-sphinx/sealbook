@@ -11,17 +11,18 @@ use chacha20poly1305::{
     Key, XChaCha20Poly1305, XNonce,
 };
 use clap::{Parser, Subcommand};
+use jiff::tz::TimeZone;
 use keyring::Entry;
 use rand::RngCore;
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::CertificateDer;
 use sealbook_client::{
     account_export_parse, account_export_write, contact_parse, contact_write, event_parse,
-    note_parse, note_write, CoreAddressBookDraft, CoreCalendarDraft, CoreCalendarEventDraft,
-    CoreChannelKind, CoreContactChannel, CoreContactDraft, CoreNoteDraft, ExportedObject,
-    LocalState, SealbookClient, DEFAULT_ADDRESS_BOOK_ID, DEFAULT_ADDRESS_BOOK_NAME,
-    DEFAULT_BOOKMARK_COLLECTION_NAME, DEFAULT_CALENDAR_COLOR, DEFAULT_CALENDAR_ID,
-    DEFAULT_CALENDAR_NAME, DEFAULT_NOTEBOOK_NAME,
+    ics_parse, note_parse, note_write, notes_import, CoreAddressBookDraft, CoreCalendarDraft,
+    CoreCalendarEventDraft, CoreChannelKind, CoreContactAddress, CoreContactChannel,
+    CoreContactDraft, CoreIcsEvent, CoreNoteDraft, ExportedObject, LocalState, SealbookClient,
+    DEFAULT_ADDRESS_BOOK_ID, DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_BOOKMARK_COLLECTION_NAME,
+    DEFAULT_CALENDAR_COLOR, DEFAULT_CALENDAR_ID, DEFAULT_CALENDAR_NAME, DEFAULT_NOTEBOOK_NAME,
 };
 use sha2::{Digest, Sha256};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
@@ -172,6 +173,11 @@ enum ContactsCommand {
         email: Option<String>,
         #[arg(long)]
         book: Option<String>,
+        /// A postal address, as `key=value` pairs split by `;`. Keys: kind
+        /// (home, work, or any other word as a label), street1, street2, city,
+        /// region, postcode, country. Repeat for more than one.
+        #[arg(long = "address", value_parser = parse_address_spec)]
+        addresses: Vec<CoreContactAddress>,
     },
     Update {
         #[arg(long)]
@@ -182,6 +188,13 @@ enum ContactsCommand {
         email: Option<String>,
         #[arg(long)]
         book: Option<String>,
+        /// As for `put`. Given at least once, replaces the card's addresses;
+        /// left out, keeps them.
+        #[arg(long = "address", value_parser = parse_address_spec)]
+        addresses: Vec<CoreContactAddress>,
+        /// Removes every address the card has.
+        #[arg(long, conflicts_with = "addresses")]
+        clear_addresses: bool,
     },
     Delete {
         #[arg(long)]
@@ -264,6 +277,14 @@ enum NotesCommand {
     Show {
         #[arg(long)]
         id: Uuid,
+    },
+    /// Add the notes in a markdown or JSON file, read by the same code every client uses.
+    Import {
+        /// File to read. Omit to read from stdin.
+        #[arg(long)]
+        file: Option<PathBuf>,
+        #[arg(long)]
+        notebook: Option<Uuid>,
     },
     Delete {
         #[arg(long)]
@@ -353,6 +374,17 @@ enum CalendarCommand {
         calendar: Option<Uuid>,
     },
     List,
+    /// Add the events in an `.ics` file, read by the same code every client uses.
+    Import {
+        /// File to read. Omit to read from stdin.
+        #[arg(long)]
+        file: Option<PathBuf>,
+        #[arg(long)]
+        calendar: Option<Uuid>,
+        /// IANA zone for times the file gives without one. Defaults to this machine's.
+        #[arg(long)]
+        timezone: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -552,7 +584,12 @@ async fn main() -> Result<()> {
             }
         }
         Command::Contacts { command } => match command {
-            ContactsCommand::Put { name, email, book } => {
+            ContactsCommand::Put {
+                name,
+                email,
+                book,
+                addresses,
+            } => {
                 let state = load_state(&cli.state)?;
                 let password = std::env::var("SEALBOOK_PASSWORD")
                     .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
@@ -566,7 +603,7 @@ async fn main() -> Result<()> {
                 let books = client.list_address_books().await.context("books")?;
                 let book_id =
                     resolve_book(&books, book.as_deref())?.unwrap_or(DEFAULT_ADDRESS_BOOK_ID);
-                let contact = jscontact(&name, email.as_deref(), book_id, None)?;
+                let contact = jscontact(&name, email.as_deref(), Some(addresses), book_id, None)?;
                 let id = Uuid::new_v4();
                 let revision = client.put_contact(id, &contact).await.context("put")?;
                 println!("stored encrypted contact {id} at revision {revision}");
@@ -577,6 +614,8 @@ async fn main() -> Result<()> {
                 name,
                 email,
                 book,
+                addresses,
+                clear_addresses,
             } => {
                 let state = load_state(&cli.state)?;
                 let password = std::env::var("SEALBOOK_PASSWORD")
@@ -595,7 +634,9 @@ async fn main() -> Result<()> {
                 // not take are kept. Rebuilding from the three it does took a
                 // card with a job, an address and a photo down to a name.
                 let existing = find_contact(&mut client, id).await?;
-                let contact = jscontact(&name, email.as_deref(), book_id, Some(&existing))?;
+                let addresses = (clear_addresses || !addresses.is_empty()).then_some(addresses);
+                let contact =
+                    jscontact(&name, email.as_deref(), addresses, book_id, Some(&existing))?;
                 let revision = client.put_contact(id, &contact).await.context("update")?;
                 println!("updated encrypted contact {id} at revision {revision}");
                 save_state(&cli.state, client.state.as_ref().unwrap())?;
@@ -642,21 +683,7 @@ async fn main() -> Result<()> {
                 save_state(&cli.state, client.state.as_ref().unwrap())?;
             }
             ContactsCommand::Import { file, book } => {
-                let text = match &file {
-                    Some(path) => std::fs::read_to_string(path)
-                        .with_context(|| format!("read {}", path.display()))?,
-                    None => {
-                        let mut buf = String::new();
-                        std::io::stdin()
-                            .read_to_string(&mut buf)
-                            .context("read stdin")?;
-                        buf
-                    }
-                };
-                let name = file
-                    .as_ref()
-                    .map(|path| path.to_string_lossy().to_string())
-                    .unwrap_or_default();
+                let (name, text) = read_input(file.as_deref())?;
                 let state = load_state(&cli.state)?;
                 let password = read_secret("Password: ", "SEALBOOK_PASSWORD")?;
                 let mut client =
@@ -742,7 +769,7 @@ async fn main() -> Result<()> {
                             id,
                             &CoreAddressBookDraft {
                                 name: name.clone(),
-                                raw: None,
+                                ..Default::default()
                             },
                         )
                         .await
@@ -1009,6 +1036,45 @@ async fn main() -> Result<()> {
                         println!("{id} [{name}] {} {}", event.start, event.title);
                     }
                 }
+                CalendarCommand::Import {
+                    file,
+                    calendar,
+                    timezone,
+                } => {
+                    let (_, text) = read_input(file.as_deref())?;
+                    let (zone_name, zone) = import_zone(timezone.as_deref())?;
+                    let calendar = calendar.unwrap_or(DEFAULT_CALENDAR_ID);
+                    if !client
+                        .list_calendars()
+                        .await?
+                        .iter()
+                        .any(|(id, _)| *id == calendar)
+                    {
+                        anyhow::bail!("no calendar {calendar}: see `calendar list-calendars`");
+                    }
+                    let read = ics_parse(&text);
+                    for event in &read.events {
+                        let draft = imported_event(event, &zone_name, &zone, calendar)?;
+                        client
+                            .put_calendar_event(Uuid::new_v4(), &draft)
+                            .await
+                            .context("put event")?;
+                    }
+                    println!(
+                        "imported {} event(s), skipped {}",
+                        read.events.len(),
+                        read.skipped.len()
+                    );
+                    for skipped in &read.skipped {
+                        println!("skipped {}: {}", skipped.title, skipped.reason);
+                    }
+                    if read.dropped_rules > 0 {
+                        println!(
+                            "{} repeating event(s) imported once: their repeat rule cannot be stored",
+                            read.dropped_rules
+                        );
+                    }
+                }
             }
             save_state(&cli.state, client.state.as_ref().unwrap())?;
         }
@@ -1078,6 +1144,48 @@ async fn main() -> Result<()> {
                     )?;
                     let revision = client.put_note(id, &note).await.context("add note")?;
                     println!("stored encrypted note {id} at revision {revision}");
+                }
+                NotesCommand::Import { file, notebook } => {
+                    let (name, text) = read_input(file.as_deref())?;
+                    let notebook = notebook.unwrap_or(default_notebook);
+                    if !client
+                        .list_notebooks()
+                        .await
+                        .context("notebooks")?
+                        .iter()
+                        .any(|(id, _)| *id == notebook)
+                    {
+                        anyhow::bail!("no notebook {notebook}: see `notebook list`");
+                    }
+                    let read = notes_import(&name, &text, &notebook.to_string())
+                        .map_err(|e| anyhow::anyhow!("{e}"))?;
+                    let now = now_rfc3339();
+                    for entry in read.notes.iter().cloned() {
+                        let note = note_write(
+                            &CoreNoteDraft {
+                                title: entry.title,
+                                body: entry.body,
+                                notebook_id: entry.notebook_id,
+                                created_at: entry.created_at,
+                                pinned: entry.pinned,
+                                ..Default::default()
+                            },
+                            &now,
+                        )?;
+                        client
+                            .put_note(Uuid::new_v4(), &note)
+                            .await
+                            .context("put note")?;
+                    }
+                    println!(
+                        "imported {} note(s) from {}, skipped {}",
+                        read.notes.len(),
+                        read.format,
+                        read.skipped.len()
+                    );
+                    for skipped in &read.skipped {
+                        println!("skipped {}: {}", skipped.title, skipped.reason);
+                    }
                 }
                 NotesCommand::Update {
                     id,
@@ -1317,6 +1425,84 @@ fn now_rfc3339() -> String {
         .unwrap_or_default()
 }
 
+/// The file's name, for the format sniffing core does on it, and its text.
+fn read_input(file: Option<&Path>) -> Result<(String, String)> {
+    match file {
+        Some(path) => Ok((
+            path.to_string_lossy().to_string(),
+            std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?,
+        )),
+        None => {
+            let mut text = String::new();
+            std::io::stdin()
+                .read_to_string(&mut text)
+                .context("read stdin")?;
+            Ok((String::new(), text))
+        }
+    }
+}
+
+/// The zone an imported event without its own is placed in, and its name.
+fn import_zone(name: Option<&str>) -> Result<(String, TimeZone)> {
+    match name {
+        Some(name) => {
+            let zone = TimeZone::get(name).with_context(|| format!("unknown time zone {name}"))?;
+            Ok((name.to_string(), zone))
+        }
+        None => {
+            let zone = TimeZone::try_system().context("read this machine's time zone")?;
+            let name = zone
+                .iana_name()
+                .context("this machine's time zone has no IANA name: pass --timezone")?
+                .to_string();
+            Ok((name, zone))
+        }
+    }
+}
+
+/// A time core left as local wall-clock text, as the UTC instant it names in
+/// `zone`. A date or an instant is already final.
+fn resolved(value: &str, zone: &TimeZone) -> Result<String> {
+    if !value.contains('T') || value.ends_with('Z') {
+        return Ok(value.to_string());
+    }
+    let local: jiff::civil::DateTime = value
+        .parse()
+        .with_context(|| format!("read the time {value}"))?;
+    let instant = local.to_zoned(zone.clone())?.timestamp();
+    Ok(instant.strftime("%Y-%m-%dT%H:%M:%SZ").to_string())
+}
+
+/// An event from an `.ics` file as the draft every client writes for it. A
+/// `TZID` this machine's zone database does not know falls back to `zone`.
+fn imported_event(
+    event: &CoreIcsEvent,
+    zone_name: &str,
+    zone: &TimeZone,
+    calendar: Uuid,
+) -> Result<CoreCalendarEventDraft> {
+    let zone_of = |name: Option<&str>| {
+        name.and_then(|name| TimeZone::get(name).ok())
+            .unwrap_or_else(|| zone.clone())
+    };
+    Ok(CoreCalendarEventDraft {
+        title: event.title.clone(),
+        start: resolved(&event.start, &zone_of(event.start_zone.as_deref()))?,
+        end: event
+            .end
+            .as_deref()
+            .map(|end| resolved(end, &zone_of(event.end_zone.as_deref())))
+            .transpose()?,
+        notes: event.notes.clone(),
+        location: event.location.clone(),
+        participants: event.participants.clone(),
+        timezone: Some(event.start_zone.as_deref().unwrap_or(zone_name).to_string()),
+        calendar_id: Some(calendar.to_string()),
+        recurrence: event.recurrence.clone(),
+        ..Default::default()
+    })
+}
+
 /// The contacts in a JSON, vCard or CSV file.
 fn read_contacts(
     filename: &str,
@@ -1340,6 +1526,7 @@ fn write_contacts(
                 .map(|(id, name)| sealbook_client::CoreAddressBook {
                     id: id.to_string(),
                     name: name.clone(),
+                    archived: false,
                     readable: true,
                     raw: String::new(),
                 })
@@ -1356,10 +1543,11 @@ fn write_contacts(
 /// not take are kept, and written through core like every other client's. The
 /// email replaces the first one the card has and leaves the rest: this used to
 /// replace the whole map, which dropped every other address and the context each
-/// one carried.
+/// one carried. `addresses`, when given, replaces the card's list.
 fn jscontact(
     name: &str,
     email: Option<&str>,
+    addresses: Option<Vec<CoreContactAddress>>,
     book_id: Uuid,
     previous: Option<&str>,
 ) -> Result<String> {
@@ -1369,6 +1557,9 @@ fn jscontact(
     };
     draft.name = name.to_string();
     draft.address_book_id = book_id.to_string();
+    if let Some(addresses) = addresses {
+        draft.addresses = addresses;
+    }
     if let Some(email) = email {
         match draft.emails.first_mut() {
             Some(first) => first.value = email.to_string(),
@@ -1381,6 +1572,42 @@ fn jscontact(
         }
     }
     Ok(contact_write(&draft, &now_rfc3339())?)
+}
+
+/// One `--address` value: `kind=work;street1=1 Main St;city=Leeds`.
+fn parse_address_spec(spec: &str) -> Result<CoreContactAddress, String> {
+    let mut address = CoreContactAddress::default();
+    for pair in spec
+        .split(';')
+        .map(str::trim)
+        .filter(|pair| !pair.is_empty())
+    {
+        let (key, value) = pair
+            .split_once('=')
+            .ok_or_else(|| format!("expected key=value, found {pair:?}"))?;
+        let value = Some(value.trim().to_string()).filter(|value| !value.is_empty());
+        match key.trim().to_ascii_lowercase().as_str() {
+            "kind" | "type" => match value.as_deref().map(str::to_ascii_lowercase).as_deref() {
+                None | Some("home") => address.kind = CoreChannelKind::Home,
+                Some("work") => address.kind = CoreChannelKind::Work,
+                Some(_) => {
+                    address.kind = CoreChannelKind::Custom;
+                    address.label = value;
+                }
+            },
+            "street1" | "street" => address.street1 = value,
+            "street2" => address.street2 = value,
+            "city" | "locality" | "town" => address.locality = value,
+            "region" | "state" | "province" => address.region = value,
+            "postcode" | "zip" | "postal" => address.postcode = value,
+            "country" => address.country = value,
+            other => return Err(format!("unknown address key {other:?}")),
+        }
+    }
+    if address.is_blank() {
+        return Err("an address needs at least one line".into());
+    }
+    Ok(address)
 }
 
 /// The whole vault as one JSON document, written by core.
@@ -1928,6 +2155,7 @@ mod tests {
         let card = jscontact(
             "Ada King",
             Some("ada@example.com"),
+            None,
             DEFAULT_ADDRESS_BOOK_ID,
             Some(&stored),
         )
@@ -1949,6 +2177,58 @@ mod tests {
         assert!(value["updated"].is_string());
     }
 
+    #[test]
+    fn an_address_spec_reads_every_key_and_refuses_a_blank_one() {
+        let work = parse_address_spec("kind=work; street1=1 Main St; city=Leeds; zip=LS1").unwrap();
+        assert_eq!(work.kind, CoreChannelKind::Work);
+        assert_eq!(work.street1.as_deref(), Some("1 Main St"));
+        assert_eq!(work.locality.as_deref(), Some("Leeds"));
+        assert_eq!(work.postcode.as_deref(), Some("LS1"));
+        let cabin = parse_address_spec("kind=Cabin;country=Norway").unwrap();
+        assert_eq!(cabin.kind, CoreChannelKind::Custom);
+        assert_eq!(cabin.label.as_deref(), Some("Cabin"));
+        assert!(parse_address_spec("kind=home").is_err());
+        assert!(parse_address_spec("planet=Mars").is_err());
+        assert!(parse_address_spec("city").is_err());
+    }
+
+    #[test]
+    fn addresses_given_to_an_update_replace_the_list_and_none_keep_it() {
+        let stored = r#"{"@type":"Card","name":{"full":"Ada"},"addresses":{"a1":{"locality":"London"},"a2":{"locality":"Paris"}}}"#;
+        let given = vec![
+            parse_address_spec("city=Leeds").unwrap(),
+            parse_address_spec("kind=work;city=York").unwrap(),
+        ];
+        let card = jscontact(
+            "Ada",
+            None,
+            Some(given),
+            DEFAULT_ADDRESS_BOOK_ID,
+            Some(stored),
+        )
+        .unwrap();
+        let read = contact_parse("c", &card);
+        let cities: Vec<_> = read
+            .addresses
+            .iter()
+            .map(|a| a.locality.clone().unwrap())
+            .collect();
+        assert_eq!(cities, ["Leeds", "York"]);
+
+        let kept = jscontact("Ada", None, None, DEFAULT_ADDRESS_BOOK_ID, Some(stored)).unwrap();
+        assert_eq!(contact_parse("c", &kept).addresses.len(), 2);
+
+        let cleared = jscontact(
+            "Ada",
+            None,
+            Some(Vec::new()),
+            DEFAULT_ADDRESS_BOOK_ID,
+            Some(stored),
+        )
+        .unwrap();
+        assert!(contact_parse("c", &cleared).addresses.is_empty());
+    }
+
     /// The lenient read lives in core now, and the shared fixture pins it. What
     /// this keeps is the one place the CLI still turns a payload into a row:
     /// a note whose notebook is gone is still listed, under the default
@@ -1958,6 +2238,79 @@ mod tests {
         let note = note_parse(&Uuid::from_u128(7).to_string(), "not json");
         assert_eq!(note.title, "Unreadable note");
         assert_eq!(note.notebook_id, Uuid::from_u128(2).to_string());
+    }
+
+    fn ics(events: &str) -> String {
+        format!("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n{events}END:VCALENDAR\r\n")
+    }
+
+    #[test]
+    fn an_imported_time_is_the_instant_its_own_zone_names() {
+        let london = TimeZone::get("Europe/London").unwrap();
+        let read = ics_parse(&ics("BEGIN:VEVENT\r\nSUMMARY:Standup\r\n\
+             DTSTART;TZID=America/New_York:20260701T090000\r\n\
+             DTEND;TZID=America/New_York:20260701T093000\r\n\
+             RRULE:FREQ=WEEKLY;BYDAY=MO\r\nEND:VEVENT\r\n"));
+        let draft = imported_event(
+            &read.events[0],
+            "Europe/London",
+            &london,
+            DEFAULT_CALENDAR_ID,
+        )
+        .unwrap();
+        assert_eq!(draft.start, "2026-07-01T13:00:00Z");
+        assert_eq!(draft.end.as_deref(), Some("2026-07-01T13:30:00Z"));
+        assert_eq!(draft.timezone.as_deref(), Some("America/New_York"));
+        assert_eq!(draft.calendar_id, Some(DEFAULT_CALENDAR_ID.to_string()));
+        assert!(draft.recurrence.is_some());
+    }
+
+    #[test]
+    fn an_imported_time_without_a_known_zone_is_placed_in_the_given_one() {
+        let london = TimeZone::get("Europe/London").unwrap();
+        let read = ics_parse(&ics(
+            "BEGIN:VEVENT\r\nSUMMARY:Floating\r\nDTSTART:20260701T090000\r\nEND:VEVENT\r\n\
+             BEGIN:VEVENT\r\nSUMMARY:Outlook\r\n\
+             DTSTART;TZID=GMT Standard Time:20260102T090000\r\nEND:VEVENT\r\n",
+        ));
+        let calendar = Uuid::new_v4();
+        let floating = imported_event(&read.events[0], "Europe/London", &london, calendar).unwrap();
+        assert_eq!(floating.start, "2026-07-01T08:00:00Z");
+        assert_eq!(floating.timezone.as_deref(), Some("Europe/London"));
+        let outlook = imported_event(&read.events[1], "Europe/London", &london, calendar).unwrap();
+        assert_eq!(outlook.start, "2026-01-02T09:00:00Z");
+        assert_eq!(outlook.calendar_id, Some(calendar.to_string()));
+    }
+
+    #[test]
+    fn an_imported_date_or_instant_is_written_as_it_was_read() {
+        let london = TimeZone::get("Europe/London").unwrap();
+        let read = ics_parse(&ics("BEGIN:VEVENT\r\nSUMMARY:Holiday\r\n\
+             DTSTART;VALUE=DATE:20260803\r\nDTEND;VALUE=DATE:20260805\r\nEND:VEVENT\r\n\
+             BEGIN:VEVENT\r\nSUMMARY:Call\r\nDTSTART:20260701T090000Z\r\nEND:VEVENT\r\n"));
+        let holiday = imported_event(
+            &read.events[0],
+            "Europe/London",
+            &london,
+            DEFAULT_CALENDAR_ID,
+        )
+        .unwrap();
+        assert_eq!(holiday.start, "2026-08-03");
+        assert_eq!(holiday.end.as_deref(), Some("2026-08-04"));
+        let call = imported_event(
+            &read.events[1],
+            "Europe/London",
+            &london,
+            DEFAULT_CALENDAR_ID,
+        )
+        .unwrap();
+        assert_eq!(call.start, "2026-07-01T09:00:00Z");
+    }
+
+    #[test]
+    fn an_unknown_import_zone_is_refused() {
+        assert!(import_zone(Some("Mars/Olympus")).is_err());
+        assert_eq!(import_zone(Some("Asia/Tokyo")).unwrap().0, "Asia/Tokyo");
     }
 
     #[test]

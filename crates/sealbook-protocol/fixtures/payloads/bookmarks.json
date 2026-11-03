@@ -19,7 +19,8 @@
       "version",
       "name",
       "parentId",
-      "color"
+      "color",
+      "hideFromAll"
     ],
     "default_collection_id": "00000000-0000-0000-0000-000000000005",
     "default_collection_name": "Default Collection",
@@ -303,7 +304,8 @@
     {
       "case": "a collection created from scratch",
       "draft": {
-        "name": "Work"
+        "name": "Work",
+        "hide_from_all": false
       },
       "payload": "{\"@type\":\"BookmarkCollection\",\"name\":\"Work\",\"version\":\"1.0\"}"
     },
@@ -311,7 +313,8 @@
       "case": "a name with surrounding space, under another collection",
       "draft": {
         "name": "  Work  ",
-        "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "hide_from_all": false
       },
       "payload": "{\"@type\":\"BookmarkCollection\",\"name\":\"Work\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"version\":\"1.0\"}"
     },
@@ -319,7 +322,8 @@
       "case": "a coloured top-level collection",
       "draft": {
         "name": "Work",
-        "color": "#112233"
+        "color": "#112233",
+        "hide_from_all": false
       },
       "payload": "{\"@type\":\"BookmarkCollection\",\"color\":\"#112233\",\"name\":\"Work\",\"version\":\"1.0\"}"
     },
@@ -329,15 +333,25 @@
         "name": "Renamed",
         "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "color": "#112233",
+        "hide_from_all": false,
         "raw": "{\"@type\":\"BookmarkCollection\",\"color\":\"#112233\",\"name\":\"Work\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sortKey\":\"from a later build\",\"version\":\"1.0\"}"
       },
       "payload": "{\"@type\":\"BookmarkCollection\",\"color\":\"#112233\",\"name\":\"Renamed\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sortKey\":\"from a later build\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a collection hidden from all bookmarks",
+      "draft": {
+        "name": "Work",
+        "hide_from_all": true
+      },
+      "payload": "{\"@type\":\"BookmarkCollection\",\"hideFromAll\":true,\"name\":\"Work\",\"version\":\"1.0\"}"
     },
     {
       "case": "moving to the top level clears the parent",
       "draft": {
         "name": "Work",
         "color": "#112233",
+        "hide_from_all": false,
         "raw": "{\"@type\":\"BookmarkCollection\",\"color\":\"#112233\",\"name\":\"Work\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sortKey\":\"from a later build\",\"version\":\"1.0\"}"
       },
       "payload": "{\"@type\":\"BookmarkCollection\",\"color\":\"#112233\",\"name\":\"Work\",\"sortKey\":\"from a later build\",\"version\":\"1.0\"}"
@@ -353,6 +367,7 @@
         "name": "Work",
         "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "color": "#112233",
+        "hide_from_all": false,
         "readable": true,
         "raw": "{\"name\":\"  Work  \",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"color\":\"#112233\"}"
       }
@@ -364,6 +379,7 @@
       "collection": {
         "id": "00000000-0000-0000-0000-000000000005",
         "name": "Default Collection",
+        "hide_from_all": false,
         "readable": true,
         "raw": "{}"
       }
@@ -375,8 +391,33 @@
       "collection": {
         "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
         "name": "Untitled",
+        "hide_from_all": false,
         "readable": true,
         "raw": "not json"
+      }
+    },
+    {
+      "case": "a collection hidden from all bookmarks",
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "raw": "{\"name\":\"Work\",\"hideFromAll\":true}",
+      "collection": {
+        "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "name": "Work",
+        "hide_from_all": true,
+        "readable": true,
+        "raw": "{\"name\":\"Work\",\"hideFromAll\":true}"
+      }
+    },
+    {
+      "case": "a non-boolean hideFromAll reads as shown",
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "raw": "{\"name\":\"Work\",\"hideFromAll\":\"yes\"}",
+      "collection": {
+        "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "name": "Work",
+        "hide_from_all": false,
+        "readable": true,
+        "raw": "{\"name\":\"Work\",\"hideFromAll\":\"yes\"}"
       }
     },
     {
@@ -386,6 +427,7 @@
       "collection": {
         "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
         "name": "Work",
+        "hide_from_all": false,
         "readable": true,
         "raw": "{\"name\":\"Work\",\"parentId\":\"  \",\"color\":\"\"}"
       }
@@ -399,6 +441,7 @@
           "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
           "name": "Root",
           "color": "#112233",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"Root\",\"color\":\"#112233\"}"
         },
@@ -406,12 +449,14 @@
           "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
           "name": "Child",
           "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"Child\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"
         },
         {
           "id": "plain",
           "name": "Plain",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"Plain\"}"
         },
@@ -419,6 +464,7 @@
           "id": "orphan",
           "name": "Orphan",
           "parent_id": "missing",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"Orphan\",\"parentId\":\"missing\"}"
         },
@@ -426,6 +472,7 @@
           "id": "loop-a",
           "name": "A",
           "parent_id": "loop-b",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"A\",\"parentId\":\"loop-b\"}"
         },
@@ -433,6 +480,7 @@
           "id": "loop-b",
           "name": "B",
           "parent_id": "loop-a",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"B\",\"parentId\":\"loop-a\"}"
         }
@@ -447,6 +495,7 @@
           "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
           "name": "Root",
           "color": "#112233",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"Root\",\"color\":\"#112233\"}"
         },
@@ -454,12 +503,14 @@
           "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
           "name": "Child",
           "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"Child\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"
         },
         {
           "id": "plain",
           "name": "Plain",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"Plain\"}"
         },
@@ -467,6 +518,7 @@
           "id": "orphan",
           "name": "Orphan",
           "parent_id": "missing",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"Orphan\",\"parentId\":\"missing\"}"
         },
@@ -474,6 +526,7 @@
           "id": "loop-a",
           "name": "A",
           "parent_id": "loop-b",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"A\",\"parentId\":\"loop-b\"}"
         },
@@ -481,6 +534,7 @@
           "id": "loop-b",
           "name": "B",
           "parent_id": "loop-a",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"B\",\"parentId\":\"loop-a\"}"
         }
@@ -495,6 +549,7 @@
           "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
           "name": "Root",
           "color": "#112233",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"Root\",\"color\":\"#112233\"}"
         },
@@ -502,12 +557,14 @@
           "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
           "name": "Child",
           "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"Child\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"
         },
         {
           "id": "plain",
           "name": "Plain",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"Plain\"}"
         },
@@ -515,6 +572,7 @@
           "id": "orphan",
           "name": "Orphan",
           "parent_id": "missing",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"Orphan\",\"parentId\":\"missing\"}"
         },
@@ -522,6 +580,7 @@
           "id": "loop-a",
           "name": "A",
           "parent_id": "loop-b",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"A\",\"parentId\":\"loop-b\"}"
         },
@@ -529,6 +588,7 @@
           "id": "loop-b",
           "name": "B",
           "parent_id": "loop-a",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"B\",\"parentId\":\"loop-a\"}"
         }
@@ -543,6 +603,7 @@
           "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
           "name": "Root",
           "color": "#112233",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"Root\",\"color\":\"#112233\"}"
         },
@@ -550,12 +611,14 @@
           "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
           "name": "Child",
           "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"Child\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"
         },
         {
           "id": "plain",
           "name": "Plain",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"Plain\"}"
         },
@@ -563,6 +626,7 @@
           "id": "orphan",
           "name": "Orphan",
           "parent_id": "missing",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"Orphan\",\"parentId\":\"missing\"}"
         },
@@ -570,6 +634,7 @@
           "id": "loop-a",
           "name": "A",
           "parent_id": "loop-b",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"A\",\"parentId\":\"loop-b\"}"
         },
@@ -577,6 +642,7 @@
           "id": "loop-b",
           "name": "B",
           "parent_id": "loop-a",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"B\",\"parentId\":\"loop-a\"}"
         }
@@ -591,6 +657,7 @@
           "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
           "name": "Root",
           "color": "#112233",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"Root\",\"color\":\"#112233\"}"
         },
@@ -598,12 +665,14 @@
           "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
           "name": "Child",
           "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"Child\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"
         },
         {
           "id": "plain",
           "name": "Plain",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"Plain\"}"
         },
@@ -611,6 +680,7 @@
           "id": "orphan",
           "name": "Orphan",
           "parent_id": "missing",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"Orphan\",\"parentId\":\"missing\"}"
         },
@@ -618,6 +688,7 @@
           "id": "loop-a",
           "name": "A",
           "parent_id": "loop-b",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"A\",\"parentId\":\"loop-b\"}"
         },
@@ -625,6 +696,7 @@
           "id": "loop-b",
           "name": "B",
           "parent_id": "loop-a",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"B\",\"parentId\":\"loop-a\"}"
         }
@@ -639,6 +711,7 @@
           "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
           "name": "Root",
           "color": "#112233",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"Root\",\"color\":\"#112233\"}"
         },
@@ -646,12 +719,14 @@
           "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
           "name": "Child",
           "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"Child\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"
         },
         {
           "id": "plain",
           "name": "Plain",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"Plain\"}"
         },
@@ -659,6 +734,7 @@
           "id": "orphan",
           "name": "Orphan",
           "parent_id": "missing",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"Orphan\",\"parentId\":\"missing\"}"
         },
@@ -666,6 +742,7 @@
           "id": "loop-a",
           "name": "A",
           "parent_id": "loop-b",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"A\",\"parentId\":\"loop-b\"}"
         },
@@ -673,6 +750,7 @@
           "id": "loop-b",
           "name": "B",
           "parent_id": "loop-a",
+          "hide_from_all": false,
           "readable": true,
           "raw": "{\"name\":\"B\",\"parentId\":\"loop-a\"}"
         }

@@ -137,21 +137,8 @@ fn entry(contact: &CoreContact, book_name: Option<&String>) -> Entry {
         let text = profile_text(profile).join(" ");
         rest.push(text);
     }
-    if let Some(address) = &contact.address {
-        let line = [
-            &address.street1,
-            &address.street2,
-            &address.locality,
-            &address.region,
-            &address.postcode,
-            &address.country,
-        ]
-        .into_iter()
-        .flatten()
-        .map(String::as_str)
-        .collect::<Vec<_>>()
-        .join(" ");
-        rest.push(name_key(&line));
+    for address in &contact.addresses {
+        rest.push(name_key(&address.lines().join(" ")));
     }
     rest.extend(contact.phones.iter().map(|phone| name_key(&phone.value)));
     rest.extend(book_name.map(|text| name_key(text)));
@@ -344,6 +331,7 @@ mod tests {
                     organization: "Analytical Engines".into(),
                     title: None,
                     extra: None,
+                    ..Default::default()
                 }],
                 ..Default::default()
             },

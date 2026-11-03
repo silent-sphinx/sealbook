@@ -5,7 +5,7 @@ use serde_json::{Map, Value};
 
 use crate::contacts::{resolve_address_book_id, CoreContactDraft};
 use crate::csv::csv_import;
-use crate::csv::{address_of, channel_of, date_of, social_of, text, work_of};
+use crate::csv::{addresses_of, channel_of, date_of, social_of, text, work_of};
 use crate::vcard::{vcard_import, CoreContactImport, CoreContactSkipped, NO_NAME};
 use crate::CoreError;
 use serde::{Deserialize, Serialize};
@@ -145,9 +145,15 @@ fn card(entry: &Map<String, Value>, default_book: &str) -> Option<CoreContactDra
         pronouns: field(entry, "pronouns"),
         emails: list(entry, "emails", channel_of),
         phones: list(entry, "phones", channel_of),
-        address: entry
-            .get("address")
-            .and_then(|a| address_of(&a.to_string())),
+        addresses: entry
+            .get("addresses")
+            .or_else(|| entry.get("address"))
+            .map(|value| {
+                let mut addresses = addresses_of(value);
+                addresses.truncate(MAX_CONTACT_LIST_ITEMS);
+                addresses
+            })
+            .unwrap_or_default(),
         work: list(entry, "work", work_of),
         dates: list(entry, "dates", date_of),
         socials: list(entry, "socials", social_of),

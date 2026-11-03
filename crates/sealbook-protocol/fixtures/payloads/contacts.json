@@ -36,7 +36,8 @@
     "address_book_keys": [
       "@type",
       "version",
-      "name"
+      "name",
+      "archived"
     ],
     "profile_keys": [
       "@type",
@@ -73,6 +74,7 @@
         "name": "Grace Hopper",
         "emails": [],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -99,9 +101,12 @@
           }
         ],
         "phones": [],
-        "address": {
-          "street1": "  "
-        },
+        "addresses": [
+          {
+            "kind": "home",
+            "street1": "  "
+          }
+        ],
         "work": [],
         "dates": [],
         "socials": [
@@ -158,6 +163,7 @@
             "value": "4"
           }
         ],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -168,11 +174,47 @@
       "payload": "{\"@type\":\"Card\",\"created\":\"2026-10-28T12:00:00.000Z\",\"emails\":{\"e1\":{\"address\":\"w@example.com\",\"contexts\":{\"work\":true}},\"e2\":{\"address\":\"h@example.com\",\"contexts\":{\"private\":true}},\"e3\":{\"address\":\"m@example.com\",\"label\":\"Mobile\"},\"e4\":{\"address\":\"c@example.com\",\"label\":\"Lists\"}},\"name\":{\"full\":\"Kinds\"},\"phones\":{\"p1\":{\"contexts\":{\"work\":true},\"number\":\"1\"},\"p2\":{\"contexts\":{\"private\":true},\"number\":\"2\"},\"p3\":{\"features\":{\"mobile\":true},\"number\":\"3\"},\"p4\":{\"number\":\"4\"}},\"sealbook:addressBookId\":\"00000000-0000-0000-0000-000000000001\",\"updated\":\"2026-10-28T12:00:00.000Z\",\"version\":\"1.0\"}"
     },
     {
+      "case": "an address of every kind, in the order given",
+      "draft": {
+        "name": "Addresses",
+        "emails": [],
+        "phones": [],
+        "addresses": [
+          {
+            "kind": "work",
+            "street1": "1 Office Park",
+            "locality": "Leeds"
+          },
+          {
+            "kind": "home",
+            "street1": " 2 Home Lane ",
+            "street2": "Flat 3",
+            "postcode": "LS1",
+            "country": "UK"
+          },
+          {
+            "kind": "custom",
+            "label": " Cabin ",
+            "locality": "Bergen",
+            "region": "Vestland"
+          }
+        ],
+        "work": [],
+        "dates": [],
+        "socials": [],
+        "attachments": [],
+        "address_book_id": "00000000-0000-0000-0000-000000000001",
+        "archived": false
+      },
+      "payload": "{\"@type\":\"Card\",\"addresses\":{\"a1\":{\"contexts\":{\"work\":true},\"locality\":\"Leeds\",\"street\":[\"1 Office Park\"]},\"a2\":{\"contexts\":{\"private\":true},\"country\":\"UK\",\"postCode\":\"LS1\",\"street\":[\"2 Home Lane\",\"Flat 3\"]},\"a3\":{\"label\":\"Cabin\",\"locality\":\"Bergen\",\"region\":\"Vestland\"}},\"created\":\"2026-10-28T12:00:00.000Z\",\"name\":{\"full\":\"Addresses\"},\"sealbook:addressBookId\":\"00000000-0000-0000-0000-000000000001\",\"updated\":\"2026-10-28T12:00:00.000Z\",\"version\":\"1.0\"}"
+    },
+    {
       "case": "two titles at one organization, and an organization with none",
       "draft": {
         "name": "Work",
         "emails": [],
         "phones": [],
+        "addresses": [],
         "work": [
           {
             "organization": "Navy",
@@ -199,11 +241,80 @@
       "payload": "{\"@type\":\"Card\",\"created\":\"2026-10-28T12:00:00.000Z\",\"name\":{\"full\":\"Work\"},\"organizations\":{\"o1\":{\"name\":\"Navy\"},\"o2\":{\"name\":\"Navy\"},\"o3\":{\"name\":\"Navy\"}},\"sealbook:addressBookId\":\"00000000-0000-0000-0000-000000000001\",\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Rear Admiral\",\"organization\":\"o1\"},\"t2\":{\"kind\":\"title\",\"name\":\"Programmer\",\"organization\":\"o2\"}},\"updated\":\"2026-10-28T12:00:00.000Z\",\"version\":\"1.0\"}"
     },
     {
+      "case": "workplaces with dates, a current one whose end is dropped, and one with none",
+      "draft": {
+        "name": "Grace",
+        "emails": [],
+        "phones": [],
+        "addresses": [],
+        "work": [
+          {
+            "organization": "UNIVAC",
+            "title": "Programmer",
+            "start": "1949",
+            "end": "1971",
+            "current": true,
+            "note": " COBOL "
+          },
+          {
+            "organization": "Harvard",
+            "start": " 1944 ",
+            "end": "1946-08"
+          },
+          {
+            "organization": "Navy"
+          }
+        ],
+        "dates": [],
+        "socials": [],
+        "attachments": [],
+        "address_book_id": "00000000-0000-0000-0000-000000000001",
+        "archived": false
+      },
+      "payload": "{\"@type\":\"Card\",\"created\":\"2026-10-28T12:00:00.000Z\",\"name\":{\"full\":\"Grace\"},\"organizations\":{\"o1\":{\"name\":\"UNIVAC\",\"sealbook:current\":true,\"sealbook:note\":\"COBOL\",\"sealbook:start\":\"1949\"},\"o2\":{\"name\":\"Harvard\",\"sealbook:end\":\"1946-08\",\"sealbook:start\":\"1944\"},\"o3\":{\"name\":\"Navy\"}},\"sealbook:addressBookId\":\"00000000-0000-0000-0000-000000000001\",\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Programmer\",\"organization\":\"o1\"}},\"updated\":\"2026-10-28T12:00:00.000Z\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "addresses with dates, a current one whose end is dropped",
+      "draft": {
+        "name": "Grace",
+        "emails": [],
+        "phones": [],
+        "addresses": [
+          {
+            "kind": "home",
+            "locality": "Arlington",
+            "start": " 1967-08 ",
+            "end": "1980",
+            "current": true
+          },
+          {
+            "kind": "work",
+            "locality": "Philadelphia",
+            "start": "1949",
+            "end": "1950-03-14"
+          },
+          {
+            "kind": "home",
+            "locality": "New York",
+            "end": "1924"
+          }
+        ],
+        "work": [],
+        "dates": [],
+        "socials": [],
+        "attachments": [],
+        "address_book_id": "00000000-0000-0000-0000-000000000001",
+        "archived": false
+      },
+      "payload": "{\"@type\":\"Card\",\"addresses\":{\"a1\":{\"contexts\":{\"private\":true},\"locality\":\"Arlington\",\"sealbook:current\":true,\"sealbook:start\":\"1967-08\"},\"a2\":{\"contexts\":{\"work\":true},\"locality\":\"Philadelphia\",\"sealbook:end\":\"1950-03-14\",\"sealbook:start\":\"1949\"},\"a3\":{\"contexts\":{\"private\":true},\"locality\":\"New York\",\"sealbook:end\":\"1924\"}},\"created\":\"2026-10-28T12:00:00.000Z\",\"name\":{\"full\":\"Grace\"},\"sealbook:addressBookId\":\"00000000-0000-0000-0000-000000000001\",\"updated\":\"2026-10-28T12:00:00.000Z\",\"version\":\"1.0\"}"
+    },
+    {
       "case": "dates of each kind, the label written only for a custom one",
       "draft": {
         "name": "Dates",
         "emails": [],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [
           {
@@ -238,6 +349,7 @@
         "name": "Archived",
         "emails": [],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -267,6 +379,7 @@
         "name": "All",
         "emails": [],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -282,6 +395,7 @@
         "name": "Profile",
         "emails": [],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -378,6 +492,7 @@
         "name": "Empty",
         "emails": [],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -434,13 +549,20 @@
             "value": "+442000000000"
           }
         ],
-        "address": {
-          "street1": "1 Engine Row",
-          "street2": "Flat 2",
-          "locality": "London",
-          "postcode": "N1",
-          "country": "UK"
-        },
+        "addresses": [
+          {
+            "kind": "home",
+            "street1": "1 Engine Row",
+            "street2": "Flat 2",
+            "locality": "London",
+            "postcode": "N1",
+            "country": "UK"
+          },
+          {
+            "kind": "work",
+            "locality": "Paris"
+          }
+        ],
         "work": [
           {
             "organization": "Analytical Engines",
@@ -505,9 +627,9 @@
         "address_book_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "archived": true,
         "created_at": "2026-01-01T00:00:00.000Z",
-        "raw": "{\"@type\":\"Card\",\"addresses\":{\"a1\":{\"country\":\"UK\",\"locality\":\"London\",\"postCode\":\"N1\",\"street\":[\"1 Engine Row\",\"Flat 2\"]},\"a2\":{\"locality\":\"Paris\"}},\"anniversaries\":{\"a1\":{\"date\":\"1815-12-10\",\"kind\":\"birth\"},\"a2\":{\"date\":\"1835-07-08\",\"kind\":\"other\",\"label\":\"Wedding of a friend\"}},\"created\":\"2026-01-01T00:00:00.000Z\",\"emails\":{\"e1\":{\"address\":\"ada@example.com\",\"contexts\":{\"work\":true}},\"e2\":{\"address\":\"ada@home.example\",\"contexts\":{\"private\":true}},\"e3\":{\"address\":\"ada@lists.example\",\"label\":\"Lists\"}},\"media\":{\"avatar\":{\"kind\":\"photo\",\"uri\":\"data:image/png;base64,AAAA\"}},\"name\":{\"full\":\"Ada Lovelace\"},\"nickNames\":{\"n1\":{\"name\":\"Countess\"}},\"notes\":{\"n1\":{\"note\":\"Met at the Royal Society.\"},\"n2\":{\"note\":\"Second note.\"}},\"onlineServices\":{\"os1\":{\"service\":\"x\",\"user\":\"@ada\"}},\"organizations\":{\"o1\":{\"name\":\"Analytical Engines\"},\"o2\":{\"name\":\"Royal Society\"}},\"phones\":{\"p1\":{\"features\":{\"mobile\":true},\"number\":\"+441234567890\"},\"p2\":{\"contexts\":{\"work\":true},\"number\":\"+442000000000\"}},\"ranking\":9,\"sealbook:addressBookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sealbook:archived\":true,\"sealbook:profile\":{\"@type\":\"SealbookProfile\",\"colleagues\":[{\"contactId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"name\":\"Charles\"}],\"food\":[{\"note\":\"ever\",\"polarity\":\"dislike\",\"value\":\"oysters\"}],\"hobbies\":[\"looms\"],\"howWeMet\":\"A dinner\",\"interests\":[\"chess\"],\"version\":\"1.0\"},\"speakToAs\":{\"greeting\":\"Dear\",\"pronouns\":\"she/her\"},\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Mathematician\",\"organization\":\"o1\"},\"t2\":{\"kind\":\"title\",\"name\":\"Fellow\",\"organization\":\"o1\"}},\"updated\":\"2026-02-01T00:00:00.000Z\",\"version\":\"1.0\"}"
+        "raw": "{\"@type\":\"Card\",\"addresses\":{\"a1\":{\"country\":\"UK\",\"locality\":\"London\",\"postCode\":\"N1\",\"street\":[\"1 Engine Row\",\"Flat 2\"]},\"a2\":{\"contexts\":{\"work\":true},\"locality\":\"Paris\"},\"a3\":{\"components\":[{\"kind\":\"locality\",\"value\":\"Oslo\"}]}},\"anniversaries\":{\"a1\":{\"date\":\"1815-12-10\",\"kind\":\"birth\"},\"a2\":{\"date\":\"1835-07-08\",\"kind\":\"other\",\"label\":\"Wedding of a friend\"}},\"created\":\"2026-01-01T00:00:00.000Z\",\"emails\":{\"e1\":{\"address\":\"ada@example.com\",\"contexts\":{\"work\":true}},\"e2\":{\"address\":\"ada@home.example\",\"contexts\":{\"private\":true}},\"e3\":{\"address\":\"ada@lists.example\",\"label\":\"Lists\"}},\"media\":{\"avatar\":{\"kind\":\"photo\",\"uri\":\"data:image/png;base64,AAAA\"}},\"name\":{\"full\":\"Ada Lovelace\"},\"nickNames\":{\"n1\":{\"name\":\"Countess\"}},\"notes\":{\"n1\":{\"note\":\"Met at the Royal Society.\"},\"n2\":{\"note\":\"Second note.\"}},\"onlineServices\":{\"os1\":{\"service\":\"x\",\"user\":\"@ada\"}},\"organizations\":{\"o1\":{\"name\":\"Analytical Engines\"},\"o2\":{\"name\":\"Royal Society\"}},\"phones\":{\"p1\":{\"features\":{\"mobile\":true},\"number\":\"+441234567890\"},\"p2\":{\"contexts\":{\"work\":true},\"number\":\"+442000000000\"}},\"ranking\":9,\"sealbook:addressBookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sealbook:archived\":true,\"sealbook:profile\":{\"@type\":\"SealbookProfile\",\"colleagues\":[{\"contactId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"name\":\"Charles\"}],\"food\":[{\"note\":\"ever\",\"polarity\":\"dislike\",\"value\":\"oysters\"}],\"hobbies\":[\"looms\"],\"howWeMet\":\"A dinner\",\"interests\":[\"chess\"],\"version\":\"1.0\"},\"speakToAs\":{\"greeting\":\"Dear\",\"pronouns\":\"she/her\"},\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Mathematician\",\"organization\":\"o1\"},\"t2\":{\"kind\":\"title\",\"name\":\"Fellow\",\"organization\":\"o1\"}},\"updated\":\"2026-02-01T00:00:00.000Z\",\"version\":\"1.0\"}"
       },
-      "payload": "{\"@type\":\"Card\",\"addresses\":{\"a1\":{\"country\":\"UK\",\"locality\":\"London\",\"postCode\":\"N1\",\"street\":[\"1 Engine Row\",\"Flat 2\"]},\"a2\":{\"locality\":\"Paris\"}},\"anniversaries\":{\"a1\":{\"date\":\"1815-12-10\",\"kind\":\"birth\"},\"a2\":{\"date\":\"1835-07-08\",\"kind\":\"other\",\"label\":\"Wedding of a friend\"}},\"created\":\"2026-01-01T00:00:00.000Z\",\"emails\":{\"e1\":{\"address\":\"ada@example.com\",\"contexts\":{\"work\":true}},\"e2\":{\"address\":\"ada@home.example\",\"contexts\":{\"private\":true}},\"e3\":{\"address\":\"ada@lists.example\",\"label\":\"Lists\"}},\"media\":{\"avatar\":{\"kind\":\"photo\",\"uri\":\"data:image/png;base64,AAAA\"}},\"name\":{\"full\":\"Ada Lovelace\"},\"nickNames\":{\"n1\":{\"name\":\"Countess\"}},\"notes\":{\"n1\":{\"note\":\"Met at the Royal Society.\"},\"n2\":{\"note\":\"Second note.\"}},\"onlineServices\":{\"os1\":{\"service\":\"x\",\"user\":\"@ada\"}},\"organizations\":{\"o1\":{\"name\":\"Analytical Engines\"},\"o2\":{\"name\":\"Analytical Engines\"},\"o3\":{\"name\":\"Royal Society\"}},\"phones\":{\"p1\":{\"features\":{\"mobile\":true},\"number\":\"+441234567890\"},\"p2\":{\"contexts\":{\"work\":true},\"number\":\"+442000000000\"}},\"ranking\":9,\"sealbook:addressBookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sealbook:archived\":true,\"sealbook:profile\":{\"@type\":\"SealbookProfile\",\"colleagues\":[{\"contactId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"name\":\"Charles\"}],\"food\":[{\"note\":\"ever\",\"polarity\":\"dislike\",\"value\":\"oysters\"}],\"hobbies\":[\"looms\"],\"howWeMet\":\"A dinner\",\"interests\":[\"chess\"],\"version\":\"1.0\"},\"speakToAs\":{\"greeting\":\"Dear\",\"pronouns\":\"she/her\"},\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Mathematician\",\"organization\":\"o1\"},\"t2\":{\"kind\":\"title\",\"name\":\"Fellow\",\"organization\":\"o2\"}},\"updated\":\"2026-10-28T12:00:00.000Z\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Card\",\"addresses\":{\"a1\":{\"contexts\":{\"private\":true},\"country\":\"UK\",\"locality\":\"London\",\"postCode\":\"N1\",\"street\":[\"1 Engine Row\",\"Flat 2\"]},\"a2\":{\"contexts\":{\"work\":true},\"locality\":\"Paris\"},\"a3\":{\"components\":[{\"kind\":\"locality\",\"value\":\"Oslo\"}]}},\"anniversaries\":{\"a1\":{\"date\":\"1815-12-10\",\"kind\":\"birth\"},\"a2\":{\"date\":\"1835-07-08\",\"kind\":\"other\",\"label\":\"Wedding of a friend\"}},\"created\":\"2026-01-01T00:00:00.000Z\",\"emails\":{\"e1\":{\"address\":\"ada@example.com\",\"contexts\":{\"work\":true}},\"e2\":{\"address\":\"ada@home.example\",\"contexts\":{\"private\":true}},\"e3\":{\"address\":\"ada@lists.example\",\"label\":\"Lists\"}},\"media\":{\"avatar\":{\"kind\":\"photo\",\"uri\":\"data:image/png;base64,AAAA\"}},\"name\":{\"full\":\"Ada Lovelace\"},\"nickNames\":{\"n1\":{\"name\":\"Countess\"}},\"notes\":{\"n1\":{\"note\":\"Met at the Royal Society.\"},\"n2\":{\"note\":\"Second note.\"}},\"onlineServices\":{\"os1\":{\"service\":\"x\",\"user\":\"@ada\"}},\"organizations\":{\"o1\":{\"name\":\"Analytical Engines\"},\"o2\":{\"name\":\"Analytical Engines\"},\"o3\":{\"name\":\"Royal Society\"}},\"phones\":{\"p1\":{\"features\":{\"mobile\":true},\"number\":\"+441234567890\"},\"p2\":{\"contexts\":{\"work\":true},\"number\":\"+442000000000\"}},\"ranking\":9,\"sealbook:addressBookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sealbook:archived\":true,\"sealbook:profile\":{\"@type\":\"SealbookProfile\",\"colleagues\":[{\"contactId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"name\":\"Charles\"}],\"food\":[{\"note\":\"ever\",\"polarity\":\"dislike\",\"value\":\"oysters\"}],\"hobbies\":[\"looms\"],\"howWeMet\":\"A dinner\",\"interests\":[\"chess\"],\"version\":\"1.0\"},\"speakToAs\":{\"greeting\":\"Dear\",\"pronouns\":\"she/her\"},\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Mathematician\",\"organization\":\"o1\"},\"t2\":{\"kind\":\"title\",\"name\":\"Fellow\",\"organization\":\"o2\"}},\"updated\":\"2026-10-28T12:00:00.000Z\",\"version\":\"1.0\"}"
     },
     {
       "case": "a rename of a card carrying a second address, a second note and a later build's keys",
@@ -540,13 +662,20 @@
             "value": "+442000000000"
           }
         ],
-        "address": {
-          "street1": "1 Engine Row",
-          "street2": "Flat 2",
-          "locality": "London",
-          "postcode": "N1",
-          "country": "UK"
-        },
+        "addresses": [
+          {
+            "kind": "home",
+            "street1": "1 Engine Row",
+            "street2": "Flat 2",
+            "locality": "London",
+            "postcode": "N1",
+            "country": "UK"
+          },
+          {
+            "kind": "work",
+            "locality": "Paris"
+          }
+        ],
         "work": [
           {
             "organization": "Analytical Engines",
@@ -611,12 +740,12 @@
         "address_book_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "archived": true,
         "created_at": "2026-01-01T00:00:00.000Z",
-        "raw": "{\"@type\":\"Card\",\"addresses\":{\"a1\":{\"country\":\"UK\",\"locality\":\"London\",\"postCode\":\"N1\",\"street\":[\"1 Engine Row\",\"Flat 2\"]},\"a2\":{\"locality\":\"Paris\"}},\"anniversaries\":{\"a1\":{\"date\":\"1815-12-10\",\"kind\":\"birth\"},\"a2\":{\"date\":\"1835-07-08\",\"kind\":\"other\",\"label\":\"Wedding of a friend\"}},\"created\":\"2026-01-01T00:00:00.000Z\",\"emails\":{\"e1\":{\"address\":\"ada@example.com\",\"contexts\":{\"work\":true}},\"e2\":{\"address\":\"ada@home.example\",\"contexts\":{\"private\":true}},\"e3\":{\"address\":\"ada@lists.example\",\"label\":\"Lists\"}},\"media\":{\"avatar\":{\"kind\":\"photo\",\"uri\":\"data:image/png;base64,AAAA\"}},\"name\":{\"full\":\"Ada Lovelace\"},\"nickNames\":{\"n1\":{\"name\":\"Countess\"}},\"notes\":{\"n1\":{\"note\":\"Met at the Royal Society.\"},\"n2\":{\"note\":\"Second note.\"}},\"onlineServices\":{\"os1\":{\"service\":\"x\",\"user\":\"@ada\"}},\"organizations\":{\"o1\":{\"name\":\"Analytical Engines\"},\"o2\":{\"name\":\"Royal Society\"}},\"phones\":{\"p1\":{\"features\":{\"mobile\":true},\"number\":\"+441234567890\"},\"p2\":{\"contexts\":{\"work\":true},\"number\":\"+442000000000\"}},\"ranking\":9,\"sealbook:addressBookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sealbook:archived\":true,\"sealbook:profile\":{\"@type\":\"SealbookProfile\",\"colleagues\":[{\"contactId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"name\":\"Charles\"}],\"food\":[{\"note\":\"ever\",\"polarity\":\"dislike\",\"value\":\"oysters\"}],\"hobbies\":[\"looms\"],\"howWeMet\":\"A dinner\",\"interests\":[\"chess\"],\"version\":\"1.0\"},\"speakToAs\":{\"greeting\":\"Dear\",\"pronouns\":\"she/her\"},\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Mathematician\",\"organization\":\"o1\"},\"t2\":{\"kind\":\"title\",\"name\":\"Fellow\",\"organization\":\"o1\"}},\"updated\":\"2026-02-01T00:00:00.000Z\",\"version\":\"1.0\"}"
+        "raw": "{\"@type\":\"Card\",\"addresses\":{\"a1\":{\"country\":\"UK\",\"locality\":\"London\",\"postCode\":\"N1\",\"street\":[\"1 Engine Row\",\"Flat 2\"]},\"a2\":{\"contexts\":{\"work\":true},\"locality\":\"Paris\"},\"a3\":{\"components\":[{\"kind\":\"locality\",\"value\":\"Oslo\"}]}},\"anniversaries\":{\"a1\":{\"date\":\"1815-12-10\",\"kind\":\"birth\"},\"a2\":{\"date\":\"1835-07-08\",\"kind\":\"other\",\"label\":\"Wedding of a friend\"}},\"created\":\"2026-01-01T00:00:00.000Z\",\"emails\":{\"e1\":{\"address\":\"ada@example.com\",\"contexts\":{\"work\":true}},\"e2\":{\"address\":\"ada@home.example\",\"contexts\":{\"private\":true}},\"e3\":{\"address\":\"ada@lists.example\",\"label\":\"Lists\"}},\"media\":{\"avatar\":{\"kind\":\"photo\",\"uri\":\"data:image/png;base64,AAAA\"}},\"name\":{\"full\":\"Ada Lovelace\"},\"nickNames\":{\"n1\":{\"name\":\"Countess\"}},\"notes\":{\"n1\":{\"note\":\"Met at the Royal Society.\"},\"n2\":{\"note\":\"Second note.\"}},\"onlineServices\":{\"os1\":{\"service\":\"x\",\"user\":\"@ada\"}},\"organizations\":{\"o1\":{\"name\":\"Analytical Engines\"},\"o2\":{\"name\":\"Royal Society\"}},\"phones\":{\"p1\":{\"features\":{\"mobile\":true},\"number\":\"+441234567890\"},\"p2\":{\"contexts\":{\"work\":true},\"number\":\"+442000000000\"}},\"ranking\":9,\"sealbook:addressBookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sealbook:archived\":true,\"sealbook:profile\":{\"@type\":\"SealbookProfile\",\"colleagues\":[{\"contactId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"name\":\"Charles\"}],\"food\":[{\"note\":\"ever\",\"polarity\":\"dislike\",\"value\":\"oysters\"}],\"hobbies\":[\"looms\"],\"howWeMet\":\"A dinner\",\"interests\":[\"chess\"],\"version\":\"1.0\"},\"speakToAs\":{\"greeting\":\"Dear\",\"pronouns\":\"she/her\"},\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Mathematician\",\"organization\":\"o1\"},\"t2\":{\"kind\":\"title\",\"name\":\"Fellow\",\"organization\":\"o1\"}},\"updated\":\"2026-02-01T00:00:00.000Z\",\"version\":\"1.0\"}"
       },
-      "payload": "{\"@type\":\"Card\",\"addresses\":{\"a1\":{\"country\":\"UK\",\"locality\":\"London\",\"postCode\":\"N1\",\"street\":[\"1 Engine Row\",\"Flat 2\"]},\"a2\":{\"locality\":\"Paris\"}},\"anniversaries\":{\"a1\":{\"date\":\"1815-12-10\",\"kind\":\"birth\"},\"a2\":{\"date\":\"1835-07-08\",\"kind\":\"other\",\"label\":\"Wedding of a friend\"}},\"created\":\"2026-01-01T00:00:00.000Z\",\"emails\":{\"e1\":{\"address\":\"ada@example.com\",\"contexts\":{\"work\":true}},\"e2\":{\"address\":\"ada@home.example\",\"contexts\":{\"private\":true}},\"e3\":{\"address\":\"ada@lists.example\",\"label\":\"Lists\"}},\"media\":{\"avatar\":{\"kind\":\"photo\",\"uri\":\"data:image/png;base64,AAAA\"}},\"name\":{\"full\":\"Ada King\"},\"nickNames\":{\"n1\":{\"name\":\"Countess\"}},\"notes\":{\"n1\":{\"note\":\"Met at the Royal Society.\"},\"n2\":{\"note\":\"Second note.\"}},\"onlineServices\":{\"os1\":{\"service\":\"x\",\"user\":\"@ada\"}},\"organizations\":{\"o1\":{\"name\":\"Analytical Engines\"},\"o2\":{\"name\":\"Analytical Engines\"},\"o3\":{\"name\":\"Royal Society\"}},\"phones\":{\"p1\":{\"features\":{\"mobile\":true},\"number\":\"+441234567890\"},\"p2\":{\"contexts\":{\"work\":true},\"number\":\"+442000000000\"}},\"ranking\":9,\"sealbook:addressBookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sealbook:archived\":true,\"sealbook:profile\":{\"@type\":\"SealbookProfile\",\"colleagues\":[{\"contactId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"name\":\"Charles\"}],\"food\":[{\"note\":\"ever\",\"polarity\":\"dislike\",\"value\":\"oysters\"}],\"hobbies\":[\"looms\"],\"howWeMet\":\"A dinner\",\"interests\":[\"chess\"],\"version\":\"1.0\"},\"speakToAs\":{\"greeting\":\"Dear\",\"pronouns\":\"she/her\"},\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Mathematician\",\"organization\":\"o1\"},\"t2\":{\"kind\":\"title\",\"name\":\"Fellow\",\"organization\":\"o2\"}},\"updated\":\"2026-10-28T12:00:00.000Z\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Card\",\"addresses\":{\"a1\":{\"contexts\":{\"private\":true},\"country\":\"UK\",\"locality\":\"London\",\"postCode\":\"N1\",\"street\":[\"1 Engine Row\",\"Flat 2\"]},\"a2\":{\"contexts\":{\"work\":true},\"locality\":\"Paris\"},\"a3\":{\"components\":[{\"kind\":\"locality\",\"value\":\"Oslo\"}]}},\"anniversaries\":{\"a1\":{\"date\":\"1815-12-10\",\"kind\":\"birth\"},\"a2\":{\"date\":\"1835-07-08\",\"kind\":\"other\",\"label\":\"Wedding of a friend\"}},\"created\":\"2026-01-01T00:00:00.000Z\",\"emails\":{\"e1\":{\"address\":\"ada@example.com\",\"contexts\":{\"work\":true}},\"e2\":{\"address\":\"ada@home.example\",\"contexts\":{\"private\":true}},\"e3\":{\"address\":\"ada@lists.example\",\"label\":\"Lists\"}},\"media\":{\"avatar\":{\"kind\":\"photo\",\"uri\":\"data:image/png;base64,AAAA\"}},\"name\":{\"full\":\"Ada King\"},\"nickNames\":{\"n1\":{\"name\":\"Countess\"}},\"notes\":{\"n1\":{\"note\":\"Met at the Royal Society.\"},\"n2\":{\"note\":\"Second note.\"}},\"onlineServices\":{\"os1\":{\"service\":\"x\",\"user\":\"@ada\"}},\"organizations\":{\"o1\":{\"name\":\"Analytical Engines\"},\"o2\":{\"name\":\"Analytical Engines\"},\"o3\":{\"name\":\"Royal Society\"}},\"phones\":{\"p1\":{\"features\":{\"mobile\":true},\"number\":\"+441234567890\"},\"p2\":{\"contexts\":{\"work\":true},\"number\":\"+442000000000\"}},\"ranking\":9,\"sealbook:addressBookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sealbook:archived\":true,\"sealbook:profile\":{\"@type\":\"SealbookProfile\",\"colleagues\":[{\"contactId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"name\":\"Charles\"}],\"food\":[{\"note\":\"ever\",\"polarity\":\"dislike\",\"value\":\"oysters\"}],\"hobbies\":[\"looms\"],\"howWeMet\":\"A dinner\",\"interests\":[\"chess\"],\"version\":\"1.0\"},\"speakToAs\":{\"greeting\":\"Dear\",\"pronouns\":\"she/her\"},\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Mathematician\",\"organization\":\"o1\"},\"t2\":{\"kind\":\"title\",\"name\":\"Fellow\",\"organization\":\"o2\"}},\"updated\":\"2026-10-28T12:00:00.000Z\",\"version\":\"1.0\"}"
     },
     {
-      "case": "clearing the address and the note shows the next of each",
+      "case": "removing the first address, and clearing the note, which shows the next",
       "draft": {
         "name": "Ada Lovelace",
         "nickname": "Countess",
@@ -644,6 +773,12 @@
           {
             "kind": "work",
             "value": "+442000000000"
+          }
+        ],
+        "addresses": [
+          {
+            "kind": "work",
+            "locality": "Paris"
           }
         ],
         "work": [
@@ -709,9 +844,9 @@
         "address_book_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "archived": true,
         "created_at": "2026-01-01T00:00:00.000Z",
-        "raw": "{\"@type\":\"Card\",\"addresses\":{\"a1\":{\"country\":\"UK\",\"locality\":\"London\",\"postCode\":\"N1\",\"street\":[\"1 Engine Row\",\"Flat 2\"]},\"a2\":{\"locality\":\"Paris\"}},\"anniversaries\":{\"a1\":{\"date\":\"1815-12-10\",\"kind\":\"birth\"},\"a2\":{\"date\":\"1835-07-08\",\"kind\":\"other\",\"label\":\"Wedding of a friend\"}},\"created\":\"2026-01-01T00:00:00.000Z\",\"emails\":{\"e1\":{\"address\":\"ada@example.com\",\"contexts\":{\"work\":true}},\"e2\":{\"address\":\"ada@home.example\",\"contexts\":{\"private\":true}},\"e3\":{\"address\":\"ada@lists.example\",\"label\":\"Lists\"}},\"media\":{\"avatar\":{\"kind\":\"photo\",\"uri\":\"data:image/png;base64,AAAA\"}},\"name\":{\"full\":\"Ada Lovelace\"},\"nickNames\":{\"n1\":{\"name\":\"Countess\"}},\"notes\":{\"n1\":{\"note\":\"Met at the Royal Society.\"},\"n2\":{\"note\":\"Second note.\"}},\"onlineServices\":{\"os1\":{\"service\":\"x\",\"user\":\"@ada\"}},\"organizations\":{\"o1\":{\"name\":\"Analytical Engines\"},\"o2\":{\"name\":\"Royal Society\"}},\"phones\":{\"p1\":{\"features\":{\"mobile\":true},\"number\":\"+441234567890\"},\"p2\":{\"contexts\":{\"work\":true},\"number\":\"+442000000000\"}},\"ranking\":9,\"sealbook:addressBookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sealbook:archived\":true,\"sealbook:profile\":{\"@type\":\"SealbookProfile\",\"colleagues\":[{\"contactId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"name\":\"Charles\"}],\"food\":[{\"note\":\"ever\",\"polarity\":\"dislike\",\"value\":\"oysters\"}],\"hobbies\":[\"looms\"],\"howWeMet\":\"A dinner\",\"interests\":[\"chess\"],\"version\":\"1.0\"},\"speakToAs\":{\"greeting\":\"Dear\",\"pronouns\":\"she/her\"},\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Mathematician\",\"organization\":\"o1\"},\"t2\":{\"kind\":\"title\",\"name\":\"Fellow\",\"organization\":\"o1\"}},\"updated\":\"2026-02-01T00:00:00.000Z\",\"version\":\"1.0\"}"
+        "raw": "{\"@type\":\"Card\",\"addresses\":{\"a1\":{\"country\":\"UK\",\"locality\":\"London\",\"postCode\":\"N1\",\"street\":[\"1 Engine Row\",\"Flat 2\"]},\"a2\":{\"contexts\":{\"work\":true},\"locality\":\"Paris\"},\"a3\":{\"components\":[{\"kind\":\"locality\",\"value\":\"Oslo\"}]}},\"anniversaries\":{\"a1\":{\"date\":\"1815-12-10\",\"kind\":\"birth\"},\"a2\":{\"date\":\"1835-07-08\",\"kind\":\"other\",\"label\":\"Wedding of a friend\"}},\"created\":\"2026-01-01T00:00:00.000Z\",\"emails\":{\"e1\":{\"address\":\"ada@example.com\",\"contexts\":{\"work\":true}},\"e2\":{\"address\":\"ada@home.example\",\"contexts\":{\"private\":true}},\"e3\":{\"address\":\"ada@lists.example\",\"label\":\"Lists\"}},\"media\":{\"avatar\":{\"kind\":\"photo\",\"uri\":\"data:image/png;base64,AAAA\"}},\"name\":{\"full\":\"Ada Lovelace\"},\"nickNames\":{\"n1\":{\"name\":\"Countess\"}},\"notes\":{\"n1\":{\"note\":\"Met at the Royal Society.\"},\"n2\":{\"note\":\"Second note.\"}},\"onlineServices\":{\"os1\":{\"service\":\"x\",\"user\":\"@ada\"}},\"organizations\":{\"o1\":{\"name\":\"Analytical Engines\"},\"o2\":{\"name\":\"Royal Society\"}},\"phones\":{\"p1\":{\"features\":{\"mobile\":true},\"number\":\"+441234567890\"},\"p2\":{\"contexts\":{\"work\":true},\"number\":\"+442000000000\"}},\"ranking\":9,\"sealbook:addressBookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sealbook:archived\":true,\"sealbook:profile\":{\"@type\":\"SealbookProfile\",\"colleagues\":[{\"contactId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"name\":\"Charles\"}],\"food\":[{\"note\":\"ever\",\"polarity\":\"dislike\",\"value\":\"oysters\"}],\"hobbies\":[\"looms\"],\"howWeMet\":\"A dinner\",\"interests\":[\"chess\"],\"version\":\"1.0\"},\"speakToAs\":{\"greeting\":\"Dear\",\"pronouns\":\"she/her\"},\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Mathematician\",\"organization\":\"o1\"},\"t2\":{\"kind\":\"title\",\"name\":\"Fellow\",\"organization\":\"o1\"}},\"updated\":\"2026-02-01T00:00:00.000Z\",\"version\":\"1.0\"}"
       },
-      "payload": "{\"@type\":\"Card\",\"addresses\":{\"a2\":{\"locality\":\"Paris\"}},\"anniversaries\":{\"a1\":{\"date\":\"1815-12-10\",\"kind\":\"birth\"},\"a2\":{\"date\":\"1835-07-08\",\"kind\":\"other\",\"label\":\"Wedding of a friend\"}},\"created\":\"2026-01-01T00:00:00.000Z\",\"emails\":{\"e1\":{\"address\":\"ada@example.com\",\"contexts\":{\"work\":true}},\"e2\":{\"address\":\"ada@home.example\",\"contexts\":{\"private\":true}},\"e3\":{\"address\":\"ada@lists.example\",\"label\":\"Lists\"}},\"media\":{\"avatar\":{\"kind\":\"photo\",\"uri\":\"data:image/png;base64,AAAA\"}},\"name\":{\"full\":\"Ada Lovelace\"},\"nickNames\":{\"n1\":{\"name\":\"Countess\"}},\"notes\":{\"n2\":{\"note\":\"Second note.\"}},\"onlineServices\":{\"os1\":{\"service\":\"x\",\"user\":\"@ada\"}},\"organizations\":{\"o1\":{\"name\":\"Analytical Engines\"},\"o2\":{\"name\":\"Analytical Engines\"},\"o3\":{\"name\":\"Royal Society\"}},\"phones\":{\"p1\":{\"features\":{\"mobile\":true},\"number\":\"+441234567890\"},\"p2\":{\"contexts\":{\"work\":true},\"number\":\"+442000000000\"}},\"ranking\":9,\"sealbook:addressBookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sealbook:archived\":true,\"sealbook:profile\":{\"@type\":\"SealbookProfile\",\"colleagues\":[{\"contactId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"name\":\"Charles\"}],\"food\":[{\"note\":\"ever\",\"polarity\":\"dislike\",\"value\":\"oysters\"}],\"hobbies\":[\"looms\"],\"howWeMet\":\"A dinner\",\"interests\":[\"chess\"],\"version\":\"1.0\"},\"speakToAs\":{\"greeting\":\"Dear\",\"pronouns\":\"she/her\"},\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Mathematician\",\"organization\":\"o1\"},\"t2\":{\"kind\":\"title\",\"name\":\"Fellow\",\"organization\":\"o2\"}},\"updated\":\"2026-10-28T12:00:00.000Z\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Card\",\"addresses\":{\"a1\":{\"contexts\":{\"work\":true},\"locality\":\"Paris\"},\"a3\":{\"components\":[{\"kind\":\"locality\",\"value\":\"Oslo\"}]}},\"anniversaries\":{\"a1\":{\"date\":\"1815-12-10\",\"kind\":\"birth\"},\"a2\":{\"date\":\"1835-07-08\",\"kind\":\"other\",\"label\":\"Wedding of a friend\"}},\"created\":\"2026-01-01T00:00:00.000Z\",\"emails\":{\"e1\":{\"address\":\"ada@example.com\",\"contexts\":{\"work\":true}},\"e2\":{\"address\":\"ada@home.example\",\"contexts\":{\"private\":true}},\"e3\":{\"address\":\"ada@lists.example\",\"label\":\"Lists\"}},\"media\":{\"avatar\":{\"kind\":\"photo\",\"uri\":\"data:image/png;base64,AAAA\"}},\"name\":{\"full\":\"Ada Lovelace\"},\"nickNames\":{\"n1\":{\"name\":\"Countess\"}},\"notes\":{\"n2\":{\"note\":\"Second note.\"}},\"onlineServices\":{\"os1\":{\"service\":\"x\",\"user\":\"@ada\"}},\"organizations\":{\"o1\":{\"name\":\"Analytical Engines\"},\"o2\":{\"name\":\"Analytical Engines\"},\"o3\":{\"name\":\"Royal Society\"}},\"phones\":{\"p1\":{\"features\":{\"mobile\":true},\"number\":\"+441234567890\"},\"p2\":{\"contexts\":{\"work\":true},\"number\":\"+442000000000\"}},\"ranking\":9,\"sealbook:addressBookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sealbook:archived\":true,\"sealbook:profile\":{\"@type\":\"SealbookProfile\",\"colleagues\":[{\"contactId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"name\":\"Charles\"}],\"food\":[{\"note\":\"ever\",\"polarity\":\"dislike\",\"value\":\"oysters\"}],\"hobbies\":[\"looms\"],\"howWeMet\":\"A dinner\",\"interests\":[\"chess\"],\"version\":\"1.0\"},\"speakToAs\":{\"greeting\":\"Dear\",\"pronouns\":\"she/her\"},\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Mathematician\",\"organization\":\"o1\"},\"t2\":{\"kind\":\"title\",\"name\":\"Fellow\",\"organization\":\"o2\"}},\"updated\":\"2026-10-28T12:00:00.000Z\",\"version\":\"1.0\"}"
     },
     {
       "case": "clearing the photo, the nickname and the pronouns",
@@ -742,13 +877,20 @@
             "value": "+442000000000"
           }
         ],
-        "address": {
-          "street1": "1 Engine Row",
-          "street2": "Flat 2",
-          "locality": "London",
-          "postcode": "N1",
-          "country": "UK"
-        },
+        "addresses": [
+          {
+            "kind": "home",
+            "street1": "1 Engine Row",
+            "street2": "Flat 2",
+            "locality": "London",
+            "postcode": "N1",
+            "country": "UK"
+          },
+          {
+            "kind": "work",
+            "locality": "Paris"
+          }
+        ],
         "work": [
           {
             "organization": "Analytical Engines",
@@ -812,9 +954,9 @@
         "address_book_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "archived": true,
         "created_at": "2026-01-01T00:00:00.000Z",
-        "raw": "{\"@type\":\"Card\",\"addresses\":{\"a1\":{\"country\":\"UK\",\"locality\":\"London\",\"postCode\":\"N1\",\"street\":[\"1 Engine Row\",\"Flat 2\"]},\"a2\":{\"locality\":\"Paris\"}},\"anniversaries\":{\"a1\":{\"date\":\"1815-12-10\",\"kind\":\"birth\"},\"a2\":{\"date\":\"1835-07-08\",\"kind\":\"other\",\"label\":\"Wedding of a friend\"}},\"created\":\"2026-01-01T00:00:00.000Z\",\"emails\":{\"e1\":{\"address\":\"ada@example.com\",\"contexts\":{\"work\":true}},\"e2\":{\"address\":\"ada@home.example\",\"contexts\":{\"private\":true}},\"e3\":{\"address\":\"ada@lists.example\",\"label\":\"Lists\"}},\"media\":{\"avatar\":{\"kind\":\"photo\",\"uri\":\"data:image/png;base64,AAAA\"}},\"name\":{\"full\":\"Ada Lovelace\"},\"nickNames\":{\"n1\":{\"name\":\"Countess\"}},\"notes\":{\"n1\":{\"note\":\"Met at the Royal Society.\"},\"n2\":{\"note\":\"Second note.\"}},\"onlineServices\":{\"os1\":{\"service\":\"x\",\"user\":\"@ada\"}},\"organizations\":{\"o1\":{\"name\":\"Analytical Engines\"},\"o2\":{\"name\":\"Royal Society\"}},\"phones\":{\"p1\":{\"features\":{\"mobile\":true},\"number\":\"+441234567890\"},\"p2\":{\"contexts\":{\"work\":true},\"number\":\"+442000000000\"}},\"ranking\":9,\"sealbook:addressBookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sealbook:archived\":true,\"sealbook:profile\":{\"@type\":\"SealbookProfile\",\"colleagues\":[{\"contactId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"name\":\"Charles\"}],\"food\":[{\"note\":\"ever\",\"polarity\":\"dislike\",\"value\":\"oysters\"}],\"hobbies\":[\"looms\"],\"howWeMet\":\"A dinner\",\"interests\":[\"chess\"],\"version\":\"1.0\"},\"speakToAs\":{\"greeting\":\"Dear\",\"pronouns\":\"she/her\"},\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Mathematician\",\"organization\":\"o1\"},\"t2\":{\"kind\":\"title\",\"name\":\"Fellow\",\"organization\":\"o1\"}},\"updated\":\"2026-02-01T00:00:00.000Z\",\"version\":\"1.0\"}"
+        "raw": "{\"@type\":\"Card\",\"addresses\":{\"a1\":{\"country\":\"UK\",\"locality\":\"London\",\"postCode\":\"N1\",\"street\":[\"1 Engine Row\",\"Flat 2\"]},\"a2\":{\"contexts\":{\"work\":true},\"locality\":\"Paris\"},\"a3\":{\"components\":[{\"kind\":\"locality\",\"value\":\"Oslo\"}]}},\"anniversaries\":{\"a1\":{\"date\":\"1815-12-10\",\"kind\":\"birth\"},\"a2\":{\"date\":\"1835-07-08\",\"kind\":\"other\",\"label\":\"Wedding of a friend\"}},\"created\":\"2026-01-01T00:00:00.000Z\",\"emails\":{\"e1\":{\"address\":\"ada@example.com\",\"contexts\":{\"work\":true}},\"e2\":{\"address\":\"ada@home.example\",\"contexts\":{\"private\":true}},\"e3\":{\"address\":\"ada@lists.example\",\"label\":\"Lists\"}},\"media\":{\"avatar\":{\"kind\":\"photo\",\"uri\":\"data:image/png;base64,AAAA\"}},\"name\":{\"full\":\"Ada Lovelace\"},\"nickNames\":{\"n1\":{\"name\":\"Countess\"}},\"notes\":{\"n1\":{\"note\":\"Met at the Royal Society.\"},\"n2\":{\"note\":\"Second note.\"}},\"onlineServices\":{\"os1\":{\"service\":\"x\",\"user\":\"@ada\"}},\"organizations\":{\"o1\":{\"name\":\"Analytical Engines\"},\"o2\":{\"name\":\"Royal Society\"}},\"phones\":{\"p1\":{\"features\":{\"mobile\":true},\"number\":\"+441234567890\"},\"p2\":{\"contexts\":{\"work\":true},\"number\":\"+442000000000\"}},\"ranking\":9,\"sealbook:addressBookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sealbook:archived\":true,\"sealbook:profile\":{\"@type\":\"SealbookProfile\",\"colleagues\":[{\"contactId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"name\":\"Charles\"}],\"food\":[{\"note\":\"ever\",\"polarity\":\"dislike\",\"value\":\"oysters\"}],\"hobbies\":[\"looms\"],\"howWeMet\":\"A dinner\",\"interests\":[\"chess\"],\"version\":\"1.0\"},\"speakToAs\":{\"greeting\":\"Dear\",\"pronouns\":\"she/her\"},\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Mathematician\",\"organization\":\"o1\"},\"t2\":{\"kind\":\"title\",\"name\":\"Fellow\",\"organization\":\"o1\"}},\"updated\":\"2026-02-01T00:00:00.000Z\",\"version\":\"1.0\"}"
       },
-      "payload": "{\"@type\":\"Card\",\"addresses\":{\"a1\":{\"country\":\"UK\",\"locality\":\"London\",\"postCode\":\"N1\",\"street\":[\"1 Engine Row\",\"Flat 2\"]},\"a2\":{\"locality\":\"Paris\"}},\"anniversaries\":{\"a1\":{\"date\":\"1815-12-10\",\"kind\":\"birth\"},\"a2\":{\"date\":\"1835-07-08\",\"kind\":\"other\",\"label\":\"Wedding of a friend\"}},\"created\":\"2026-01-01T00:00:00.000Z\",\"emails\":{\"e1\":{\"address\":\"ada@example.com\",\"contexts\":{\"work\":true}},\"e2\":{\"address\":\"ada@home.example\",\"contexts\":{\"private\":true}},\"e3\":{\"address\":\"ada@lists.example\",\"label\":\"Lists\"}},\"name\":{\"full\":\"Ada Lovelace\"},\"notes\":{\"n1\":{\"note\":\"Met at the Royal Society.\"},\"n2\":{\"note\":\"Second note.\"}},\"onlineServices\":{\"os1\":{\"service\":\"x\",\"user\":\"@ada\"}},\"organizations\":{\"o1\":{\"name\":\"Analytical Engines\"},\"o2\":{\"name\":\"Analytical Engines\"},\"o3\":{\"name\":\"Royal Society\"}},\"phones\":{\"p1\":{\"features\":{\"mobile\":true},\"number\":\"+441234567890\"},\"p2\":{\"contexts\":{\"work\":true},\"number\":\"+442000000000\"}},\"ranking\":9,\"sealbook:addressBookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sealbook:archived\":true,\"sealbook:profile\":{\"@type\":\"SealbookProfile\",\"colleagues\":[{\"contactId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"name\":\"Charles\"}],\"food\":[{\"note\":\"ever\",\"polarity\":\"dislike\",\"value\":\"oysters\"}],\"hobbies\":[\"looms\"],\"howWeMet\":\"A dinner\",\"interests\":[\"chess\"],\"version\":\"1.0\"},\"speakToAs\":{\"greeting\":\"Dear\"},\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Mathematician\",\"organization\":\"o1\"},\"t2\":{\"kind\":\"title\",\"name\":\"Fellow\",\"organization\":\"o2\"}},\"updated\":\"2026-10-28T12:00:00.000Z\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Card\",\"addresses\":{\"a1\":{\"contexts\":{\"private\":true},\"country\":\"UK\",\"locality\":\"London\",\"postCode\":\"N1\",\"street\":[\"1 Engine Row\",\"Flat 2\"]},\"a2\":{\"contexts\":{\"work\":true},\"locality\":\"Paris\"},\"a3\":{\"components\":[{\"kind\":\"locality\",\"value\":\"Oslo\"}]}},\"anniversaries\":{\"a1\":{\"date\":\"1815-12-10\",\"kind\":\"birth\"},\"a2\":{\"date\":\"1835-07-08\",\"kind\":\"other\",\"label\":\"Wedding of a friend\"}},\"created\":\"2026-01-01T00:00:00.000Z\",\"emails\":{\"e1\":{\"address\":\"ada@example.com\",\"contexts\":{\"work\":true}},\"e2\":{\"address\":\"ada@home.example\",\"contexts\":{\"private\":true}},\"e3\":{\"address\":\"ada@lists.example\",\"label\":\"Lists\"}},\"name\":{\"full\":\"Ada Lovelace\"},\"notes\":{\"n1\":{\"note\":\"Met at the Royal Society.\"},\"n2\":{\"note\":\"Second note.\"}},\"onlineServices\":{\"os1\":{\"service\":\"x\",\"user\":\"@ada\"}},\"organizations\":{\"o1\":{\"name\":\"Analytical Engines\"},\"o2\":{\"name\":\"Analytical Engines\"},\"o3\":{\"name\":\"Royal Society\"}},\"phones\":{\"p1\":{\"features\":{\"mobile\":true},\"number\":\"+441234567890\"},\"p2\":{\"contexts\":{\"work\":true},\"number\":\"+442000000000\"}},\"ranking\":9,\"sealbook:addressBookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sealbook:archived\":true,\"sealbook:profile\":{\"@type\":\"SealbookProfile\",\"colleagues\":[{\"contactId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"name\":\"Charles\"}],\"food\":[{\"note\":\"ever\",\"polarity\":\"dislike\",\"value\":\"oysters\"}],\"hobbies\":[\"looms\"],\"howWeMet\":\"A dinner\",\"interests\":[\"chess\"],\"version\":\"1.0\"},\"speakToAs\":{\"greeting\":\"Dear\"},\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Mathematician\",\"organization\":\"o1\"},\"t2\":{\"kind\":\"title\",\"name\":\"Fellow\",\"organization\":\"o2\"}},\"updated\":\"2026-10-28T12:00:00.000Z\",\"version\":\"1.0\"}"
     },
     {
       "case": "an edit to a card with eleven emails keeps them in order",
@@ -867,6 +1009,7 @@
           }
         ],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -888,6 +1031,7 @@
           }
         ],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -905,6 +1049,7 @@
         "nickname": "Old",
         "emails": [],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -920,7 +1065,7 @@
     {
       "case": "a card that has been through every feature",
       "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
-      "raw": "{\"@type\":\"Card\",\"addresses\":{\"a1\":{\"country\":\"UK\",\"locality\":\"London\",\"postCode\":\"N1\",\"street\":[\"1 Engine Row\",\"Flat 2\"]},\"a2\":{\"locality\":\"Paris\"}},\"anniversaries\":{\"a1\":{\"date\":\"1815-12-10\",\"kind\":\"birth\"},\"a2\":{\"date\":\"1835-07-08\",\"kind\":\"other\",\"label\":\"Wedding of a friend\"}},\"created\":\"2026-01-01T00:00:00.000Z\",\"emails\":{\"e1\":{\"address\":\"ada@example.com\",\"contexts\":{\"work\":true}},\"e2\":{\"address\":\"ada@home.example\",\"contexts\":{\"private\":true}},\"e3\":{\"address\":\"ada@lists.example\",\"label\":\"Lists\"}},\"media\":{\"avatar\":{\"kind\":\"photo\",\"uri\":\"data:image/png;base64,AAAA\"}},\"name\":{\"full\":\"Ada Lovelace\"},\"nickNames\":{\"n1\":{\"name\":\"Countess\"}},\"notes\":{\"n1\":{\"note\":\"Met at the Royal Society.\"},\"n2\":{\"note\":\"Second note.\"}},\"onlineServices\":{\"os1\":{\"service\":\"x\",\"user\":\"@ada\"}},\"organizations\":{\"o1\":{\"name\":\"Analytical Engines\"},\"o2\":{\"name\":\"Royal Society\"}},\"phones\":{\"p1\":{\"features\":{\"mobile\":true},\"number\":\"+441234567890\"},\"p2\":{\"contexts\":{\"work\":true},\"number\":\"+442000000000\"}},\"ranking\":9,\"sealbook:addressBookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sealbook:archived\":true,\"sealbook:profile\":{\"@type\":\"SealbookProfile\",\"colleagues\":[{\"contactId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"name\":\"Charles\"}],\"food\":[{\"note\":\"ever\",\"polarity\":\"dislike\",\"value\":\"oysters\"}],\"hobbies\":[\"looms\"],\"howWeMet\":\"A dinner\",\"interests\":[\"chess\"],\"version\":\"1.0\"},\"speakToAs\":{\"greeting\":\"Dear\",\"pronouns\":\"she/her\"},\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Mathematician\",\"organization\":\"o1\"},\"t2\":{\"kind\":\"title\",\"name\":\"Fellow\",\"organization\":\"o1\"}},\"updated\":\"2026-02-01T00:00:00.000Z\",\"version\":\"1.0\"}",
+      "raw": "{\"@type\":\"Card\",\"addresses\":{\"a1\":{\"country\":\"UK\",\"locality\":\"London\",\"postCode\":\"N1\",\"street\":[\"1 Engine Row\",\"Flat 2\"]},\"a2\":{\"contexts\":{\"work\":true},\"locality\":\"Paris\"},\"a3\":{\"components\":[{\"kind\":\"locality\",\"value\":\"Oslo\"}]}},\"anniversaries\":{\"a1\":{\"date\":\"1815-12-10\",\"kind\":\"birth\"},\"a2\":{\"date\":\"1835-07-08\",\"kind\":\"other\",\"label\":\"Wedding of a friend\"}},\"created\":\"2026-01-01T00:00:00.000Z\",\"emails\":{\"e1\":{\"address\":\"ada@example.com\",\"contexts\":{\"work\":true}},\"e2\":{\"address\":\"ada@home.example\",\"contexts\":{\"private\":true}},\"e3\":{\"address\":\"ada@lists.example\",\"label\":\"Lists\"}},\"media\":{\"avatar\":{\"kind\":\"photo\",\"uri\":\"data:image/png;base64,AAAA\"}},\"name\":{\"full\":\"Ada Lovelace\"},\"nickNames\":{\"n1\":{\"name\":\"Countess\"}},\"notes\":{\"n1\":{\"note\":\"Met at the Royal Society.\"},\"n2\":{\"note\":\"Second note.\"}},\"onlineServices\":{\"os1\":{\"service\":\"x\",\"user\":\"@ada\"}},\"organizations\":{\"o1\":{\"name\":\"Analytical Engines\"},\"o2\":{\"name\":\"Royal Society\"}},\"phones\":{\"p1\":{\"features\":{\"mobile\":true},\"number\":\"+441234567890\"},\"p2\":{\"contexts\":{\"work\":true},\"number\":\"+442000000000\"}},\"ranking\":9,\"sealbook:addressBookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sealbook:archived\":true,\"sealbook:profile\":{\"@type\":\"SealbookProfile\",\"colleagues\":[{\"contactId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"name\":\"Charles\"}],\"food\":[{\"note\":\"ever\",\"polarity\":\"dislike\",\"value\":\"oysters\"}],\"hobbies\":[\"looms\"],\"howWeMet\":\"A dinner\",\"interests\":[\"chess\"],\"version\":\"1.0\"},\"speakToAs\":{\"greeting\":\"Dear\",\"pronouns\":\"she/her\"},\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Mathematician\",\"organization\":\"o1\"},\"t2\":{\"kind\":\"title\",\"name\":\"Fellow\",\"organization\":\"o1\"}},\"updated\":\"2026-02-01T00:00:00.000Z\",\"version\":\"1.0\"}",
       "contact": {
         "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
         "name": "Ada Lovelace",
@@ -952,13 +1097,20 @@
             "value": "+442000000000"
           }
         ],
-        "address": {
-          "street1": "1 Engine Row",
-          "street2": "Flat 2",
-          "locality": "London",
-          "postcode": "N1",
-          "country": "UK"
-        },
+        "addresses": [
+          {
+            "kind": "home",
+            "street1": "1 Engine Row",
+            "street2": "Flat 2",
+            "locality": "London",
+            "postcode": "N1",
+            "country": "UK"
+          },
+          {
+            "kind": "work",
+            "locality": "Paris"
+          }
+        ],
         "work": [
           {
             "organization": "Analytical Engines",
@@ -1025,7 +1177,7 @@
         "created_at": "2026-01-01T00:00:00.000Z",
         "updated_at": "2026-02-01T00:00:00.000Z",
         "readable": true,
-        "raw": "{\"@type\":\"Card\",\"addresses\":{\"a1\":{\"country\":\"UK\",\"locality\":\"London\",\"postCode\":\"N1\",\"street\":[\"1 Engine Row\",\"Flat 2\"]},\"a2\":{\"locality\":\"Paris\"}},\"anniversaries\":{\"a1\":{\"date\":\"1815-12-10\",\"kind\":\"birth\"},\"a2\":{\"date\":\"1835-07-08\",\"kind\":\"other\",\"label\":\"Wedding of a friend\"}},\"created\":\"2026-01-01T00:00:00.000Z\",\"emails\":{\"e1\":{\"address\":\"ada@example.com\",\"contexts\":{\"work\":true}},\"e2\":{\"address\":\"ada@home.example\",\"contexts\":{\"private\":true}},\"e3\":{\"address\":\"ada@lists.example\",\"label\":\"Lists\"}},\"media\":{\"avatar\":{\"kind\":\"photo\",\"uri\":\"data:image/png;base64,AAAA\"}},\"name\":{\"full\":\"Ada Lovelace\"},\"nickNames\":{\"n1\":{\"name\":\"Countess\"}},\"notes\":{\"n1\":{\"note\":\"Met at the Royal Society.\"},\"n2\":{\"note\":\"Second note.\"}},\"onlineServices\":{\"os1\":{\"service\":\"x\",\"user\":\"@ada\"}},\"organizations\":{\"o1\":{\"name\":\"Analytical Engines\"},\"o2\":{\"name\":\"Royal Society\"}},\"phones\":{\"p1\":{\"features\":{\"mobile\":true},\"number\":\"+441234567890\"},\"p2\":{\"contexts\":{\"work\":true},\"number\":\"+442000000000\"}},\"ranking\":9,\"sealbook:addressBookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sealbook:archived\":true,\"sealbook:profile\":{\"@type\":\"SealbookProfile\",\"colleagues\":[{\"contactId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"name\":\"Charles\"}],\"food\":[{\"note\":\"ever\",\"polarity\":\"dislike\",\"value\":\"oysters\"}],\"hobbies\":[\"looms\"],\"howWeMet\":\"A dinner\",\"interests\":[\"chess\"],\"version\":\"1.0\"},\"speakToAs\":{\"greeting\":\"Dear\",\"pronouns\":\"she/her\"},\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Mathematician\",\"organization\":\"o1\"},\"t2\":{\"kind\":\"title\",\"name\":\"Fellow\",\"organization\":\"o1\"}},\"updated\":\"2026-02-01T00:00:00.000Z\",\"version\":\"1.0\"}"
+        "raw": "{\"@type\":\"Card\",\"addresses\":{\"a1\":{\"country\":\"UK\",\"locality\":\"London\",\"postCode\":\"N1\",\"street\":[\"1 Engine Row\",\"Flat 2\"]},\"a2\":{\"contexts\":{\"work\":true},\"locality\":\"Paris\"},\"a3\":{\"components\":[{\"kind\":\"locality\",\"value\":\"Oslo\"}]}},\"anniversaries\":{\"a1\":{\"date\":\"1815-12-10\",\"kind\":\"birth\"},\"a2\":{\"date\":\"1835-07-08\",\"kind\":\"other\",\"label\":\"Wedding of a friend\"}},\"created\":\"2026-01-01T00:00:00.000Z\",\"emails\":{\"e1\":{\"address\":\"ada@example.com\",\"contexts\":{\"work\":true}},\"e2\":{\"address\":\"ada@home.example\",\"contexts\":{\"private\":true}},\"e3\":{\"address\":\"ada@lists.example\",\"label\":\"Lists\"}},\"media\":{\"avatar\":{\"kind\":\"photo\",\"uri\":\"data:image/png;base64,AAAA\"}},\"name\":{\"full\":\"Ada Lovelace\"},\"nickNames\":{\"n1\":{\"name\":\"Countess\"}},\"notes\":{\"n1\":{\"note\":\"Met at the Royal Society.\"},\"n2\":{\"note\":\"Second note.\"}},\"onlineServices\":{\"os1\":{\"service\":\"x\",\"user\":\"@ada\"}},\"organizations\":{\"o1\":{\"name\":\"Analytical Engines\"},\"o2\":{\"name\":\"Royal Society\"}},\"phones\":{\"p1\":{\"features\":{\"mobile\":true},\"number\":\"+441234567890\"},\"p2\":{\"contexts\":{\"work\":true},\"number\":\"+442000000000\"}},\"ranking\":9,\"sealbook:addressBookId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sealbook:archived\":true,\"sealbook:profile\":{\"@type\":\"SealbookProfile\",\"colleagues\":[{\"contactId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"name\":\"Charles\"}],\"food\":[{\"note\":\"ever\",\"polarity\":\"dislike\",\"value\":\"oysters\"}],\"hobbies\":[\"looms\"],\"howWeMet\":\"A dinner\",\"interests\":[\"chess\"],\"version\":\"1.0\"},\"speakToAs\":{\"greeting\":\"Dear\",\"pronouns\":\"she/her\"},\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Mathematician\",\"organization\":\"o1\"},\"t2\":{\"kind\":\"title\",\"name\":\"Fellow\",\"organization\":\"o1\"}},\"updated\":\"2026-02-01T00:00:00.000Z\",\"version\":\"1.0\"}"
       }
     },
     {
@@ -1038,6 +1190,7 @@
         "display_name": "Unnamed contact",
         "emails": [],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -1058,6 +1211,7 @@
         "display_name": "Unnamed contact",
         "emails": [],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -1078,6 +1232,7 @@
         "display_name": "Unnamed contact",
         "emails": [],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -1143,6 +1298,7 @@
           }
         ],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -1168,6 +1324,7 @@
           }
         ],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -1194,6 +1351,7 @@
           }
         ],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -1219,6 +1377,7 @@
           }
         ],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -1244,6 +1403,7 @@
             "value": "+44 1"
           }
         ],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -1265,6 +1425,7 @@
         "nickname": "Nick",
         "emails": [],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -1285,6 +1446,7 @@
         "display_name": "Unnamed contact",
         "emails": [],
         "phones": [],
+        "addresses": [],
         "work": [
           {
             "organization": "Work"
@@ -1309,6 +1471,7 @@
         "display_name": "Ada Lovelace",
         "emails": [],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -1329,6 +1492,7 @@
         "display_name": "Ada",
         "emails": [],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -1363,6 +1527,7 @@
             "value": "2"
           }
         ],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -1392,6 +1557,7 @@
           }
         ],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -1412,6 +1578,7 @@
         "display_name": "Unnamed contact",
         "emails": [],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [
           {
@@ -1445,6 +1612,7 @@
         "display_name": "Unnamed contact",
         "emails": [],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -1466,10 +1634,13 @@
         "display_name": "Unnamed contact",
         "emails": [],
         "phones": [],
-        "address": {
-          "street1": "1 Row",
-          "postcode": "N1"
-        },
+        "addresses": [
+          {
+            "kind": "home",
+            "street1": "1 Row",
+            "postcode": "N1"
+          }
+        ],
         "work": [],
         "dates": [],
         "socials": [],
@@ -1491,6 +1662,7 @@
         "display_name": "Unnamed contact",
         "emails": [],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -1523,6 +1695,7 @@
         "display_name": "Unnamed contact",
         "emails": [],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -1543,6 +1716,7 @@
         "display_name": "Unnamed contact",
         "emails": [],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -1577,6 +1751,7 @@
         "display_name": "Unnamed contact",
         "emails": [],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -1624,6 +1799,7 @@
         "display_name": "future",
         "emails": [],
         "phones": [],
+        "addresses": [],
         "work": [],
         "dates": [],
         "socials": [],
@@ -1633,13 +1809,131 @@
         "readable": false,
         "raw": "{\"@type\":\"Card\",\"version\":\"2.0\",\"name\":{\"full\":\"future\"}}"
       }
+    },
+    {
+      "case": "career rows from a build before workplace dates, folded into work; the one matching a stored job dates it",
+      "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "raw": "{\"@type\":\"Card\",\"version\":\"1.0\",\"name\":{\"full\":\"Grace\"},\"organizations\":{\"o1\":{\"name\":\"Navy\"}},\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Programmer\",\"organization\":\"o1\"}},\"sealbook:profile\":{\"@type\":\"SealbookProfile\",\"version\":\"1.0\",\"career\":[{\"organization\":\"navy \",\"title\":\"programmer\",\"start\":\"1943\"},{\"organization\":\"Harvard\",\"title\":\"Research fellow\",\"start\":\"1944\",\"end\":\"1946-08\",\"note\":\"Mark I\"}],\"pets\":[{\"name\":\"Rex\"}]}}",
+      "contact": {
+        "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        "name": "Grace",
+        "display_name": "Grace",
+        "emails": [],
+        "phones": [],
+        "addresses": [],
+        "work": [
+          {
+            "organization": "Navy",
+            "title": "Programmer",
+            "start": "1943",
+            "current": true
+          },
+          {
+            "organization": "Harvard",
+            "title": "Research fellow",
+            "start": "1944",
+            "end": "1946-08",
+            "note": "Mark I"
+          }
+        ],
+        "dates": [],
+        "socials": [],
+        "profile": {
+          "interests": [],
+          "music": [],
+          "food": [],
+          "pets": [
+            {
+              "name": "Rex"
+            }
+          ],
+          "career": [],
+          "relationships": [],
+          "timeline": [],
+          "family": [],
+          "friends": [],
+          "colleagues": [],
+          "custom": [],
+          "extra": "{}"
+        },
+        "attachments": [],
+        "address_book_id": "00000000-0000-0000-0000-000000000001",
+        "archived": false,
+        "readable": true,
+        "raw": "{\"@type\":\"Card\",\"version\":\"1.0\",\"name\":{\"full\":\"Grace\"},\"organizations\":{\"o1\":{\"name\":\"Navy\"}},\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Programmer\",\"organization\":\"o1\"}},\"sealbook:profile\":{\"@type\":\"SealbookProfile\",\"version\":\"1.0\",\"career\":[{\"organization\":\"navy \",\"title\":\"programmer\",\"start\":\"1943\"},{\"organization\":\"Harvard\",\"title\":\"Research fellow\",\"start\":\"1944\",\"end\":\"1946-08\",\"note\":\"Mark I\"}],\"pets\":[{\"name\":\"Rex\"}]}}"
+      }
+    },
+    {
+      "case": "a current workplace whose stored end is ignored, and a key from a later build kept",
+      "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "raw": "{\"name\":{\"full\":\"Grace\"},\"organizations\":{\"o1\":{\"name\":\"UNIVAC\",\"sealbook:start\":\"1949\",\"sealbook:end\":\"1950\",\"sealbook:current\":true,\"sealbook:note\":\"COBOL\",\"rank\":2}}}",
+      "contact": {
+        "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        "name": "Grace",
+        "display_name": "Grace",
+        "emails": [],
+        "phones": [],
+        "addresses": [],
+        "work": [
+          {
+            "organization": "UNIVAC",
+            "start": "1949",
+            "current": true,
+            "note": "COBOL",
+            "extra": "{\"rank\":2}"
+          }
+        ],
+        "dates": [],
+        "socials": [],
+        "attachments": [],
+        "address_book_id": "00000000-0000-0000-0000-000000000001",
+        "archived": false,
+        "readable": true,
+        "raw": "{\"name\":{\"full\":\"Grace\"},\"organizations\":{\"o1\":{\"name\":\"UNIVAC\",\"sealbook:start\":\"1949\",\"sealbook:end\":\"1950\",\"sealbook:current\":true,\"sealbook:note\":\"COBOL\",\"rank\":2}}}"
+      }
+    },
+    {
+      "case": "addresses with dates, a current one whose stored end is ignored",
+      "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "raw": "{\"name\":{\"full\":\"Grace\"},\"addresses\":{\"a1\":{\"locality\":\"Arlington\",\"sealbook:start\":\"1967\",\"sealbook:end\":\"1970\",\"sealbook:current\":true},\"a2\":{\"locality\":\"New York\",\"sealbook:start\":\" 1906 \",\"sealbook:end\":\"1924-05\",\"rank\":1}}}",
+      "contact": {
+        "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        "name": "Grace",
+        "display_name": "Grace",
+        "emails": [],
+        "phones": [],
+        "addresses": [
+          {
+            "kind": "home",
+            "locality": "Arlington",
+            "start": "1967",
+            "current": true
+          },
+          {
+            "kind": "home",
+            "locality": "New York",
+            "start": "1906",
+            "end": "1924-05",
+            "extra": "{\"rank\":1}"
+          }
+        ],
+        "work": [],
+        "dates": [],
+        "socials": [],
+        "attachments": [],
+        "address_book_id": "00000000-0000-0000-0000-000000000001",
+        "archived": false,
+        "readable": true,
+        "raw": "{\"name\":{\"full\":\"Grace\"},\"addresses\":{\"a1\":{\"locality\":\"Arlington\",\"sealbook:start\":\"1967\",\"sealbook:end\":\"1970\",\"sealbook:current\":true},\"a2\":{\"locality\":\"New York\",\"sealbook:start\":\" 1906 \",\"sealbook:end\":\"1924-05\",\"rank\":1}}}"
+      }
     }
   ],
   "address_book_writes": [
     {
       "case": "an address book created from scratch",
       "draft": {
-        "name": "  Family  "
+        "name": "  Family  ",
+        "archived": false
       },
       "payload": "{\"@type\":\"AddressBook\",\"name\":\"Family\",\"version\":\"1.0\"}"
     },
@@ -1647,9 +1941,19 @@
       "case": "a rename that keeps a key from a later build",
       "draft": {
         "name": "Relatives",
+        "archived": false,
         "raw": "{\"@type\":\"AddressBook\",\"name\":\"Family\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
       },
       "payload": "{\"@type\":\"AddressBook\",\"name\":\"Relatives\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
+    },
+    {
+      "case": "an archive that keeps a key from a later build",
+      "draft": {
+        "name": "Relatives",
+        "archived": true,
+        "raw": "{\"@type\":\"AddressBook\",\"name\":\"Family\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
+      },
+      "payload": "{\"@type\":\"AddressBook\",\"archived\":true,\"name\":\"Relatives\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
     }
   ],
   "address_book_parses": [
@@ -1660,6 +1964,7 @@
       "address_book": {
         "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "name": "Family",
+        "archived": false,
         "readable": true,
         "raw": "{\"@type\":\"AddressBook\",\"name\":\"Family\"}"
       }
@@ -1671,6 +1976,7 @@
       "address_book": {
         "id": "00000000-0000-0000-0000-000000000001",
         "name": "Default Address Book",
+        "archived": false,
         "readable": true,
         "raw": "{}"
       }
@@ -1682,6 +1988,7 @@
       "address_book": {
         "id": "00000000-0000-0000-0000-000000000001",
         "name": "Mine",
+        "archived": false,
         "readable": true,
         "raw": "{\"name\":\"Mine\"}"
       }
@@ -1693,8 +2000,21 @@
       "address_book": {
         "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "name": "Untitled Address Book",
+        "archived": false,
         "readable": true,
         "raw": "{\"name\":\"  \"}"
+      }
+    },
+    {
+      "case": "an archived book",
+      "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "raw": "{\"@type\":\"AddressBook\",\"name\":\"Family\",\"archived\":true}",
+      "address_book": {
+        "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "name": "Family",
+        "archived": true,
+        "readable": true,
+        "raw": "{\"@type\":\"AddressBook\",\"name\":\"Family\",\"archived\":true}"
       }
     },
     {
@@ -1704,6 +2024,7 @@
       "address_book": {
         "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "name": "Untitled Address Book",
+        "archived": false,
         "readable": true,
         "raw": "garbage"
       }
@@ -1715,6 +2036,7 @@
       "address_book": {
         "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "name": "future",
+        "archived": false,
         "readable": false,
         "raw": "{\"@type\":\"AddressBook\",\"version\":\"2.0\",\"name\":\"future\"}"
       }

@@ -74,12 +74,14 @@ fn cases() -> Vec<Case> {
     fifth_monday.nth_weekday = Some(CoreNthWeekday {
         ordinal: 5,
         weekday: 1,
+        extra: None,
     });
     let mut second_tuesday = rule(Monthly);
     second_tuesday.interval = Some(2);
     second_tuesday.nth_weekday = Some(CoreNthWeekday {
         ordinal: 2,
         weekday: 2,
+        extra: None,
     });
     let mut counted_weekly = rule(Weekly);
     counted_weekly.weekdays = vec![1, 3, 5];

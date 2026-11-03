@@ -7,7 +7,15 @@ rust-version.workspace = true
 
 [dependencies]
 base64.workspace = true
+schemars = { version = "1", features = ["uuid1"], optional = true }
 sealbook-crypto = { path = "../sealbook-crypto" }
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+jsonschema = { version = "0.60", default-features = false }
+sealbook-protocol = { path = ".", features = ["schema"] }
+
+[features]
+schema = ["dep:schemars"]

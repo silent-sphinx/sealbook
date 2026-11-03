@@ -1,0 +1,716 @@
+{
+  "now": "2026-11-02T09:00:00.000Z",
+  "refusals": {
+    "task_move": "A task cannot be moved inside itself.",
+    "list_move": "A list cannot be moved inside itself.",
+    "default_list_remove": "The default list cannot be deleted.",
+    "import": "Unrecognised format. Expected a Sealbook task export or a JSON array of tasks."
+  },
+  "completions": [
+    {
+      "case": "a one-off task is marked done",
+      "tasks": [
+        {
+          "id": "a",
+          "raw": "{\"dueDate\":\"2026-11-02\",\"title\":\"Post letter\"}"
+        }
+      ],
+      "id": "a",
+      "clock": {
+        "now": "2026-11-02T09:00:00.000Z",
+        "today": "2026-11-02"
+      },
+      "rolled": false,
+      "local_due": null,
+      "writes": [
+        {
+          "id": "a",
+          "payload": "{\"@type\":\"Task\",\"completedAt\":\"2026-11-02T09:00:00.000Z\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"done\":true,\"dueDate\":\"2026-11-02\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Post letter\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+        }
+      ]
+    },
+    {
+      "case": "a recurring task rolls a week and reopens its done subtasks, nested ones too",
+      "tasks": [
+        {
+          "id": "p",
+          "raw": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-01T00:00:00Z\",\"dueDate\":\"2026-11-02\",\"recurrence\":{\"frequency\":\"weekly\"},\"title\":\"Water plants\",\"version\":\"1.0\"}"
+        },
+        {
+          "id": "c",
+          "raw": "{\"completedAt\":\"2026-11-01T10:00:00Z\",\"done\":true,\"parentId\":\"p\",\"title\":\"Feed\"}"
+        },
+        {
+          "id": "g",
+          "raw": "{\"done\":true,\"parentId\":\"c\",\"title\":\"Mist\"}"
+        },
+        {
+          "id": "o",
+          "raw": "{\"parentId\":\"p\",\"title\":\"Repot\"}"
+        }
+      ],
+      "id": "p",
+      "clock": {
+        "now": "2026-11-02T09:00:00.000Z",
+        "today": "2026-11-02"
+      },
+      "rolled": true,
+      "local_due": null,
+      "writes": [
+        {
+          "id": "p",
+          "payload": "{\"@type\":\"Task\",\"completions\":[\"2026-11-02T09:00:00.000Z\"],\"createdAt\":\"2026-10-01T00:00:00Z\",\"dueDate\":\"2026-11-09\",\"recurrence\":{\"frequency\":\"weekly\"},\"recurrenceAnchor\":\"2026-11-02\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Water plants\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+        },
+        {
+          "id": "c",
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"p\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Feed\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+        },
+        {
+          "id": "g",
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"c\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Mist\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+        }
+      ]
+    },
+    {
+      "case": "an overdue recurring task rolls past today",
+      "tasks": [
+        {
+          "id": "p",
+          "raw": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-01T00:00:00Z\",\"dueDate\":\"2026-10-05\",\"recurrence\":{\"frequency\":\"weekly\"},\"title\":\"Water plants\",\"version\":\"1.0\"}"
+        }
+      ],
+      "id": "p",
+      "clock": {
+        "now": "2026-11-02T09:00:00.000Z",
+        "today": "2026-11-02"
+      },
+      "rolled": true,
+      "local_due": null,
+      "writes": [
+        {
+          "id": "p",
+          "payload": "{\"@type\":\"Task\",\"completions\":[\"2026-11-02T09:00:00.000Z\"],\"createdAt\":\"2026-10-01T00:00:00Z\",\"dueDate\":\"2026-11-09\",\"recurrence\":{\"frequency\":\"weekly\"},\"recurrenceAnchor\":\"2026-10-05\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Water plants\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+        }
+      ]
+    },
+    {
+      "case": "a timed recurring task keeps its local time for the host to store",
+      "tasks": [
+        {
+          "id": "p",
+          "raw": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-01T00:00:00Z\",\"dueDate\":\"2026-11-02T17:30:00Z\",\"recurrence\":{\"frequency\":\"weekly\"},\"title\":\"Water plants\",\"version\":\"1.0\"}"
+        }
+      ],
+      "id": "p",
+      "clock": {
+        "now": "2026-11-02T09:00:00.000Z",
+        "today": "2026-11-02",
+        "due_local": "2026-11-02T18:30"
+      },
+      "rolled": true,
+      "local_due": "2026-11-09T18:30",
+      "writes": [
+        {
+          "id": "p",
+          "payload": "{\"@type\":\"Task\",\"completions\":[\"2026-11-02T09:00:00.000Z\"],\"createdAt\":\"2026-10-01T00:00:00Z\",\"recurrence\":{\"frequency\":\"weekly\"},\"recurrenceAnchor\":\"2026-11-02T17:30:00Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Water plants\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+        }
+      ]
+    },
+    {
+      "case": "a spent series is marked done",
+      "tasks": [
+        {
+          "id": "p",
+          "raw": "{\"dueDate\":\"2026-11-02\",\"recurrence\":{\"count\":1,\"frequency\":\"daily\"},\"title\":\"Course\"}"
+        }
+      ],
+      "id": "p",
+      "clock": {
+        "now": "2026-11-02T09:00:00.000Z",
+        "today": "2026-11-02"
+      },
+      "rolled": false,
+      "local_due": null,
+      "writes": [
+        {
+          "id": "p",
+          "payload": "{\"@type\":\"Task\",\"completedAt\":\"2026-11-02T09:00:00.000Z\",\"completions\":[\"2026-11-02T09:00:00.000Z\"],\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"done\":true,\"dueDate\":\"2026-11-02\",\"recurrence\":{\"count\":1,\"frequency\":\"daily\"},\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Course\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+        }
+      ]
+    },
+    {
+      "case": "an untitled task stays untitled",
+      "tasks": [
+        {
+          "id": "u",
+          "raw": "{\"dueDate\":\"2026-11-02\"}"
+        }
+      ],
+      "id": "u",
+      "clock": {
+        "now": "2026-11-02T09:00:00.000Z",
+        "today": "2026-11-02"
+      },
+      "rolled": false,
+      "local_due": null,
+      "writes": [
+        {
+          "id": "u",
+          "payload": "{\"@type\":\"Task\",\"completedAt\":\"2026-11-02T09:00:00.000Z\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"done\":true,\"dueDate\":\"2026-11-02\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+        }
+      ]
+    }
+  ],
+  "plans": [
+    {
+      "case": "deleting a task moves its subtasks up a level",
+      "action": "remove",
+      "tasks": [
+        {
+          "id": "root",
+          "raw": "{\"title\":\"Root\"}"
+        },
+        {
+          "id": "p",
+          "raw": "{\"parentId\":\"root\",\"title\":\"Parent\"}"
+        },
+        {
+          "id": "c",
+          "raw": "{\"parentId\":\"p\"}"
+        },
+        {
+          "id": "home",
+          "raw": "{\"taskListId\":\"work\",\"title\":\"Home\"}"
+        }
+      ],
+      "lists": [],
+      "id": "p",
+      "parent_id": null,
+      "refusal": null,
+      "task_writes": [
+        {
+          "id": "c",
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"root\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+        }
+      ],
+      "list_writes": [],
+      "removed_tasks": [
+        "p"
+      ],
+      "removed_lists": []
+    },
+    {
+      "case": "a task moved under a task in another list takes its subtree there",
+      "action": "move",
+      "tasks": [
+        {
+          "id": "root",
+          "raw": "{\"title\":\"Root\"}"
+        },
+        {
+          "id": "p",
+          "raw": "{\"parentId\":\"root\",\"title\":\"Parent\"}"
+        },
+        {
+          "id": "c",
+          "raw": "{\"parentId\":\"p\"}"
+        },
+        {
+          "id": "home",
+          "raw": "{\"taskListId\":\"work\",\"title\":\"Home\"}"
+        }
+      ],
+      "lists": [],
+      "id": "p",
+      "parent_id": "home",
+      "refusal": null,
+      "task_writes": [
+        {
+          "id": "p",
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"home\",\"taskListId\":\"work\",\"title\":\"Parent\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+        },
+        {
+          "id": "c",
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"p\",\"taskListId\":\"work\",\"title\":\"\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+        }
+      ],
+      "list_writes": [],
+      "removed_tasks": [],
+      "removed_lists": []
+    },
+    {
+      "case": "a task moved to the top level",
+      "action": "move",
+      "tasks": [
+        {
+          "id": "root",
+          "raw": "{\"title\":\"Root\"}"
+        },
+        {
+          "id": "p",
+          "raw": "{\"parentId\":\"root\",\"title\":\"Parent\"}"
+        },
+        {
+          "id": "c",
+          "raw": "{\"parentId\":\"p\"}"
+        },
+        {
+          "id": "home",
+          "raw": "{\"taskListId\":\"work\",\"title\":\"Home\"}"
+        }
+      ],
+      "lists": [],
+      "id": "c",
+      "parent_id": null,
+      "refusal": null,
+      "task_writes": [
+        {
+          "id": "c",
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+        }
+      ],
+      "list_writes": [],
+      "removed_tasks": [],
+      "removed_lists": []
+    },
+    {
+      "case": "a task cannot move inside itself",
+      "action": "move",
+      "tasks": [
+        {
+          "id": "root",
+          "raw": "{\"title\":\"Root\"}"
+        },
+        {
+          "id": "p",
+          "raw": "{\"parentId\":\"root\",\"title\":\"Parent\"}"
+        },
+        {
+          "id": "c",
+          "raw": "{\"parentId\":\"p\"}"
+        },
+        {
+          "id": "home",
+          "raw": "{\"taskListId\":\"work\",\"title\":\"Home\"}"
+        }
+      ],
+      "lists": [],
+      "id": "root",
+      "parent_id": "c",
+      "refusal": "A task cannot be moved inside itself.",
+      "task_writes": [],
+      "list_writes": [],
+      "removed_tasks": [],
+      "removed_lists": []
+    },
+    {
+      "case": "a task edited into another list takes its subtasks along",
+      "action": "relist",
+      "tasks": [
+        {
+          "id": "root",
+          "raw": "{\"title\":\"Root\"}"
+        },
+        {
+          "id": "p",
+          "raw": "{\"parentId\":\"root\",\"title\":\"Parent\"}"
+        },
+        {
+          "id": "c",
+          "raw": "{\"parentId\":\"p\"}"
+        },
+        {
+          "id": "home",
+          "raw": "{\"taskListId\":\"work\",\"title\":\"Home\"}"
+        }
+      ],
+      "lists": [],
+      "id": "root",
+      "parent_id": "work",
+      "refusal": null,
+      "task_writes": [
+        {
+          "id": "p",
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"root\",\"taskListId\":\"work\",\"title\":\"Parent\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+        },
+        {
+          "id": "c",
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"p\",\"taskListId\":\"work\",\"title\":\"\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+        }
+      ],
+      "list_writes": [],
+      "removed_tasks": [],
+      "removed_lists": []
+    },
+    {
+      "case": "a move that changes nothing writes nothing",
+      "action": "move",
+      "tasks": [
+        {
+          "id": "root",
+          "raw": "{\"title\":\"Root\"}"
+        },
+        {
+          "id": "p",
+          "raw": "{\"parentId\":\"root\",\"title\":\"Parent\"}"
+        },
+        {
+          "id": "c",
+          "raw": "{\"parentId\":\"p\"}"
+        },
+        {
+          "id": "home",
+          "raw": "{\"taskListId\":\"work\",\"title\":\"Home\"}"
+        }
+      ],
+      "lists": [],
+      "id": "c",
+      "parent_id": "p",
+      "refusal": null,
+      "task_writes": [],
+      "list_writes": [],
+      "removed_tasks": [],
+      "removed_lists": []
+    },
+    {
+      "case": "deleting a nested list moves its lists and tasks to its parent",
+      "action": "list_remove",
+      "tasks": [
+        {
+          "id": "a",
+          "raw": "{\"taskListId\":\"proj\",\"title\":\"A\"}"
+        },
+        {
+          "id": "b",
+          "raw": "{\"taskListId\":\"work\",\"title\":\"B\"}"
+        }
+      ],
+      "lists": [
+        {
+          "id": "00000000-0000-0000-0000-000000000006",
+          "raw": "{\"name\":\"Default Task List\"}"
+        },
+        {
+          "id": "work",
+          "raw": "{\"color\":\"#9ece6a\",\"name\":\"Work\"}"
+        },
+        {
+          "id": "proj",
+          "raw": "{\"name\":\"Project\",\"parentId\":\"work\"}"
+        },
+        {
+          "id": "sub",
+          "raw": "{\"name\":\"Sub\",\"parentId\":\"proj\"}"
+        }
+      ],
+      "id": "proj",
+      "parent_id": null,
+      "refusal": null,
+      "task_writes": [
+        {
+          "id": "a",
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"taskListId\":\"work\",\"title\":\"A\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+        }
+      ],
+      "list_writes": [
+        {
+          "id": "sub",
+          "payload": "{\"@type\":\"TaskList\",\"name\":\"Sub\",\"parentId\":\"work\",\"version\":\"1.0\"}"
+        }
+      ],
+      "removed_tasks": [],
+      "removed_lists": [
+        "proj"
+      ]
+    },
+    {
+      "case": "deleting a top-level list moves its tasks to the default list",
+      "action": "list_remove",
+      "tasks": [
+        {
+          "id": "a",
+          "raw": "{\"taskListId\":\"proj\",\"title\":\"A\"}"
+        },
+        {
+          "id": "b",
+          "raw": "{\"taskListId\":\"work\",\"title\":\"B\"}"
+        }
+      ],
+      "lists": [
+        {
+          "id": "00000000-0000-0000-0000-000000000006",
+          "raw": "{\"name\":\"Default Task List\"}"
+        },
+        {
+          "id": "work",
+          "raw": "{\"color\":\"#9ece6a\",\"name\":\"Work\"}"
+        },
+        {
+          "id": "proj",
+          "raw": "{\"name\":\"Project\",\"parentId\":\"work\"}"
+        },
+        {
+          "id": "sub",
+          "raw": "{\"name\":\"Sub\",\"parentId\":\"proj\"}"
+        }
+      ],
+      "id": "work",
+      "parent_id": null,
+      "refusal": null,
+      "task_writes": [
+        {
+          "id": "b",
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"B\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+        }
+      ],
+      "list_writes": [
+        {
+          "id": "proj",
+          "payload": "{\"@type\":\"TaskList\",\"name\":\"Project\",\"version\":\"1.0\"}"
+        }
+      ],
+      "removed_tasks": [],
+      "removed_lists": [
+        "work"
+      ]
+    },
+    {
+      "case": "the default list cannot be deleted",
+      "action": "list_remove",
+      "tasks": [
+        {
+          "id": "a",
+          "raw": "{\"taskListId\":\"proj\",\"title\":\"A\"}"
+        },
+        {
+          "id": "b",
+          "raw": "{\"taskListId\":\"work\",\"title\":\"B\"}"
+        }
+      ],
+      "lists": [
+        {
+          "id": "00000000-0000-0000-0000-000000000006",
+          "raw": "{\"name\":\"Default Task List\"}"
+        },
+        {
+          "id": "work",
+          "raw": "{\"color\":\"#9ece6a\",\"name\":\"Work\"}"
+        },
+        {
+          "id": "proj",
+          "raw": "{\"name\":\"Project\",\"parentId\":\"work\"}"
+        },
+        {
+          "id": "sub",
+          "raw": "{\"name\":\"Sub\",\"parentId\":\"proj\"}"
+        }
+      ],
+      "id": "00000000-0000-0000-0000-000000000006",
+      "parent_id": null,
+      "refusal": "The default list cannot be deleted.",
+      "task_writes": [],
+      "list_writes": [],
+      "removed_tasks": [],
+      "removed_lists": []
+    },
+    {
+      "case": "a list moved under another",
+      "action": "list_move",
+      "tasks": [],
+      "lists": [
+        {
+          "id": "00000000-0000-0000-0000-000000000006",
+          "raw": "{\"name\":\"Default Task List\"}"
+        },
+        {
+          "id": "work",
+          "raw": "{\"color\":\"#9ece6a\",\"name\":\"Work\"}"
+        },
+        {
+          "id": "proj",
+          "raw": "{\"name\":\"Project\",\"parentId\":\"work\"}"
+        },
+        {
+          "id": "sub",
+          "raw": "{\"name\":\"Sub\",\"parentId\":\"proj\"}"
+        }
+      ],
+      "id": "sub",
+      "parent_id": "work",
+      "refusal": null,
+      "task_writes": [],
+      "list_writes": [
+        {
+          "id": "sub",
+          "payload": "{\"@type\":\"TaskList\",\"name\":\"Sub\",\"parentId\":\"work\",\"version\":\"1.0\"}"
+        }
+      ],
+      "removed_tasks": [],
+      "removed_lists": []
+    },
+    {
+      "case": "a list cannot move inside itself",
+      "action": "list_move",
+      "tasks": [],
+      "lists": [
+        {
+          "id": "00000000-0000-0000-0000-000000000006",
+          "raw": "{\"name\":\"Default Task List\"}"
+        },
+        {
+          "id": "work",
+          "raw": "{\"color\":\"#9ece6a\",\"name\":\"Work\"}"
+        },
+        {
+          "id": "proj",
+          "raw": "{\"name\":\"Project\",\"parentId\":\"work\"}"
+        },
+        {
+          "id": "sub",
+          "raw": "{\"name\":\"Sub\",\"parentId\":\"proj\"}"
+        }
+      ],
+      "id": "work",
+      "parent_id": "sub",
+      "refusal": "A list cannot be moved inside itself.",
+      "task_writes": [],
+      "list_writes": [],
+      "removed_tasks": [],
+      "removed_lists": []
+    },
+    {
+      "case": "the default list stays at the top level",
+      "action": "list_move",
+      "tasks": [],
+      "lists": [
+        {
+          "id": "00000000-0000-0000-0000-000000000006",
+          "raw": "{\"name\":\"Default Task List\"}"
+        },
+        {
+          "id": "work",
+          "raw": "{\"color\":\"#9ece6a\",\"name\":\"Work\"}"
+        },
+        {
+          "id": "proj",
+          "raw": "{\"name\":\"Project\",\"parentId\":\"work\"}"
+        },
+        {
+          "id": "sub",
+          "raw": "{\"name\":\"Sub\",\"parentId\":\"proj\"}"
+        }
+      ],
+      "id": "00000000-0000-0000-0000-000000000006",
+      "parent_id": "work",
+      "refusal": "A list cannot be moved inside itself.",
+      "task_writes": [],
+      "list_writes": [],
+      "removed_tasks": [],
+      "removed_lists": []
+    }
+  ],
+  "orders": [
+    {
+      "case": "open before done, then due, then priority, then title without case or accents",
+      "items": [
+        {
+          "id": "1",
+          "title": "Done early",
+          "done": true,
+          "due_at": 1.0
+        },
+        {
+          "id": "2",
+          "title": "No date",
+          "done": false,
+          "priority": 3
+        },
+        {
+          "id": "3",
+          "title": "Later",
+          "done": false,
+          "due_at": 2000.0
+        },
+        {
+          "id": "4",
+          "title": "beta",
+          "done": false,
+          "due_at": 1000.0
+        },
+        {
+          "id": "5",
+          "title": "Álpha",
+          "done": false,
+          "due_at": 1000.0
+        },
+        {
+          "id": "6",
+          "title": "Urgent",
+          "done": false,
+          "due_at": 1000.0,
+          "priority": 3
+        }
+      ],
+      "order": [
+        "6",
+        "5",
+        "4",
+        "3",
+        "2",
+        "1"
+      ]
+    }
+  ],
+  "imports": [
+    {
+      "case": "an export reads back parents first",
+      "text": "{\n  \"@type\": \"sealbook-task-export\",\n  \"exportedAt\": \"2026-11-02T09:00:00.000Z\",\n  \"lists\": [\n    {\n      \"id\": \"work\",\n      \"name\": \"Work\"\n    }\n  ],\n  \"tasks\": [\n    {\n      \"id\": \"c\",\n      \"listName\": \"Work\",\n      \"parentId\": \"p\",\n      \"recurrence\": {\n        \"frequency\": \"fortnightly\"\n      },\n      \"title\": \"Child\"\n    },\n    {\n      \"createdAt\": \"2026-10-01T00:00:00Z\",\n      \"dueDate\": \"2026-11-02\",\n      \"id\": \"p\",\n      \"listName\": \"Default Task List\",\n      \"priority\": 2,\n      \"recurrence\": {\n        \"frequency\": \"weekly\",\n        \"interval\": 2\n      },\n      \"tags\": [\n        \"home\"\n      ],\n      \"title\": \"Parent\"\n    }\n  ],\n  \"version\": 1\n}",
+      "refused": false,
+      "skipped": 0,
+      "tasks": [
+        {
+          "source_id": "p",
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-01T00:00:00Z\",\"dueDate\":\"2026-11-02\",\"priority\":2,\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2},\"tags\":[\"home\"],\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Parent\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+        },
+        {
+          "source_id": "c",
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"p\",\"recurrence\":{\"frequency\":\"fortnightly\"},\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Child\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+        }
+      ]
+    },
+    {
+      "case": "a bare array drops a missing or circular parent and skips the untitled",
+      "text": "[{\"id\":\"a\",\"parentId\":\"b\",\"title\":\"A\"},{\"id\":\"b\",\"parentId\":\"a\",\"title\":\"B\"},{\"id\":\"c\",\"parentId\":\"gone\",\"title\":\"C\"},{\"id\":\"d\",\"title\":\"  \"},\"not a task\"]",
+      "refused": false,
+      "skipped": 2,
+      "tasks": [
+        {
+          "source_id": "b",
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"B\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+        },
+        {
+          "source_id": "a",
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"b\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"A\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+        },
+        {
+          "source_id": "c",
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"C\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+        }
+      ]
+    },
+    {
+      "case": "a file that is not JSON",
+      "text": "not json",
+      "refused": true,
+      "skipped": 0,
+      "tasks": []
+    },
+    {
+      "case": "an object that is not a task export",
+      "text": "{\"@type\":\"sealbook-note-export\",\"tasks\":[]}",
+      "refused": true,
+      "skipped": 0,
+      "tasks": []
+    }
+  ]
+}

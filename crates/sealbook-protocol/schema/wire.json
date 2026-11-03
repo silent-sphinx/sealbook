@@ -1,0 +1,1632 @@
+{
+  "$defs": {
+    "AccountChallengeResponse": {
+      "description": "A server-issued nonce for an account mutation.\n\nAccount changes are authorised by a device signature over a transcript that\nincludes this challenge, not by the age of a session. A bearer token alone is\nno longer enough to change the password, rename the account or delete it.",
+      "properties": {
+        "challenge": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "challenge_id": {
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "challenge_id",
+        "challenge"
+      ],
+      "type": "object"
+    },
+    "AttachmentListEntry": {
+      "description": "One entry of the attachment listing the client uses to sweep orphans.\n\nDeliberately id and age only: the server is content-blind and cannot know\nwhich attachments a note still references, so the sweep is driven entirely by\nthe client cross-referencing these ids against its decrypted notes.",
+      "properties": {
+        "attachment_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "attachment_id",
+        "state",
+        "created_at"
+      ],
+      "type": "object"
+    },
+    "AttachmentMetaResponse": {
+      "description": "An attachment's stored shape, without any chunk bytes.",
+      "properties": {
+        "attachment_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "chunk_count": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "chunk_size": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "created_at": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "state": {
+          "type": "string"
+        },
+        "total_ciphertext_size": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "attachment_id",
+        "state",
+        "chunk_size",
+        "chunk_count",
+        "total_ciphertext_size",
+        "created_at"
+      ],
+      "type": "object"
+    },
+    "Base64Url": {
+      "contentEncoding": "base64url",
+      "description": "Bytes as unpadded base64url (RFC 4648 section 5).",
+      "pattern": "^[A-Za-z0-9_-]*$",
+      "type": "string"
+    },
+    "BatchObject": {
+      "description": "One object inside a batch write.\n\nThe same fields `PutObjectRequest` carries per object, without the manifest:\na batch signs one manifest for the state all of them together produce.",
+      "properties": {
+        "ciphertext": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "nonce": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "padded_size": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "revision": {
+          "description": "Revisions a batch assigns, which must run consecutively from the\ncollection's next revision in the order the objects are sent.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tombstone": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "nonce",
+        "ciphertext",
+        "padded_size",
+        "content_type",
+        "tombstone"
+      ],
+      "type": "object"
+    },
+    "ChangePasswordRequest": {
+      "properties": {
+        "challenge": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "kdf_salt": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "password_change_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "recovery_ciphersuite": {
+          "type": "string"
+        },
+        "recovery_nonce": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "recovery_wrapped_ck": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "signature": {
+          "$ref": "#/$defs/DualSignatureBody"
+        },
+        "upload": {
+          "$ref": "#/$defs/Base64Url"
+        }
+      },
+      "required": [
+        "password_change_id",
+        "challenge",
+        "signature",
+        "upload",
+        "kdf_salt",
+        "recovery_nonce",
+        "recovery_wrapped_ck",
+        "recovery_ciphersuite"
+      ],
+      "type": "object"
+    },
+    "ChangePasswordStartRequest": {
+      "properties": {
+        "request": {
+          "$ref": "#/$defs/Base64Url"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "type": "object"
+    },
+    "ChangePasswordStartResponse": {
+      "properties": {
+        "challenge": {
+          "$ref": "#/$defs/Base64Url",
+          "description": "Doubles as the account-operation challenge, so changing a password is\nstill two round trips rather than three."
+        },
+        "password_change_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "response": {
+          "$ref": "#/$defs/Base64Url"
+        }
+      },
+      "required": [
+        "password_change_id",
+        "response",
+        "challenge"
+      ],
+      "type": "object"
+    },
+    "ChangeUsernameRequest": {
+      "properties": {
+        "challenge": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "challenge_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "new_username": {
+          "type": "string"
+        },
+        "signature": {
+          "$ref": "#/$defs/DualSignatureBody"
+        },
+        "upload": {
+          "$ref": "#/$defs/Base64Url"
+        }
+      },
+      "required": [
+        "new_username",
+        "upload",
+        "challenge_id",
+        "challenge",
+        "signature"
+      ],
+      "type": "object"
+    },
+    "ChangesQuery": {
+      "properties": {
+        "after": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "limit": {
+          "description": "Most objects to return. Clamped to `MAX_CHANGES_LIMIT`; defaults to\n`DEFAULT_CHANGES_LIMIT`.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "snapshot": {
+          "description": "Walk the collection's current state rather than the revision log.\n\nSet after a `resync`, and kept set for the rest of that walk. A snapshot\nwalk pages through live objects, so it completes whatever has been pruned\nfrom the log; an incremental walk needs the log and can therefore be told\nits watermark is too old. Tombstones are rows in the live state, so a\nsnapshot is complete rather than merely current.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ChangesResponse": {
+      "properties": {
+        "has_more": {
+          "description": "True when more objects remain above the highest revision in `objects`.\nContinue with `after` set to that revision.",
+          "type": "boolean"
+        },
+        "key_epoch": {
+          "description": "Bumped whenever the collection key is rotated. A client whose cached key\npredates this must re-fetch its wrap before it can decrypt.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "latest_revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "manifest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ManifestBody"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The collection's current signed manifest, for the client to verify what\nit has been served against. `None` only for a collection that has never\nbeen written by a v3 client."
+        },
+        "objects": {
+          "items": {
+            "$ref": "#/$defs/ObjectChange"
+          },
+          "type": "array"
+        },
+        "resync": {
+          "default": false,
+          "description": "True when the server could not serve the requested `after` incrementally,\nbecause the revisions between it and now have aged out of the revision log.\n`objects` is then the collection's full current state, tombstones included,\nand the client must replace its local state with it rather than merging.\n\nA resync pages like any other answer: keep following `has_more` with\n`after` set to the highest revision seen, collect the whole walk, and\nreplace local state with the result once it completes.\n\n`#[serde(default)]` so a client built before this field existed still\ndeserializes a response carrying it.",
+          "type": "boolean"
+        },
+        "tombstone_floor": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "latest_revision",
+        "key_epoch",
+        "objects",
+        "has_more"
+      ],
+      "type": "object"
+    },
+    "CollectionKeysResponse": {
+      "description": "The requesting device's current collection-key wrap.",
+      "properties": {
+        "key_epoch": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "key_wraps": {
+          "items": {
+            "$ref": "#/$defs/KeyWrapBody"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "key_epoch",
+        "key_wraps"
+      ],
+      "type": "object"
+    },
+    "CommitAttachmentResponse": {
+      "properties": {
+        "attachment_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "attachment_id",
+        "state"
+      ],
+      "type": "object"
+    },
+    "CreateAttachmentRequest": {
+      "description": "Declares an attachment before its chunks are uploaded.\n\nThe server reserves quota from the declared parameters and refuses the whole\nattachment up front if it would not fit, so a client does not stream tens of\nmegabytes only to be rejected at commit. Re-declaring an id already `pending`\nis a no-op, which is what lets an interrupted upload resume.",
+      "properties": {
+        "attachment_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "chunk_count": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "chunk_size": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "total_plaintext_size": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "attachment_id",
+        "total_plaintext_size",
+        "chunk_size",
+        "chunk_count"
+      ],
+      "type": "object"
+    },
+    "CreateAttachmentResponse": {
+      "properties": {
+        "attachment_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "attachment_id",
+        "state"
+      ],
+      "type": "object"
+    },
+    "DeleteAccountRequest": {
+      "description": "Deleting an account needs a device signature too, so that a stolen token\ncannot destroy the vault.",
+      "properties": {
+        "challenge": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "challenge_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "signature": {
+          "$ref": "#/$defs/DualSignatureBody"
+        }
+      },
+      "required": [
+        "challenge_id",
+        "challenge",
+        "signature"
+      ],
+      "type": "object"
+    },
+    "DevicePublicKeys": {
+      "properties": {
+        "device_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "ed25519_pk": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "mldsa_pk": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "xwing_hpke_pk": {
+          "$ref": "#/$defs/Base64Url"
+        }
+      },
+      "required": [
+        "device_id",
+        "mldsa_pk",
+        "ed25519_pk",
+        "xwing_hpke_pk"
+      ],
+      "type": "object"
+    },
+    "DualSignatureBody": {
+      "properties": {
+        "ed25519": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "mldsa": {
+          "$ref": "#/$defs/Base64Url"
+        }
+      },
+      "required": [
+        "mldsa",
+        "ed25519"
+      ],
+      "type": "object"
+    },
+    "ErrorBody": {
+      "properties": {
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "type": "object"
+    },
+    "KeyWrapBody": {
+      "properties": {
+        "ciphersuite": {
+          "type": "string"
+        },
+        "hpke_enc": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "recipient_id": {
+          "type": "string"
+        },
+        "recipient_kind": {
+          "type": "string"
+        },
+        "wrapped_ck": {
+          "$ref": "#/$defs/Base64Url"
+        }
+      },
+      "required": [
+        "recipient_kind",
+        "recipient_id",
+        "hpke_enc",
+        "wrapped_ck",
+        "ciphersuite"
+      ],
+      "type": "object"
+    },
+    "ListAttachmentsResponse": {
+      "properties": {
+        "attachments": {
+          "items": {
+            "$ref": "#/$defs/AttachmentListEntry"
+          },
+          "type": "array"
+        },
+        "next_after": {
+          "description": "Set to the last id when a page was capped, to continue with `after`.",
+          "format": "uuid",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "attachments"
+      ],
+      "type": "object"
+    },
+    "LoginChallengeRequest": {
+      "description": "Step 1 of login: ask for a device-sealed challenge.\n\nThis step is unauthenticated and reveals nothing: an unknown username or\ndevice gets a challenge sealed to a dummy key of the same shape.",
+      "properties": {
+        "device_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "username",
+        "device_id"
+      ],
+      "type": "object"
+    },
+    "LoginChallengeResponse": {
+      "properties": {
+        "challenge_ct": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "challenge_enc": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "challenge_id": {
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "challenge_id",
+        "challenge_enc",
+        "challenge_ct"
+      ],
+      "type": "object"
+    },
+    "LoginFinishRequest": {
+      "properties": {
+        "device_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "device_signature": {
+          "$ref": "#/$defs/DualSignatureBody"
+        },
+        "finalization": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "login_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "login_id",
+        "username",
+        "device_id",
+        "finalization",
+        "device_signature"
+      ],
+      "type": "object"
+    },
+    "LoginFinishResponse": {
+      "properties": {
+        "account_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "collection_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "kdf_salt": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "key_epoch": {
+          "description": "The epoch these wraps belong to, so a client starts in sync and only\nre-fetches its wrap when a rotation actually happens.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "key_wraps": {
+          "items": {
+            "$ref": "#/$defs/KeyWrapBody"
+          },
+          "type": "array"
+        },
+        "recovery_pending": {
+          "default": false,
+          "description": "True when a recovery enrolled a device and the collection key has still\nnot been rotated, so the phrase used then — and any other copy of it —\ncan still open this vault. The client must finish that rotation before\nthe account can be written to again.\n\n`#[serde(default)]` so a client built before this field existed still\ndeserializes a response carrying it.",
+          "type": "boolean"
+        },
+        "session_token": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "account_id",
+        "collection_id",
+        "session_token",
+        "kdf_salt",
+        "key_wraps",
+        "key_epoch"
+      ],
+      "type": "object"
+    },
+    "LoginStartRequest": {
+      "description": "Step 2 of login: prove device possession, then receive the OPAQUE response.\n\nThe server releases no OPAQUE credential response until the opened challenge\nand `device_signature` both check out. Without this, anyone could harvest an\nOPRF evaluation for any username and attack the password offline.",
+      "properties": {
+        "challenge": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "challenge_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "device_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "device_signature": {
+          "$ref": "#/$defs/DualSignatureBody"
+        },
+        "request": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "challenge_id",
+        "username",
+        "device_id",
+        "challenge",
+        "request",
+        "device_signature"
+      ],
+      "type": "object"
+    },
+    "LoginStartResponse": {
+      "properties": {
+        "login_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "response": {
+          "$ref": "#/$defs/Base64Url"
+        }
+      },
+      "required": [
+        "login_id",
+        "response"
+      ],
+      "type": "object"
+    },
+    "ManifestBody": {
+      "description": "A device's signed statement of what the collection contained when it wrote.\n\nThe server recomputes `digest`, `object_count` and `latest_revision` from its\nown tables and rejects a manifest that does not match, so a stored manifest is\nalways a device-signed commitment to the server's true state. A client\nre-derives the digest from what it is served and compares, which is what\ndetects a withheld, rolled-back or substituted object.",
+      "properties": {
+        "device_id": {
+          "description": "The device that signed, so a reader knows which public key to check.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "digest": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "key_epoch": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "latest_revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "manifest_seq": {
+          "description": "Monotonic per collection. A write must present exactly current + 1, which\nserialises concurrent writers and stops a manifest being replayed.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "object_count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "signature": {
+          "$ref": "#/$defs/DualSignatureBody"
+        }
+      },
+      "required": [
+        "manifest_seq",
+        "key_epoch",
+        "latest_revision",
+        "object_count",
+        "digest",
+        "device_id",
+        "signature"
+      ],
+      "type": "object"
+    },
+    "ManifestBucketQuery": {
+      "description": "Which buckets of the manifest a caller wants the entries of.",
+      "properties": {
+        "buckets": {
+          "description": "The buckets to serve, as concatenated two-digit hex: `manifest_bucket_of`\nof each object the caller is about to write, so `03` for one and `031f`\nfor two. Omitted asks for the digests alone.\n\nA list rather than a single bucket because a batch write touches one\nbucket per object, and asking for them one request at a time would undo\nwhat batching is for.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ManifestBucketsResponse": {
+      "description": "The manifest as a write needs to see it.\n\n`ManifestResponse` carries every entry in the collection, so a write that\nfetched it moved bytes proportional to the whole vault and importing *n*\nobjects cost O(n squared). The root is a hash of 256 bucket digests, and a\nwrite changes one bucket per object, so this serves the digests plus the\nentries of the buckets asked for: enough to check the manifest and to compute\nthe next one.\n\nVerifying it is the same work as before, in two steps rather than one. The\nserved entries of each bucket must hash to that bucket's digest, and `buckets`\nwith `object_count` must produce the root the manifest signature covers. A\nserver withholding an object from a served bucket fails the first check, and\none editing a bucket digest fails the second.",
+      "properties": {
+        "buckets": {
+          "$ref": "#/$defs/Base64Url",
+          "description": "The 256 bucket digests concatenated, 32 bytes each."
+        },
+        "entries": {
+          "description": "Every entry in every bucket of `served`, or empty if none was asked for.",
+          "items": {
+            "$ref": "#/$defs/ManifestEntry"
+          },
+          "type": "array"
+        },
+        "manifest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ManifestBody"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "object_count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "served": {
+          "description": "The buckets whose entries follow, parsed back from the request and in\nascending order. A caller checks its own list against this rather than\ntrusting that every bucket it asked for was served.",
+          "items": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "buckets",
+        "object_count",
+        "served",
+        "entries"
+      ],
+      "type": "object"
+    },
+    "ManifestEntry": {
+      "description": "One object as the manifest commits to it.\n\n`content_digest` is `SHA-256(nonce || ciphertext)`. Committing to the content\nas well as the revision is what makes a rollback detectable: without it a\nserver could serve an old ciphertext under the current revision number and\nevery check would still pass.",
+      "properties": {
+        "content_digest": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tombstone": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "tombstone",
+        "content_digest"
+      ],
+      "type": "object"
+    },
+    "ManifestResponse": {
+      "description": "The current manifest plus the entries it commits to.\n\nA client that holds no local state fetches this, verifies the signature and\nthe digest, and can then trust the entry set as the collection's true shape.",
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/ManifestEntry"
+          },
+          "type": "array"
+        },
+        "manifest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ManifestBody"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "type": "object"
+    },
+    "ObjectChange": {
+      "properties": {
+        "ciphertext": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "nonce": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "padded_size": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tombstone": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "tombstone",
+        "nonce",
+        "ciphertext",
+        "padded_size",
+        "content_type"
+      ],
+      "type": "object"
+    },
+    "PairApproveRequest": {
+      "properties": {
+        "confirmation": {
+          "type": "string"
+        },
+        "grant": {
+          "$ref": "#/$defs/DualSignatureBody"
+        },
+        "roster": {
+          "$ref": "#/$defs/RosterBody",
+          "description": "The current roster plus the new device, signed by the approver."
+        },
+        "wrap": {
+          "$ref": "#/$defs/KeyWrapBody"
+        }
+      },
+      "required": [
+        "wrap",
+        "grant",
+        "confirmation",
+        "roster"
+      ],
+      "type": "object"
+    },
+    "PairJoinRequest": {
+      "properties": {
+        "device": {
+          "$ref": "#/$defs/DevicePublicKeys"
+        },
+        "enrollment_signature": {
+          "$ref": "#/$defs/DualSignatureBody"
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "username",
+        "device",
+        "enrollment_signature"
+      ],
+      "type": "object"
+    },
+    "PairJoinResponse": {
+      "properties": {
+        "confirm": {
+          "type": "string"
+        },
+        "pair_code": {
+          "type": "string"
+        },
+        "pair_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "roster_seq": {
+          "description": "The roster the joining device must anchor on, and which `confirm` commits\nto: the account's current roster sequence and its transcript.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "roster_transcript": {
+          "$ref": "#/$defs/Base64Url"
+        }
+      },
+      "required": [
+        "pair_id",
+        "pair_code",
+        "confirm",
+        "roster_seq",
+        "roster_transcript"
+      ],
+      "type": "object"
+    },
+    "PairStatusResponse": {
+      "properties": {
+        "confirm": {
+          "type": "string"
+        },
+        "device": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DevicePublicKeys"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pair_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "roster_seq": {
+          "description": "The roster sequence the joining device anchored on, for the account's own\ndevices only. It lets an approver whose roster has moved on since the\npairing started say so, rather than reporting a bare code mismatch.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "username": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "pair_id",
+        "status",
+        "confirm"
+      ],
+      "type": "object"
+    },
+    "PhraseRecoveryBody": {
+      "description": "Hybrid recovery-phrase material.\n\n`lookup_id` is an opaque handle derived from the phrase; it is what a client\npresents to fetch its phrase key wrap. The verification keys are separate so\nthe server never has to hand them out before a proof is supplied.",
+      "properties": {
+        "ed25519_pk": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "lookup_id": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "mldsa_pk": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "scheme": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mldsa_pk",
+        "ed25519_pk",
+        "lookup_id",
+        "scheme"
+      ],
+      "type": "object"
+    },
+    "ProtocolReport": {
+      "description": "Just the version field of `GET /health/crypto`.\n\nThe full profile lives in the server, which is free to add to it: a client\nchecking the generation it is talking to must not fail because the server\ngrew a field describing an algorithm this build has no opinion about.",
+      "properties": {
+        "protocol": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol"
+      ],
+      "type": "object"
+    },
+    "PutObjectRequest": {
+      "properties": {
+        "ciphertext": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "manifest": {
+          "$ref": "#/$defs/ManifestBody",
+          "description": "The collection as it will stand once this write is applied."
+        },
+        "nonce": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "padded_size": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "revision": {
+          "description": "The revision this write claims, which must be the collection's next one.\nTake it from `ManifestBody::latest_revision + 1`; a mismatch is a `409`\nand means another device wrote first.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tombstone": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "nonce",
+        "ciphertext",
+        "padded_size",
+        "content_type",
+        "tombstone",
+        "manifest"
+      ],
+      "type": "object"
+    },
+    "PutObjectResponse": {
+      "properties": {
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "revision"
+      ],
+      "type": "object"
+    },
+    "PutObjectsRequest": {
+      "description": "Several objects written under one manifest.\n\nA single `PutObjectRequest` costs a round trip and a manifest signature each,\nso importing *n* objects meant *n* requests against the per-minute write cap\nwith nothing else able to write in between. This applies them in one\ntransaction under one signature instead.\n\nIt does not relax the sequence rule: the manifest still has to be the\ncollection's next one, so two devices writing at the same time still collide.\nWhat it changes is how much one request can carry, which is what an import\nneeds.",
+      "properties": {
+        "manifest": {
+          "$ref": "#/$defs/ManifestBody",
+          "description": "The collection as it will stand once every object in `objects` is\napplied."
+        },
+        "objects": {
+          "description": "At least one and at most `MAX_BATCH_OBJECTS`, each id appearing once.",
+          "items": {
+            "$ref": "#/$defs/BatchObject"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "objects",
+        "manifest"
+      ],
+      "type": "object"
+    },
+    "PutObjectsResponse": {
+      "properties": {
+        "first_revision": {
+          "description": "The revision the first object in the batch took.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "latest_revision": {
+          "description": "The revision the last one took, which is the collection's latest.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "first_revision",
+        "latest_revision"
+      ],
+      "type": "object"
+    },
+    "RecoverFinishRequest": {
+      "properties": {
+        "challenge": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "device": {
+          "$ref": "#/$defs/DevicePublicKeys"
+        },
+        "enrollment_signature": {
+          "$ref": "#/$defs/DualSignatureBody"
+        },
+        "kdf_salt": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "phrase_proof": {
+          "$ref": "#/$defs/DualSignatureBody"
+        },
+        "recovery_ciphersuite": {
+          "type": "string"
+        },
+        "recovery_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "recovery_nonce": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "recovery_wrapped_ck": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "roster": {
+          "$ref": "#/$defs/RosterBody",
+          "description": "The current roster plus the recovering device, signed by the phrase key."
+        },
+        "upload": {
+          "$ref": "#/$defs/Base64Url",
+          "description": "The replacement password, as an OPAQUE registration upload, plus the KDF\nsalt and the collection-key wrap re-made under it. `phrase_proof` covers\nall of it, so none of it can be substituted in flight."
+        },
+        "username": {
+          "type": "string"
+        },
+        "wrap": {
+          "$ref": "#/$defs/KeyWrapBody"
+        }
+      },
+      "required": [
+        "username",
+        "recovery_id",
+        "challenge",
+        "phrase_proof",
+        "device",
+        "enrollment_signature",
+        "wrap",
+        "roster",
+        "upload",
+        "kdf_salt",
+        "recovery_nonce",
+        "recovery_wrapped_ck",
+        "recovery_ciphersuite"
+      ],
+      "type": "object"
+    },
+    "RecoverFinishResponse": {
+      "properties": {
+        "account_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "collection_id": {
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "account_id",
+        "collection_id"
+      ],
+      "type": "object"
+    },
+    "RecoverStartRequest": {
+      "description": "Step 1 of recovery: fetch the phrase's key wrap and begin a password reset.\n\nA recovery exists for the case where the password is what was lost, so it\nreplaces the password rather than asking for it. That needs an OPAQUE\nregistration round trip, which is what `opaque_request` starts.\n\nUnauthenticated, like `login/challenge`, and it reveals nothing: an unknown\nusername, or a `lookup_id` that does not match, gets a dummy wrap and a\nregistration response of the same shape. The response carries no material\nderived from the existing password, so it cannot be harvested to attack it.",
+      "properties": {
+        "lookup_id": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "opaque_request": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "username",
+        "lookup_id",
+        "opaque_request"
+      ],
+      "type": "object"
+    },
+    "RecoverStartResponse": {
+      "properties": {
+        "challenge": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "collection_id": {
+          "format": "uuid",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "opaque_response": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "recovery_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "roster": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RosterBody"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The current roster and the collection it belongs to. A recovering device\nchecks them with the collection key the phrase wrap opens; a lookup that\nmatched nothing is answered with a decoy, so their presence says nothing\nabout whether the account exists. Optional for the benefit of a server\nthat predates the decoy."
+        },
+        "wrap": {
+          "$ref": "#/$defs/KeyWrapBody"
+        }
+      },
+      "required": [
+        "wrap",
+        "recovery_id",
+        "challenge",
+        "opaque_response"
+      ],
+      "type": "object"
+    },
+    "RegisterFinishRequest": {
+      "properties": {
+        "collection_id": {
+          "description": "Chosen by the client, like the device id, so that the initial manifest can\nbe signed over it before the account exists. A duplicate is a `409`.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "device": {
+          "$ref": "#/$defs/DevicePublicKeys"
+        },
+        "enrollment_signature": {
+          "$ref": "#/$defs/DualSignatureBody"
+        },
+        "kdf_salt": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "key_wraps": {
+          "items": {
+            "$ref": "#/$defs/KeyWrapBody"
+          },
+          "type": "array"
+        },
+        "manifest": {
+          "$ref": "#/$defs/ManifestBody",
+          "description": "Manifest for the empty collection, so an account has a signed manifest\nfrom the moment it exists and a client never has to accept an unsigned\n\"your vault is empty\" from the server."
+        },
+        "phrase_recovery": {
+          "$ref": "#/$defs/PhraseRecoveryBody"
+        },
+        "roster": {
+          "$ref": "#/$defs/RosterBody",
+          "description": "Genesis roster: this device alone, signed by itself."
+        },
+        "upload": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "username",
+        "upload",
+        "kdf_salt",
+        "device",
+        "collection_id",
+        "enrollment_signature",
+        "key_wraps",
+        "phrase_recovery",
+        "manifest",
+        "roster"
+      ],
+      "type": "object"
+    },
+    "RegisterFinishResponse": {
+      "properties": {
+        "account_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "collection_id": {
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "account_id",
+        "collection_id"
+      ],
+      "type": "object"
+    },
+    "RegisterStartRequest": {
+      "properties": {
+        "request": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "username",
+        "request"
+      ],
+      "type": "object"
+    },
+    "RegisterStartResponse": {
+      "properties": {
+        "response": {
+          "$ref": "#/$defs/Base64Url"
+        }
+      },
+      "required": [
+        "response"
+      ],
+      "type": "object"
+    },
+    "RosterBody": {
+      "description": "The account's device set and phrase recovery key at one sequence number.\n\nSigned by a member of the previous roster and MAC'd under the collection key,\nso a client never has to take the server's word for which devices exist. See\n`sealbook_crypto::roster`.",
+      "properties": {
+        "devices": {
+          "items": {
+            "$ref": "#/$defs/DevicePublicKeys"
+          },
+          "type": "array"
+        },
+        "key_epoch": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mac": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "phrase_ed25519_pk": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "phrase_mldsa_pk": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "roster_seq": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "signature": {
+          "$ref": "#/$defs/DualSignatureBody"
+        },
+        "signer": {
+          "$ref": "#/$defs/RosterSignerBody"
+        }
+      },
+      "required": [
+        "roster_seq",
+        "key_epoch",
+        "devices",
+        "phrase_mldsa_pk",
+        "phrase_ed25519_pk",
+        "signer",
+        "signature",
+        "mac"
+      ],
+      "type": "object"
+    },
+    "RosterQuery": {
+      "properties": {
+        "from": {
+          "description": "Return every roster from this sequence on, inclusive. Omitted, only the\nnewest is returned.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RosterResponse": {
+      "properties": {
+        "floor": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rosters": {
+          "description": "Oldest first.",
+          "items": {
+            "$ref": "#/$defs/RosterBody"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "rosters"
+      ],
+      "type": "object"
+    },
+    "RosterSignerBody": {
+      "oneOf": [
+        {
+          "properties": {
+            "device_id": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "kind": {
+              "const": "device",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "device_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "phrase",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RotateRequest": {
+      "description": "Replaces the collection key, re-wrapping it for everyone who keeps access and\nre-encrypting every object under it.\n\nEvery operation that must invalidate the old key goes through this one\nrequest, because they all require the same work and only a client can do it:\n\n* revoking a device (`revoke_device_id`), which already holds the old key;\n* changing the recovery phrase, since a rotation always issues a new one;\n* finishing a recovery, where the phrase that was just used — and anyone who\n  has ever seen it — must stop being able to decrypt.",
+      "properties": {
+        "drop_tombstones": {
+          "default": [],
+          "description": "Tombstones this rotation retires, which must each be below the\ncollection's `tombstone_floor`.\n\nNot covered by `rotation_signature` and it does not need to be: `manifest`\ncommits to the entry set the rotation leaves behind, and the server\nrecomputes that from its own rows afterwards. Adding an id here or taking\none away changes the rows and the manifest stops matching, so the signed\nmanifest is what pins this list.",
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "kdf_salt": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "key_epoch": {
+          "description": "Must be exactly one greater than the collection's current epoch.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "key_wraps": {
+          "description": "One wrap per device that keeps access, plus `recovery` and `phrase`.",
+          "items": {
+            "$ref": "#/$defs/KeyWrapBody"
+          },
+          "type": "array"
+        },
+        "manifest": {
+          "$ref": "#/$defs/ManifestBody"
+        },
+        "objects": {
+          "items": {
+            "$ref": "#/$defs/RotatedObject"
+          },
+          "type": "array"
+        },
+        "phrase_recovery": {
+          "$ref": "#/$defs/PhraseRecoveryBody",
+          "description": "Rotating the key invalidates the old recovery phrase, so a new one is\nissued as part of the same operation."
+        },
+        "revoke_device_id": {
+          "description": "The device to revoke as part of this rotation, if any. It must not be the\ndevice making the request.",
+          "format": "uuid",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "roster": {
+          "$ref": "#/$defs/RosterBody",
+          "description": "The remaining devices and the new phrase key, at the new epoch, signed by\nthe rotating device."
+        },
+        "rotation_signature": {
+          "$ref": "#/$defs/DualSignatureBody"
+        }
+      },
+      "required": [
+        "key_epoch",
+        "kdf_salt",
+        "key_wraps",
+        "phrase_recovery",
+        "objects",
+        "manifest",
+        "rotation_signature",
+        "roster"
+      ],
+      "type": "object"
+    },
+    "RotateResponse": {
+      "properties": {
+        "key_epoch": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "latest_revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "key_epoch",
+        "latest_revision"
+      ],
+      "type": "object"
+    },
+    "RotatedObject": {
+      "description": "One object re-encrypted under the new collection key.",
+      "properties": {
+        "ciphertext": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "nonce": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "padded_size": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "revision": {
+          "description": "Revisions a rotation assigns, which must run consecutively from the\ncollection's next revision in the order the objects are sent.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tombstone": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "nonce",
+        "ciphertext",
+        "padded_size",
+        "content_type",
+        "tombstone"
+      ],
+      "type": "object"
+    },
+    "SimpleStatusResponse": {
+      "properties": {
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "urn:sealbook:schema:wire",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Requests and responses of protocol sealbook-v1.",
+  "title": "Sealbook wire types"
+}

@@ -20,6 +20,7 @@
 mod account_export;
 mod attachments;
 mod auth;
+mod batch;
 mod bookmarks;
 mod calendars;
 mod contact_json;
@@ -28,23 +29,29 @@ mod contact_search;
 mod contacts;
 mod csv;
 mod error;
+mod flush;
 mod http;
 mod ics;
 mod manifest;
 mod markdown;
+mod merge;
 mod messages;
 mod notes;
 mod notes_file;
+mod offline;
 mod order;
 mod pairing;
 mod payload;
 mod recurrence;
 mod roster;
 mod rotation;
+pub mod schema;
 mod settings;
 mod state;
 mod sync;
+mod task_rules;
 mod tasks;
+mod tree;
 mod vcard;
 
 // uniffi's scaffolding and custom types have to sit in the crate root.
@@ -86,6 +93,7 @@ pub use auth::{
     AuthRequest, CoreDeviceSecrets, LoggedIn, LoginStarting, OpaqueStart, PasswordChange,
     PasswordChangeStarted, RecoverStarted, Recovering, RegisterIdentity, Registering,
 };
+pub use batch::write_batches;
 pub use bookmarks::{
     bookmark_collection_name_by_id, bookmark_collection_parse, bookmark_collection_tone,
     bookmark_collection_write, bookmark_parse, bookmark_write, default_bookmark_collection_id,
@@ -115,9 +123,14 @@ pub use contacts::{
     ADDRESS_BOOK_CONTENT_TYPE, ADDRESS_BOOK_ID_PROP, ADDRESS_BOOK_KEYS, CONTACT_ARCHIVED_PROP,
     CONTACT_ATTACHMENTS_PROP, CONTACT_KEYS, CONTACT_PROFILE_PROP, DEFAULT_ADDRESS_BOOK_NAME,
     DEFAULT_RELATIONSHIP_KIND, JSCONTACT_CONTENT_TYPE, MAX_PROFILE_ENTRIES, MAX_PROFILE_TEXT_CHARS,
-    PROFILE_KEYS, UNNAMED_CONTACT_NAME, UNTITLED_ADDRESS_BOOK_NAME,
+    PERIOD_CURRENT_PROP, PERIOD_END_PROP, PERIOD_START_PROP, PROFILE_KEYS, UNNAMED_CONTACT_NAME,
+    UNTITLED_ADDRESS_BOOK_NAME, WORK_NOTE_PROP,
 };
 pub use error::CoreError;
+pub use flush::{
+    flush_failure, flush_plan, write_guard, FlushDrop, FlushFailure, FlushGuard, FlushPlan,
+    FlushWrite,
+};
 pub use http::{Header, HttpRequest, HttpResponse, Method, Step};
 pub use ics::{
     ics_fold, ics_parse, ics_rrule, ics_stamp, ics_write, CoreIcsEvent, CoreIcsExportEvent,
@@ -169,6 +182,14 @@ pub use sync::{
     walk_page, walk_start, ChangesPage, CoreSealedRow, RowOutcome, RowRef, StoredRow,
     UnreadableReason, WalkCursor, WalkOutcome, WalkStep, CHANGES_PAGE_LIMIT, SYNC_RESTART_LIMIT,
 };
+pub use task_rules::{
+    order_tasks, task_can_move, task_complete, task_export, task_import, task_list_can_move,
+    task_list_move_plan, task_list_remove_plan, task_move_plan, task_relist_plan, task_remove_plan,
+    task_reopen, task_subtree, CoreImportedTask, CoreTaskClock, CoreTaskCompletion, CoreTaskImport,
+    CoreTaskListWrite, CoreTaskOrderItem, CoreTaskPlan, CoreTaskWrite,
+    DEFAULT_TASK_LIST_REMOVE_REFUSAL, TASK_EXPORT_TYPE, TASK_IMPORT_REFUSAL,
+    TASK_LIST_MOVE_REFUSAL, TASK_MOVE_REFUSAL,
+};
 pub use tasks::{
     default_task_list_id, normalize_due_date, resolve_task_list_id, task_list_name_by_id,
     task_list_parse, task_list_tone, task_list_write, task_parse, task_write, CoreTask,
@@ -181,13 +202,21 @@ pub use contact_json::{contacts_import, json_import, CoreContactFile};
 pub use contact_search::{ContactIndex, CoreBookName, CoreContactSource};
 pub use csv::{csv_import, csv_parse, csv_rows, csv_write};
 pub use markdown::repair_pipe_tables;
+pub use merge::{conflict_copy, conflict_copy_id, merge_payload, MergeOutcome};
 pub use messages::{
-    attachment_message, auth_message, collection_busy_message, error_message, pair_message,
-    recovery_pending_message, roster_too_old_message, rotation_message,
+    attachment_message, auth_message, collection_busy_message, conflict_copy_title, error_message,
+    offline_conflict_message, offline_delete_kept_message, offline_overwrote_message,
+    offline_restored_message, pair_message, recovery_pending_message, roster_too_old_message,
+    rotation_message,
 };
 pub use notes_file::{
     notes_import, notes_write_json, notes_write_markdown, CoreNoteFile, CoreNoteFileEntry,
     CoreNoteSkipped,
+};
+pub use offline::{
+    local_vault_apply, local_vault_read, local_vault_write, local_view, outbox_fail, outbox_push,
+    outbox_read, outbox_settle, outbox_write, FailedWrite, LocalObject, LocalVault, Outbox,
+    PendingWrite, LOCAL_VAULT_VERSION, OUTBOX_VERSION,
 };
 pub use order::{name_key, order_by_name, order_by_recency, order_containers, CoreOrderItem};
 pub use sealbook_protocol::{PAYLOAD_SCHEMA_VERSION, PROTOCOL_VERSION};

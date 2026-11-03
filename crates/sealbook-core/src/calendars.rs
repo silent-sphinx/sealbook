@@ -116,12 +116,29 @@ impl CoreRecurrenceFrequency {
 
 /// Which occurrence of a weekday within a month a monthly rule lands on, as in
 /// "the third Tuesday". `ordinal` is 1 to 5 and `weekday` is 0 (Sunday) to 6.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct CoreNthWeekday {
     pub ordinal: u32,
     pub weekday: u32,
+    /// Keys of the stored entry this build does not write, as a JSON object.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "uniffi", uniffi(default = None))]
+    pub extra: Option<String>,
+}
+
+/// The ranges a reader keeps, which are also all a writer may store.
+fn valid_weekday(day: u32) -> bool {
+    day <= 6
+}
+
+fn valid_day_of_month(day: u32) -> bool {
+    (1..=31).contains(&day)
+}
+
+fn valid_nth(nth: &CoreNthWeekday) -> bool {
+    (1..=5).contains(&nth.ordinal) && valid_weekday(nth.weekday)
 }
 
 /// A repeat rule, in the shape the payload stores it.
@@ -460,6 +477,8 @@ fn parse_participants(value: Option<&Value>) -> Vec<String> {
 /// weekday of 9 or a 40th of the month is a rule no client can expand, and
 /// keeping the rest of a rule is closer to what was meant than guessing at the
 /// part that will not read.
+const NTH_WEEKDAY_KEYS: &[&str] = &["ordinal", "weekday"];
+
 const RECURRENCE_KEYS: &[&str] = &[
     "frequency",
     "interval",
@@ -483,8 +502,8 @@ pub(crate) fn parse_recurrence(object: &Map<String, Value>) -> Option<CoreRecurr
             entries
                 .iter()
                 .filter_map(Value::as_u64)
-                .filter(|day| *day <= 6)
-                .map(|day| day as u32)
+                .filter_map(|day| u32::try_from(day).ok())
+                .filter(|day| valid_weekday(*day))
                 .collect::<Vec<u32>>()
         })
         .unwrap_or_default();
@@ -492,12 +511,17 @@ pub(crate) fn parse_recurrence(object: &Map<String, Value>) -> Option<CoreRecurr
         .get("nthWeekday")
         .and_then(Value::as_object)
         .and_then(|nth| {
-            let ordinal = nth.get("ordinal").and_then(Value::as_u64)?;
-            let weekday = nth.get("weekday").and_then(Value::as_u64)?;
-            ((1..=5).contains(&ordinal) && weekday <= 6).then_some(CoreNthWeekday {
-                ordinal: ordinal as u32,
-                weekday: weekday as u32,
-            })
+            let read = |key: &str| {
+                nth.get(key)
+                    .and_then(Value::as_u64)
+                    .and_then(|value| u32::try_from(value).ok())
+            };
+            let entry = CoreNthWeekday {
+                ordinal: read("ordinal")?,
+                weekday: read("weekday")?,
+                extra: extra_of(nth, NTH_WEEKDAY_KEYS),
+            };
+            valid_nth(&entry).then_some(entry)
         });
     Some(CoreRecurrence {
         frequency,
@@ -510,8 +534,8 @@ pub(crate) fn parse_recurrence(object: &Map<String, Value>) -> Option<CoreRecurr
             .map(|count| count as u32),
         weekdays,
         day_of_month: number("dayOfMonth")
-            .filter(|day| (1..=31).contains(day))
-            .map(|day| day as u32),
+            .and_then(|day| u32::try_from(day).ok())
+            .filter(|day| valid_day_of_month(*day)),
         nth_weekday,
         extra: extra_of(object, RECURRENCE_KEYS),
     })
@@ -533,17 +557,23 @@ pub(crate) fn recurrence_json(rule: &CoreRecurrence) -> Value {
     if let Some(count) = rule.count.filter(|count| *count > 0) {
         object.insert("count".into(), json!(count));
     }
-    if !rule.weekdays.is_empty() {
-        object.insert("weekdays".into(), json!(rule.weekdays));
+    let weekdays: Vec<u32> = rule
+        .weekdays
+        .iter()
+        .copied()
+        .filter(|day| valid_weekday(*day))
+        .collect();
+    if !weekdays.is_empty() {
+        object.insert("weekdays".into(), json!(weekdays));
     }
-    if let Some(day) = rule.day_of_month {
+    if let Some(day) = rule.day_of_month.filter(|day| valid_day_of_month(*day)) {
         object.insert("dayOfMonth".into(), json!(day));
     }
-    if let Some(nth) = rule.nth_weekday {
-        object.insert(
-            "nthWeekday".into(),
-            json!({ "ordinal": nth.ordinal, "weekday": nth.weekday }),
-        );
+    if let Some(nth) = rule.nth_weekday.as_ref().filter(|nth| valid_nth(nth)) {
+        let mut entry = entry_with(&nth.extra);
+        entry.insert("ordinal".into(), json!(nth.ordinal));
+        entry.insert("weekday".into(), json!(nth.weekday));
+        object.insert("nthWeekday".into(), Value::Object(entry));
     }
     Value::Object(object)
 }

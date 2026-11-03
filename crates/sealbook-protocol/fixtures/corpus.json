@@ -444,6 +444,64 @@
             "raw"
           ],
           "expect": "settings"
+        },
+        {
+          "table": "sealed_rows",
+          "op": "sealed.open_row",
+          "args": [
+            "key",
+            "collection_id",
+            "row"
+          ],
+          "expect": "outcome"
+        }
+      ]
+    },
+    {
+      "file": "offline/offline.json",
+      "tables": [
+        {
+          "table": "outbox",
+          "op": "offline.outbox_push",
+          "args": [
+            "pushes"
+          ],
+          "expect": "outbox"
+        },
+        {
+          "table": "outbox",
+          "op": "offline.local_view",
+          "args": [
+            "vault",
+            "outbox"
+          ],
+          "expect": "view"
+        },
+        {
+          "table": "merge",
+          "op": "offline.merge",
+          "args": [
+            "content_type",
+            "base",
+            "local",
+            "remote",
+            {
+              "value": "2026-11-03"
+            }
+          ],
+          "expect": "outcome"
+        },
+        {
+          "table": "flush",
+          "op": "offline.flush_plan",
+          "args": [
+            "outbox",
+            "vault",
+            {
+              "value": "2026-11-03"
+            }
+          ],
+          "expect": "plan"
         }
       ]
     }

@@ -37,6 +37,7 @@ pub const ATTACHMENT_CHUNK_TAG_LEN: usize = 16;
 /// megabytes only to be rejected at commit. Re-declaring an id already `pending`
 /// is a no-op, which is what lets an interrupted upload resume.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CreateAttachmentRequest {
     pub attachment_id: Uuid,
     pub total_plaintext_size: u64,
@@ -45,6 +46,7 @@ pub struct CreateAttachmentRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CreateAttachmentResponse {
     pub attachment_id: Uuid,
     pub state: String,
@@ -52,6 +54,7 @@ pub struct CreateAttachmentResponse {
 
 /// An attachment's stored shape, without any chunk bytes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AttachmentMetaResponse {
     pub attachment_id: Uuid,
     pub state: String,
@@ -62,6 +65,7 @@ pub struct AttachmentMetaResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CommitAttachmentResponse {
     pub attachment_id: Uuid,
     pub state: String,
@@ -73,6 +77,7 @@ pub struct CommitAttachmentResponse {
 /// which attachments a note still references, so the sweep is driven entirely by
 /// the client cross-referencing these ids against its decrypted notes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AttachmentListEntry {
     pub attachment_id: Uuid,
     pub state: String,
@@ -80,6 +85,7 @@ pub struct AttachmentListEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ListAttachmentsResponse {
     pub attachments: Vec<AttachmentListEntry>,
     /// Set to the last id when a page was capped, to continue with `after`.

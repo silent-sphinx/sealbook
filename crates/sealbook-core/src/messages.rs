@@ -118,6 +118,34 @@ pub fn recovery_pending_message() -> String {
         .into()
 }
 
+/// The title a conflicted copy is saved under. `date` is the host's local
+/// `YYYY-MM-DD`.
+pub fn conflict_copy_title(title: &str, date: &str) -> String {
+    format!("{title} (conflict, {date})")
+}
+
+pub fn offline_conflict_message(title: &str, copy_title: &str) -> String {
+    format!(
+        "\"{title}\" was changed on this device and on another one. This device's version was \
+         saved as \"{copy_title}\"."
+    )
+}
+
+pub fn offline_overwrote_message(title: &str) -> String {
+    format!(
+        "\"{title}\" was changed on this device and on another one. This device's change was \
+         kept."
+    )
+}
+
+pub fn offline_restored_message(title: &str) -> String {
+    format!("\"{title}\" was deleted on another device. Your edit brought it back.")
+}
+
+pub fn offline_delete_kept_message(title: &str) -> String {
+    format!("\"{title}\" was changed on another device, so it wasn't deleted.")
+}
+
 /// The sentence for a core error that has one, `None` for the rest.
 ///
 /// The rest carry a detail meant for a log, and a host wraps them in its own

@@ -325,12 +325,15 @@ fn read(row: &Row, default_book: &str) -> Option<CoreContactDraft> {
             organization: organization.unwrap_or_default(),
             title,
             extra: None,
+            ..Default::default()
         }]
     } else {
         Vec::new()
     };
 
-    let mut address = Some(CoreContactAddress {
+    let address = CoreContactAddress {
+        kind: CoreChannelKind::Home,
+        label: None,
         street1: row.get(&[
             "street 1",
             "address street",
@@ -370,15 +373,13 @@ fn read(row: &Row, default_book: &str) -> Option<CoreContactDraft> {
             "home country",
             "address 1 - country",
         ]),
-    })
-    .filter(|a| {
-        a.street1.is_some()
-            || a.street2.is_some()
-            || a.locality.is_some()
-            || a.region.is_some()
-            || a.postcode.is_some()
-            || a.country.is_some()
-    });
+        ..Default::default()
+    };
+    let mut addresses = if address.is_blank() {
+        Vec::new()
+    } else {
+        vec![address]
+    };
 
     let mut dates = Vec::new();
     if let Some(date) = row.get(&[
@@ -480,10 +481,15 @@ fn read(row: &Row, default_book: &str) -> Option<CoreContactDraft> {
         work = rows;
     }
     if let Some(raw) = row.get(&["address (json)"]) {
-        if raw == "null" {
-            address = None;
-        } else if let Some(parsed) = address_of(&raw) {
-            address = Some(parsed);
+        if let Ok(value) = serde_json::from_str::<Value>(&raw) {
+            if value.is_null() {
+                addresses.clear();
+            } else {
+                let parsed = addresses_of(&value);
+                if !parsed.is_empty() {
+                    addresses = parsed;
+                }
+            }
         }
     }
     let profile = row
@@ -499,7 +505,7 @@ fn read(row: &Row, default_book: &str) -> Option<CoreContactDraft> {
         pronouns: row.get(&["pronouns", "pronoun", "x-pronouns"]),
         emails,
         phones,
-        address,
+        addresses,
         work,
         dates,
         socials,
@@ -609,27 +615,46 @@ pub(crate) fn work_of(entry: &Map<String, Value>) -> Option<CoreContactWork> {
         organization: organization.unwrap_or_default(),
         title,
         extra: None,
+        ..Default::default()
     })
 }
 
-pub(crate) fn address_of(raw: &str) -> Option<CoreContactAddress> {
-    let value: Value = serde_json::from_str(raw).ok()?;
-    let entry = value.as_object()?;
+fn address_of(entry: &Map<String, Value>) -> Option<CoreContactAddress> {
+    let kind = match text(entry, "kind")
+        .unwrap_or_default()
+        .to_lowercase()
+        .as_str()
+    {
+        "work" => CoreChannelKind::Work,
+        "custom" => CoreChannelKind::Custom,
+        _ => CoreChannelKind::Home,
+    };
     let address = CoreContactAddress {
+        kind,
+        label: text(entry, "label").filter(|_| kind == CoreChannelKind::Custom),
         street1: text(entry, "street1"),
         street2: text(entry, "street2"),
         locality: text(entry, "locality"),
         region: text(entry, "region"),
         postcode: text(entry, "postcode"),
         country: text(entry, "country"),
+        ..Default::default()
     };
-    let empty = address.street1.is_none()
-        && address.street2.is_none()
-        && address.locality.is_none()
-        && address.region.is_none()
-        && address.postcode.is_none()
-        && address.country.is_none();
-    (!empty).then_some(address)
+    (!address.is_blank()).then_some(address)
+}
+
+/// The addresses in a JSON column or field: a list, or the single object an
+/// older export wrote.
+pub(crate) fn addresses_of(value: &Value) -> Vec<CoreContactAddress> {
+    match value {
+        Value::Array(items) => items
+            .iter()
+            .filter_map(Value::as_object)
+            .filter_map(address_of)
+            .collect(),
+        Value::Object(entry) => address_of(entry).into_iter().collect(),
+        _ => Vec::new(),
+    }
 }
 
 /// Quotes a cell, and defuses one a spreadsheet would execute as a formula: Excel
@@ -729,18 +754,28 @@ fn work_json(work: &[CoreContactWork]) -> String {
     .to_string()
 }
 
-fn address_json(address: &Option<CoreContactAddress>) -> String {
-    let Some(a) = address else {
-        return "null".to_string();
-    };
-    let mut entry = Map::new();
-    put(&mut entry, "street1", &a.street1);
-    put(&mut entry, "street2", &a.street2);
-    put(&mut entry, "locality", &a.locality);
-    put(&mut entry, "region", &a.region);
-    put(&mut entry, "postcode", &a.postcode);
-    put(&mut entry, "country", &a.country);
-    Value::Object(entry).to_string()
+/// A list, which an older reader cannot use and so falls back to the plain
+/// columns for, holding the first address.
+fn addresses_json(addresses: &[CoreContactAddress]) -> String {
+    Value::Array(
+        addresses
+            .iter()
+            .filter(|a| !a.is_blank())
+            .map(|a| {
+                let mut entry = Map::new();
+                entry.insert("kind".into(), json!(kind_name(a.kind)));
+                put(&mut entry, "label", &a.label);
+                put(&mut entry, "street1", &a.street1);
+                put(&mut entry, "street2", &a.street2);
+                put(&mut entry, "locality", &a.locality);
+                put(&mut entry, "region", &a.region);
+                put(&mut entry, "postcode", &a.postcode);
+                put(&mut entry, "country", &a.country);
+                Value::Object(entry)
+            })
+            .collect(),
+    )
+    .to_string()
 }
 
 /// A CSV file holding `contacts`, with each row's book named from `books`. The
@@ -769,7 +804,12 @@ pub fn csv_write(contacts: &[CoreContactDraft], books: &[CoreAddressBook]) -> St
         )
         .to_string();
         let work = c.work.first();
-        let address = c.address.clone().unwrap_or_default();
+        let address = c
+            .addresses
+            .iter()
+            .find(|a| !a.is_blank())
+            .cloned()
+            .unwrap_or_default();
         let profile = c
             .profile
             .as_ref()
@@ -806,7 +846,7 @@ pub fn csv_write(contacts: &[CoreContactDraft], books: &[CoreAddressBook]) -> St
             &dates_json(&c.dates),
             &socials_json,
             &work_json(&c.work),
-            &address_json(&c.address),
+            &addresses_json(&c.addresses),
             &profile,
             opt(&c.created_at),
             "",

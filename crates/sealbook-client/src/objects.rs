@@ -3,11 +3,11 @@
 
 use uuid::Uuid;
 
-use sealbook_crypto::{content_digest, encrypt_object, object_aad, padded_len};
+use sealbook_crypto::{content_digest, encrypt_object, object_aad};
 use sealbook_protocol::envelope::seal_envelope;
 use sealbook_protocol::{
     BatchObject, ManifestEntry, PutObjectRequest, PutObjectsRequest, PutObjectsResponse,
-    MAX_BATCH_BYTES, MAX_BATCH_OBJECTS,
+    MAX_BATCH_OBJECTS,
 };
 use sealbook_protocol::{
     ADDRESS_BOOK_CONTENT_TYPE, BOOKMARK_COLLECTION_CONTENT_TYPE, BOOKMARK_CONTENT_TYPE,
@@ -62,35 +62,19 @@ pub struct ExportedObject {
     pub payload: String,
 }
 
-/// Splits objects into batches that fit a single request.
-///
-/// Bounded by object count and by padded bytes: `MAX_BATCH_OBJECTS` alone lets a
-/// batch of large objects exceed the server's body limit, which fails the write
-/// rather than splitting it. Sizes come from `padded_len` rather than from
-/// sealing, so a batch is sized before any of it is encrypted.
-///
-/// An object larger than the whole budget still goes, alone: it is within the
-/// body limit as a single write, and refusing it here would mean an object that
-/// can be exported but never imported.
+/// Splits objects into batches that fit a single request, by the sizes core's
+/// `write_batches` gives every client.
 fn import_chunks(objects: &[ExportedObject]) -> Vec<&[ExportedObject]> {
+    let lengths: Vec<u64> = objects
+        .iter()
+        .map(|object| object.payload.len() as u64)
+        .collect();
+    let mut rest = objects;
     let mut chunks = Vec::new();
-    let mut start = 0;
-    let mut bytes = 0;
-    for (index, object) in objects.iter().enumerate() {
-        let size = padded_len(object.payload.len());
-        let full = index - start == MAX_BATCH_OBJECTS;
-        let over = bytes + size > MAX_BATCH_BYTES;
-        // `index > start` keeps a single oversized object from closing an empty
-        // chunk, which would loop forever on it.
-        if full || (over && index > start) {
-            chunks.push(&objects[start..index]);
-            start = index;
-            bytes = 0;
-        }
-        bytes += size;
-    }
-    if start < objects.len() {
-        chunks.push(&objects[start..]);
+    for count in sealbook_core::write_batches(&lengths) {
+        let (chunk, tail) = rest.split_at(count as usize);
+        chunks.push(chunk);
+        rest = tail;
     }
     chunks
 }
@@ -161,7 +145,7 @@ impl SealbookClient {
             DEFAULT_ADDRESS_BOOK_ID,
             &CoreAddressBookDraft {
                 name: DEFAULT_ADDRESS_BOOK_NAME.to_string(),
-                raw: None,
+                ..Default::default()
             },
         )
         .await?;

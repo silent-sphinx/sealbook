@@ -11,7 +11,9 @@
 //! a null `payload` as absent and refused the file.
 //!
 //! **Ids are canonical.** An id is read in its hyphenated form, either case, and
-//! written lowercase.
+//! written lowercase. An object whose id is not a UUID cannot come from a vault,
+//! since the server refuses one, so the writer leaves it out and counts it as
+//! unreadable rather than write a file the reader refuses.
 //!
 //! **Order is fixed.** Objects are sorted by content type then id, byte for
 //! byte, and keys are sorted by the serialiser, so two exports of an unchanged
@@ -70,8 +72,9 @@ pub fn account_export_write(
 ) -> String {
     let mut sorted: Vec<(String, &CoreExportObject)> = objects
         .iter()
-        .map(|object| (canonical_id(&object.id), object))
+        .filter_map(|object| canonical_id(&object.id).map(|id| (id, object)))
         .collect();
+    let unreadable = unreadable.saturating_add((objects.len() - sorted.len()) as u32);
     sorted.sort_by(|(a_id, a), (b_id, b)| {
         a.content_type
             .cmp(&b.content_type)
@@ -248,8 +251,7 @@ pub mod ffi {
     }
 }
 
-/// The id as written: lowercase hyphenated when it parses, otherwise as given,
-/// so a vault object with an odd id is still in the backup.
-fn canonical_id(id: &str) -> String {
-    Uuid::parse_str(id).map_or_else(|_| id.to_string(), |id| id.to_string())
+/// The id as written, lowercase hyphenated, or `None` when it is not a UUID.
+fn canonical_id(id: &str) -> Option<String> {
+    Uuid::parse_str(id).ok().map(|id| id.to_string())
 }

@@ -38,6 +38,7 @@ pub fn speaks_protocol(reported: &str) -> bool {
 /// checking the generation it is talking to must not fail because the server
 /// grew a field describing an algorithm this build has no opinion about.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ProtocolReport {
     pub protocol: String,
 }
