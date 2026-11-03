@@ -272,21 +272,81 @@ fn contact_write_cases() -> Vec<(String, CoreContactDraft)> {
                         organization: "Navy".into(),
                         title: Some("Rear Admiral".into()),
                         extra: None,
+                        ..Default::default()
                     },
                     CoreContactWork {
                         organization: "Navy".into(),
                         title: Some("Programmer".into()),
                         extra: None,
+                        ..Default::default()
                     },
                     CoreContactWork {
                         organization: "Navy".into(),
                         title: None,
                         extra: None,
+                        ..Default::default()
                     },
                     CoreContactWork {
                         organization: "  ".into(),
                         title: Some("orphan".into()),
                         extra: None,
+                        ..Default::default()
+                    },
+                ],
+                ..blank()
+            },
+        ),
+        (
+            "workplaces with dates, a current one whose end is dropped, and one with none".into(),
+            CoreContactDraft {
+                name: "Grace".into(),
+                work: vec![
+                    CoreContactWork {
+                        organization: "UNIVAC".into(),
+                        title: Some("Programmer".into()),
+                        start: Some("1949".into()),
+                        end: Some("1971".into()),
+                        current: true,
+                        note: Some(" COBOL ".into()),
+                        extra: None,
+                    },
+                    CoreContactWork {
+                        organization: "Harvard".into(),
+                        start: Some(" 1944 ".into()),
+                        end: Some("1946-08".into()),
+                        ..Default::default()
+                    },
+                    CoreContactWork {
+                        organization: "Navy".into(),
+                        ..Default::default()
+                    },
+                ],
+                ..blank()
+            },
+        ),
+        (
+            "addresses with dates, a current one whose end is dropped".into(),
+            CoreContactDraft {
+                name: "Grace".into(),
+                addresses: vec![
+                    CoreContactAddress {
+                        locality: Some("Arlington".into()),
+                        start: Some(" 1967-08 ".into()),
+                        end: Some("1980".into()),
+                        current: true,
+                        ..Default::default()
+                    },
+                    CoreContactAddress {
+                        kind: CoreChannelKind::Work,
+                        locality: Some("Philadelphia".into()),
+                        start: Some("1949".into()),
+                        end: Some("1950-03-14".into()),
+                        ..Default::default()
+                    },
+                    CoreContactAddress {
+                        locality: Some("New York".into()),
+                        end: Some("1924".into()),
+                        ..Default::default()
                     },
                 ],
                 ..blank()
@@ -571,6 +631,18 @@ fn contact_parse_cases() -> Vec<(String, String, String)> {
         case(
             "a payload from a newer schema major",
             r#"{"@type":"Card","version":"2.0","name":{"full":"future"}}"#.into(),
+        ),
+        case(
+            "career rows from a build before workplace dates, folded into work; the one matching a stored job dates it",
+            r#"{"@type":"Card","version":"1.0","name":{"full":"Grace"},"organizations":{"o1":{"name":"Navy"}},"titles":{"t1":{"kind":"title","name":"Programmer","organization":"o1"}},"sealbook:profile":{"@type":"SealbookProfile","version":"1.0","career":[{"organization":"navy ","title":"programmer","start":"1943"},{"organization":"Harvard","title":"Research fellow","start":"1944","end":"1946-08","note":"Mark I"}],"pets":[{"name":"Rex"}]}}"#.into(),
+        ),
+        case(
+            "a current workplace whose stored end is ignored, and a key from a later build kept",
+            r#"{"name":{"full":"Grace"},"organizations":{"o1":{"name":"UNIVAC","sealbook:start":"1949","sealbook:end":"1950","sealbook:current":true,"sealbook:note":"COBOL","rank":2}}}"#.into(),
+        ),
+        case(
+            "addresses with dates, a current one whose stored end is ignored",
+            r#"{"name":{"full":"Grace"},"addresses":{"a1":{"locality":"Arlington","sealbook:start":"1967","sealbook:end":"1970","sealbook:current":true},"a2":{"locality":"New York","sealbook:start":" 1906 ","sealbook:end":"1924-05","rank":1}}}"#.into(),
         ),
     ]
 }
@@ -949,4 +1021,50 @@ fn a_csv_or_json_file_from_before_address_lists_still_reads() {
     let back = csv_parse(csv, &default_address_book_id());
     assert_eq!(back[0].addresses.len(), 1);
     assert_eq!(back[0].addresses[0].locality.as_deref(), Some("London"));
+}
+
+#[test]
+fn a_vcard_lists_only_the_workplaces_that_are_not_finished() {
+    let job = |organization: &str, end: Option<&str>, current: bool| CoreContactWork {
+        organization: organization.into(),
+        end: end.map(Into::into),
+        current,
+        ..Default::default()
+    };
+    let card = CoreContactDraft {
+        name: "Grace".into(),
+        work: vec![
+            job("UNIVAC", None, true),
+            job("Harvard", Some("1946"), false),
+            job("Navy", None, false),
+        ],
+        ..blank()
+    };
+    let text = vcard_write(&[card]);
+    assert!(text.contains("ORG:UNIVAC"));
+    assert!(text.contains("ORG:Navy"));
+    assert!(!text.contains("Harvard"));
+}
+
+#[test]
+fn a_vcard_lists_only_the_addresses_they_have_not_left() {
+    let home = |locality: &str, end: Option<&str>, current: bool| CoreContactAddress {
+        locality: Some(locality.into()),
+        end: end.map(Into::into),
+        current,
+        ..Default::default()
+    };
+    let card = CoreContactDraft {
+        name: "Grace".into(),
+        addresses: vec![
+            home("Arlington", None, true),
+            home("New York", Some("1924"), false),
+            home("Philadelphia", None, false),
+        ],
+        ..blank()
+    };
+    let text = vcard_write(&[card]);
+    assert!(text.contains("Arlington"));
+    assert!(text.contains("Philadelphia"));
+    assert!(!text.contains("New York"));
 }

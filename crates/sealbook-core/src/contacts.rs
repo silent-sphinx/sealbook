@@ -53,6 +53,20 @@ pub const CONTACT_ARCHIVED_PROP: &str = "sealbook:archived";
 /// Absent on a contact with no attachments.
 pub const CONTACT_ATTACHMENTS_PROP: &str = "sealbook:attachments";
 pub const CONTACT_PROFILE_PROP: &str = "sealbook:profile";
+/// When a workplace or an address began and ended, and whether it is current,
+/// on its `organizations` or `addresses` entry.
+pub const PERIOD_START_PROP: &str = "sealbook:start";
+pub const PERIOD_END_PROP: &str = "sealbook:end";
+pub const PERIOD_CURRENT_PROP: &str = "sealbook:current";
+/// A workplace's note, on its `organizations` entry.
+pub const WORK_NOTE_PROP: &str = "sealbook:note";
+const WORK_KEYS: &[&str] = &[
+    "name",
+    PERIOD_START_PROP,
+    PERIOD_END_PROP,
+    PERIOD_CURRENT_PROP,
+    WORK_NOTE_PROP,
+];
 
 /// What a card with no name, nickname, email or number is listed as.
 pub const UNNAMED_CONTACT_NAME: &str = "Unnamed contact";
@@ -155,6 +169,17 @@ pub struct CoreContactAddress {
     pub postcode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub country: Option<String>,
+    /// When they moved in, as a partial ISO date.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "uniffi", uniffi(default = None))]
+    pub start: Option<String>,
+    /// When they left. Absent while `current`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "uniffi", uniffi(default = None))]
+    pub end: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[cfg_attr(feature = "uniffi", uniffi(default = false))]
+    pub current: bool,
     /// Keys of the stored entry this build does not write, as a JSON object.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "uniffi", uniffi(default = None))]
@@ -193,13 +218,27 @@ impl CoreContactAddress {
 }
 
 /// One workplace and, when there is one, the title held there.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct CoreContactWork {
     pub organization: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Partial ISO dates (`YYYY`, `YYYY-MM`, `YYYY-MM-DD`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "uniffi", uniffi(default = None))]
+    pub start: Option<String>,
+    /// Never set alongside `current`; the writer drops it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "uniffi", uniffi(default = None))]
+    pub end: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[cfg_attr(feature = "uniffi", uniffi(default = false))]
+    pub current: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "uniffi", uniffi(default = None))]
+    pub note: Option<String>,
     /// Keys of the stored entry this build does not write, as a JSON object.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "uniffi", uniffi(default = None))]
@@ -485,9 +524,47 @@ fn parse_channels(
 }
 
 const ADDRESS_KEYS: &[&str] = &[
-    "street", "locality", "region", "postCode", "postcode", "country", "contexts", "features",
+    "street",
+    "locality",
+    "region",
+    "postCode",
+    "postcode",
+    "country",
+    "contexts",
+    "features",
     "label",
+    PERIOD_START_PROP,
+    PERIOD_END_PROP,
+    PERIOD_CURRENT_PROP,
 ];
+
+/// The start, end and current flag of an entry. A current entry has no end,
+/// so a stored one is ignored.
+fn period_of(entry: &Map<String, Value>) -> (Option<String>, Option<String>, bool) {
+    let current = entry.get(PERIOD_CURRENT_PROP).and_then(Value::as_bool) == Some(true);
+    let end = if current {
+        None
+    } else {
+        trimmed(entry, PERIOD_END_PROP)
+    };
+    (trimmed(entry, PERIOD_START_PROP), end, current)
+}
+
+fn put_period(
+    entry: &mut Map<String, Value>,
+    start: &Option<String>,
+    end: &Option<String>,
+    current: bool,
+) {
+    if let Some(start) = present(start) {
+        entry.insert(PERIOD_START_PROP.into(), json!(start));
+    }
+    if current {
+        entry.insert(PERIOD_CURRENT_PROP.into(), json!(true));
+    } else if let Some(end) = present(end) {
+        entry.insert(PERIOD_END_PROP.into(), json!(end));
+    }
+}
 
 fn parse_addresses(card: &Map<String, Value>) -> Vec<CoreContactAddress> {
     objects(card, "addresses")
@@ -507,6 +584,7 @@ fn address_of(entry: &Map<String, Value>) -> Option<CoreContactAddress> {
     };
     let line = |index: usize| street.get(index).filter(|text| !text.is_empty()).cloned();
     let (kind, label) = channel_kind(entry, CoreChannelKind::Home);
+    let (start, end, current) = period_of(entry);
     let address = CoreContactAddress {
         kind,
         label,
@@ -516,6 +594,9 @@ fn address_of(entry: &Map<String, Value>) -> Option<CoreContactAddress> {
         region: trimmed(entry, "region"),
         postcode: first_of(entry, &["postCode", "postcode"]),
         country: trimmed(entry, "country"),
+        start,
+        end,
+        current,
         extra: extra_of(entry, ADDRESS_KEYS),
     };
     (!address.is_blank()).then_some(address)
@@ -533,22 +614,64 @@ fn parse_work(card: &Map<String, Value>) -> Vec<CoreContactWork> {
             .filter(|(_, title)| title.get("organization").and_then(Value::as_str) == Some(org_id))
             .filter_map(|(_, title)| trimmed(title, "name"))
             .collect();
+        let (start, end, current) = period_of(org);
+        let row = |title: Option<String>| CoreContactWork {
+            organization: organization.clone(),
+            title,
+            start: start.clone(),
+            end: end.clone(),
+            current,
+            note: trimmed(org, WORK_NOTE_PROP),
+            extra: extra_of(org, WORK_KEYS),
+        };
         if linked.is_empty() {
-            work.push(CoreContactWork {
-                organization: organization.clone(),
-                title: None,
-                extra: extra_of(org, &["name"]),
-            });
+            work.push(row(None));
         }
         for title in linked {
-            work.push(CoreContactWork {
-                organization: organization.clone(),
-                title: Some(title),
-                extra: extra_of(org, &["name"]),
-            });
+            work.push(row(Some(title)));
         }
     }
     work
+}
+
+/// Moves the profile's career rows onto `work`, which is where a workplace's
+/// dates live now. A row naming a workplace already on the card fills in that
+/// row's dates rather than listing the job twice. Runs on every read, so a
+/// career row a build predating `PERIOD_START_PROP` writes later is moved too.
+fn fold_career(work: &mut Vec<CoreContactWork>, profile: &mut Option<CoreContactProfile>) {
+    let Some(profile) = profile.as_mut() else {
+        return;
+    };
+    let same = |a: &str, b: &str| a.trim().eq_ignore_ascii_case(b.trim());
+    for job in std::mem::take(&mut profile.career) {
+        let current = job.end.is_none() && job.start.is_some();
+        let matched = work.iter_mut().find(|row| {
+            same(&row.organization, &job.organization)
+                && same(
+                    row.title.as_deref().unwrap_or_default(),
+                    job.title.as_deref().unwrap_or_default(),
+                )
+                && row.start.is_none()
+                && row.end.is_none()
+        });
+        match matched {
+            Some(row) => {
+                row.start = job.start;
+                row.end = job.end;
+                row.current = row.current || row.end.is_none();
+                row.note = row.note.take().or(job.note);
+            }
+            None => work.push(CoreContactWork {
+                organization: job.organization,
+                title: job.title,
+                start: job.start,
+                end: job.end,
+                current,
+                note: job.note,
+                extra: None,
+            }),
+        }
+    }
 }
 
 fn parse_dates(card: &Map<String, Value>) -> Vec<CoreContactDate> {
@@ -718,8 +841,10 @@ pub fn contact_parse(id: &str, raw: &str) -> CoreContact {
         &["number", "phoneNumber"],
         CoreChannelKind::Mobile,
     );
-    let work = parse_work(&card);
+    let mut work = parse_work(&card);
     let name = parse_name(&card, &work);
+    let mut profile = parse_profile(card.get(CONTACT_PROFILE_PROP));
+    fold_career(&mut work, &mut profile);
     let nickname = parse_nickname(&card);
     let pronouns = card
         .get("speakToAs")
@@ -740,7 +865,7 @@ pub fn contact_parse(id: &str, raw: &str) -> CoreContact {
         socials: parse_socials(&card),
         notes: parse_notes(&card),
         avatar: parse_avatar(&card),
-        profile: parse_profile(card.get(CONTACT_PROFILE_PROP)),
+        profile,
         attachments: parse_attachments(card.get(CONTACT_ATTACHMENTS_PROP)),
         address_book_id: resolve_address_book_id(trimmed(&card, ADDRESS_BOOK_ID_PROP)),
         archived: card.get(CONTACT_ARCHIVED_PROP).and_then(Value::as_bool) == Some(true),
@@ -825,6 +950,7 @@ fn address_entry(address: &CoreContactAddress) -> Option<Value> {
         }
     }
     put_kind(&mut entry, address.kind, &address.label, false);
+    put_period(&mut entry, &address.start, &address.end, address.current);
     Some(Value::Object(entry))
 }
 
@@ -906,6 +1032,10 @@ fn work_entries(work: &[CoreContactWork]) -> (Option<Value>, Option<Value>) {
         let org_id = format!("o{}", organizations.len() + 1);
         let mut org = entry_with(&row.extra);
         org.insert("name".into(), json!(organization));
+        put_period(&mut org, &row.start, &row.end, row.current);
+        if let Some(note) = present(&row.note) {
+            org.insert(WORK_NOTE_PROP.into(), json!(note));
+        }
         organizations.insert(org_id.clone(), Value::Object(org));
         if let Some(title) = present(&row.title) {
             titles.insert(

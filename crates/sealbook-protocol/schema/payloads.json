@@ -395,6 +395,15 @@
               "region": {
                 "type": "string"
               },
+              "sealbook:current": {
+                "type": "boolean"
+              },
+              "sealbook:end": {
+                "type": "string"
+              },
+              "sealbook:start": {
+                "type": "string"
+              },
               "street": {
                 "items": {
                   "type": "string"
@@ -558,6 +567,18 @@
           "additionalProperties": {
             "properties": {
               "name": {
+                "type": "string"
+              },
+              "sealbook:current": {
+                "type": "boolean"
+              },
+              "sealbook:end": {
+                "type": "string"
+              },
+              "sealbook:note": {
+                "type": "string"
+              },
+              "sealbook:start": {
                 "type": "string"
               }
             },

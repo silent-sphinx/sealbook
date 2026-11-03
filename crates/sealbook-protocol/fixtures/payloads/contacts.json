@@ -240,6 +240,74 @@
       "payload": "{\"@type\":\"Card\",\"created\":\"2026-10-28T12:00:00.000Z\",\"name\":{\"full\":\"Work\"},\"organizations\":{\"o1\":{\"name\":\"Navy\"},\"o2\":{\"name\":\"Navy\"},\"o3\":{\"name\":\"Navy\"}},\"sealbook:addressBookId\":\"00000000-0000-0000-0000-000000000001\",\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Rear Admiral\",\"organization\":\"o1\"},\"t2\":{\"kind\":\"title\",\"name\":\"Programmer\",\"organization\":\"o2\"}},\"updated\":\"2026-10-28T12:00:00.000Z\",\"version\":\"1.0\"}"
     },
     {
+      "case": "workplaces with dates, a current one whose end is dropped, and one with none",
+      "draft": {
+        "name": "Grace",
+        "emails": [],
+        "phones": [],
+        "addresses": [],
+        "work": [
+          {
+            "organization": "UNIVAC",
+            "title": "Programmer",
+            "start": "1949",
+            "end": "1971",
+            "current": true,
+            "note": " COBOL "
+          },
+          {
+            "organization": "Harvard",
+            "start": " 1944 ",
+            "end": "1946-08"
+          },
+          {
+            "organization": "Navy"
+          }
+        ],
+        "dates": [],
+        "socials": [],
+        "attachments": [],
+        "address_book_id": "00000000-0000-0000-0000-000000000001",
+        "archived": false
+      },
+      "payload": "{\"@type\":\"Card\",\"created\":\"2026-10-28T12:00:00.000Z\",\"name\":{\"full\":\"Grace\"},\"organizations\":{\"o1\":{\"name\":\"UNIVAC\",\"sealbook:current\":true,\"sealbook:note\":\"COBOL\",\"sealbook:start\":\"1949\"},\"o2\":{\"name\":\"Harvard\",\"sealbook:end\":\"1946-08\",\"sealbook:start\":\"1944\"},\"o3\":{\"name\":\"Navy\"}},\"sealbook:addressBookId\":\"00000000-0000-0000-0000-000000000001\",\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Programmer\",\"organization\":\"o1\"}},\"updated\":\"2026-10-28T12:00:00.000Z\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "addresses with dates, a current one whose end is dropped",
+      "draft": {
+        "name": "Grace",
+        "emails": [],
+        "phones": [],
+        "addresses": [
+          {
+            "kind": "home",
+            "locality": "Arlington",
+            "start": " 1967-08 ",
+            "end": "1980",
+            "current": true
+          },
+          {
+            "kind": "work",
+            "locality": "Philadelphia",
+            "start": "1949",
+            "end": "1950-03-14"
+          },
+          {
+            "kind": "home",
+            "locality": "New York",
+            "end": "1924"
+          }
+        ],
+        "work": [],
+        "dates": [],
+        "socials": [],
+        "attachments": [],
+        "address_book_id": "00000000-0000-0000-0000-000000000001",
+        "archived": false
+      },
+      "payload": "{\"@type\":\"Card\",\"addresses\":{\"a1\":{\"contexts\":{\"private\":true},\"locality\":\"Arlington\",\"sealbook:current\":true,\"sealbook:start\":\"1967-08\"},\"a2\":{\"contexts\":{\"work\":true},\"locality\":\"Philadelphia\",\"sealbook:end\":\"1950-03-14\",\"sealbook:start\":\"1949\"},\"a3\":{\"contexts\":{\"private\":true},\"locality\":\"New York\",\"sealbook:end\":\"1924\"}},\"created\":\"2026-10-28T12:00:00.000Z\",\"name\":{\"full\":\"Grace\"},\"sealbook:addressBookId\":\"00000000-0000-0000-0000-000000000001\",\"updated\":\"2026-10-28T12:00:00.000Z\",\"version\":\"1.0\"}"
+    },
+    {
       "case": "dates of each kind, the label written only for a custom one",
       "draft": {
         "name": "Dates",
@@ -1739,6 +1807,123 @@
         "archived": false,
         "readable": false,
         "raw": "{\"@type\":\"Card\",\"version\":\"2.0\",\"name\":{\"full\":\"future\"}}"
+      }
+    },
+    {
+      "case": "career rows from a build before workplace dates, folded into work; the one matching a stored job dates it",
+      "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "raw": "{\"@type\":\"Card\",\"version\":\"1.0\",\"name\":{\"full\":\"Grace\"},\"organizations\":{\"o1\":{\"name\":\"Navy\"}},\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Programmer\",\"organization\":\"o1\"}},\"sealbook:profile\":{\"@type\":\"SealbookProfile\",\"version\":\"1.0\",\"career\":[{\"organization\":\"navy \",\"title\":\"programmer\",\"start\":\"1943\"},{\"organization\":\"Harvard\",\"title\":\"Research fellow\",\"start\":\"1944\",\"end\":\"1946-08\",\"note\":\"Mark I\"}],\"pets\":[{\"name\":\"Rex\"}]}}",
+      "contact": {
+        "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        "name": "Grace",
+        "display_name": "Grace",
+        "emails": [],
+        "phones": [],
+        "addresses": [],
+        "work": [
+          {
+            "organization": "Navy",
+            "title": "Programmer",
+            "start": "1943",
+            "current": true
+          },
+          {
+            "organization": "Harvard",
+            "title": "Research fellow",
+            "start": "1944",
+            "end": "1946-08",
+            "note": "Mark I"
+          }
+        ],
+        "dates": [],
+        "socials": [],
+        "profile": {
+          "interests": [],
+          "music": [],
+          "food": [],
+          "pets": [
+            {
+              "name": "Rex"
+            }
+          ],
+          "career": [],
+          "relationships": [],
+          "timeline": [],
+          "family": [],
+          "friends": [],
+          "colleagues": [],
+          "custom": [],
+          "extra": "{}"
+        },
+        "attachments": [],
+        "address_book_id": "00000000-0000-0000-0000-000000000001",
+        "archived": false,
+        "readable": true,
+        "raw": "{\"@type\":\"Card\",\"version\":\"1.0\",\"name\":{\"full\":\"Grace\"},\"organizations\":{\"o1\":{\"name\":\"Navy\"}},\"titles\":{\"t1\":{\"kind\":\"title\",\"name\":\"Programmer\",\"organization\":\"o1\"}},\"sealbook:profile\":{\"@type\":\"SealbookProfile\",\"version\":\"1.0\",\"career\":[{\"organization\":\"navy \",\"title\":\"programmer\",\"start\":\"1943\"},{\"organization\":\"Harvard\",\"title\":\"Research fellow\",\"start\":\"1944\",\"end\":\"1946-08\",\"note\":\"Mark I\"}],\"pets\":[{\"name\":\"Rex\"}]}}"
+      }
+    },
+    {
+      "case": "a current workplace whose stored end is ignored, and a key from a later build kept",
+      "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "raw": "{\"name\":{\"full\":\"Grace\"},\"organizations\":{\"o1\":{\"name\":\"UNIVAC\",\"sealbook:start\":\"1949\",\"sealbook:end\":\"1950\",\"sealbook:current\":true,\"sealbook:note\":\"COBOL\",\"rank\":2}}}",
+      "contact": {
+        "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        "name": "Grace",
+        "display_name": "Grace",
+        "emails": [],
+        "phones": [],
+        "addresses": [],
+        "work": [
+          {
+            "organization": "UNIVAC",
+            "start": "1949",
+            "current": true,
+            "note": "COBOL",
+            "extra": "{\"rank\":2}"
+          }
+        ],
+        "dates": [],
+        "socials": [],
+        "attachments": [],
+        "address_book_id": "00000000-0000-0000-0000-000000000001",
+        "archived": false,
+        "readable": true,
+        "raw": "{\"name\":{\"full\":\"Grace\"},\"organizations\":{\"o1\":{\"name\":\"UNIVAC\",\"sealbook:start\":\"1949\",\"sealbook:end\":\"1950\",\"sealbook:current\":true,\"sealbook:note\":\"COBOL\",\"rank\":2}}}"
+      }
+    },
+    {
+      "case": "addresses with dates, a current one whose stored end is ignored",
+      "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "raw": "{\"name\":{\"full\":\"Grace\"},\"addresses\":{\"a1\":{\"locality\":\"Arlington\",\"sealbook:start\":\"1967\",\"sealbook:end\":\"1970\",\"sealbook:current\":true},\"a2\":{\"locality\":\"New York\",\"sealbook:start\":\" 1906 \",\"sealbook:end\":\"1924-05\",\"rank\":1}}}",
+      "contact": {
+        "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        "name": "Grace",
+        "display_name": "Grace",
+        "emails": [],
+        "phones": [],
+        "addresses": [
+          {
+            "kind": "home",
+            "locality": "Arlington",
+            "start": "1967",
+            "current": true
+          },
+          {
+            "kind": "home",
+            "locality": "New York",
+            "start": "1906",
+            "end": "1924-05",
+            "extra": "{\"rank\":1}"
+          }
+        ],
+        "work": [],
+        "dates": [],
+        "socials": [],
+        "attachments": [],
+        "address_book_id": "00000000-0000-0000-0000-000000000001",
+        "archived": false,
+        "readable": true,
+        "raw": "{\"name\":{\"full\":\"Grace\"},\"addresses\":{\"a1\":{\"locality\":\"Arlington\",\"sealbook:start\":\"1967\",\"sealbook:end\":\"1970\",\"sealbook:current\":true},\"a2\":{\"locality\":\"New York\",\"sealbook:start\":\" 1906 \",\"sealbook:end\":\"1924-05\",\"rank\":1}}}"
       }
     }
   ],
