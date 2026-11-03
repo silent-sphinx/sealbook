@@ -133,7 +133,8 @@ fn stored_card() -> String {
         },
         "addresses": {
             "a1": { "street": ["1 Engine Row", "Flat 2"], "locality": "London", "postCode": "N1", "country": "UK" },
-            "a2": { "locality": "Paris" }
+            "a2": { "locality": "Paris", "contexts": { "work": true } },
+            "a3": { "components": [{ "kind": "locality", "value": "Oslo" }] }
         },
         "organizations": { "o1": { "name": "Analytical Engines" }, "o2": { "name": "Royal Society" } },
         "titles": {
@@ -196,10 +197,10 @@ fn contact_write_cases() -> Vec<(String, CoreContactDraft)> {
                     channel(CoreChannelKind::Work, "   "),
                 ],
                 notes: Some("  ".into()),
-                address: Some(CoreContactAddress {
+                addresses: vec![CoreContactAddress {
                     street1: Some("  ".into()),
                     ..Default::default()
-                }),
+                }],
                 socials: vec![CoreContactSocial {
                     platform: "  ".into(),
                     handle: " @grace ".into(),
@@ -228,6 +229,36 @@ fn contact_write_cases() -> Vec<(String, CoreContactDraft)> {
                     channel(CoreChannelKind::Home, "2"),
                     channel(CoreChannelKind::Mobile, "3"),
                     channel(CoreChannelKind::Custom, "4"),
+                ],
+                ..blank()
+            },
+        ),
+        (
+            "an address of every kind, in the order given".into(),
+            CoreContactDraft {
+                name: "Addresses".into(),
+                addresses: vec![
+                    CoreContactAddress {
+                        kind: CoreChannelKind::Work,
+                        street1: Some("1 Office Park".into()),
+                        locality: Some("Leeds".into()),
+                        ..Default::default()
+                    },
+                    CoreContactAddress {
+                        kind: CoreChannelKind::Home,
+                        street1: Some(" 2 Home Lane ".into()),
+                        street2: Some("Flat 3".into()),
+                        postcode: Some("LS1".into()),
+                        country: Some("UK".into()),
+                        ..Default::default()
+                    },
+                    CoreContactAddress {
+                        kind: CoreChannelKind::Custom,
+                        label: Some(" Cabin ".into()),
+                        locality: Some("Bergen".into()),
+                        region: Some("Vestland".into()),
+                        ..Default::default()
+                    },
                 ],
                 ..blank()
             },
@@ -430,9 +461,9 @@ fn contact_write_cases() -> Vec<(String, CoreContactDraft)> {
             },
         ),
         (
-            "clearing the address and the note shows the next of each".into(),
+            "removing the first address, and clearing the note, which shows the next".into(),
             CoreContactDraft {
-                address: None,
+                addresses: edited.addresses[1..].to_vec(),
                 notes: None,
                 ..edited.clone()
             },
@@ -858,4 +889,64 @@ fn keys_this_build_does_not_write_survive_an_edit() {
     assert_eq!(written["organizations"]["o1"]["sortName"], "ACME");
     assert_eq!(written["anniversaries"]["a1"]["calendarScale"], "gregorian");
     assert_eq!(written["onlineServices"]["os1"]["vendorName"], "x");
+}
+
+fn three_addresses() -> CoreContactDraft {
+    let address = |kind, label: Option<&str>, locality: &str| CoreContactAddress {
+        kind,
+        label: label.map(Into::into),
+        street1: Some(format!("1 {locality} Road")),
+        locality: Some(locality.into()),
+        ..Default::default()
+    };
+    CoreContactDraft {
+        name: "Ada".into(),
+        addresses: vec![
+            address(CoreChannelKind::Home, None, "London"),
+            address(CoreChannelKind::Work, None, "Leeds"),
+            address(CoreChannelKind::Custom, Some("Cabin"), "Bergen"),
+        ],
+        ..blank()
+    }
+}
+
+fn localities(draft: &CoreContactDraft) -> Vec<(CoreChannelKind, String)> {
+    draft
+        .addresses
+        .iter()
+        .map(|a| (a.kind, a.locality.clone().unwrap_or_default()))
+        .collect()
+}
+
+#[test]
+fn every_address_survives_a_vcard_round_trip() {
+    let text = vcard_write(&[three_addresses()]);
+    assert_eq!(text.matches("\r\nADR;").count(), 3);
+    assert!(text.contains("ADR;TYPE=WORK:"));
+    let back = vcard_parse(&text, &default_address_book_id());
+    assert_eq!(localities(&back[0]), localities(&three_addresses()));
+    assert_eq!(back[0].addresses[2].label.as_deref(), Some("cabin"));
+}
+
+#[test]
+fn every_address_survives_a_csv_round_trip() {
+    let text = csv_write(&[three_addresses()], &[]);
+    let back = csv_parse(&text, &default_address_book_id());
+    assert_eq!(localities(&back[0]), localities(&three_addresses()));
+    assert_eq!(back[0].addresses[2].label.as_deref(), Some("Cabin"));
+}
+
+#[test]
+fn a_csv_or_json_file_from_before_address_lists_still_reads() {
+    let json = r#"{"contacts":[{"name":"Ada","address":{"locality":"London"}}]}"#;
+    let read = json_import(json, &default_address_book_id()).unwrap();
+    assert_eq!(
+        read.contacts[0].addresses[0].locality.as_deref(),
+        Some("London")
+    );
+
+    let csv = "Name,City,Address (JSON)\r\nAda,Paris,\"{\"\"locality\"\":\"\"London\"\"}\"";
+    let back = csv_parse(csv, &default_address_book_id());
+    assert_eq!(back[0].addresses.len(), 1);
+    assert_eq!(back[0].addresses[0].locality.as_deref(), Some("London"));
 }

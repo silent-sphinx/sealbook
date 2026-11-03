@@ -360,6 +360,9 @@ fn card() -> Value {
                 "region": string(),
                 "postCode": string(),
                 "country": string(),
+                "contexts": flags(&["work", "private"]),
+                "features": flags(&["mobile"]),
+                "label": string(),
             }))),
             "organizations": map_of(object(json!({ "name": string() }))),
             "titles": map_of(object(json!({

@@ -19,10 +19,10 @@ use rustls_pki_types::CertificateDer;
 use sealbook_client::{
     account_export_parse, account_export_write, contact_parse, contact_write, event_parse,
     ics_parse, note_parse, note_write, notes_import, CoreAddressBookDraft, CoreCalendarDraft,
-    CoreCalendarEventDraft, CoreChannelKind, CoreContactChannel, CoreContactDraft, CoreIcsEvent,
-    CoreNoteDraft, ExportedObject, LocalState, SealbookClient, DEFAULT_ADDRESS_BOOK_ID,
-    DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_BOOKMARK_COLLECTION_NAME, DEFAULT_CALENDAR_COLOR,
-    DEFAULT_CALENDAR_ID, DEFAULT_CALENDAR_NAME, DEFAULT_NOTEBOOK_NAME,
+    CoreCalendarEventDraft, CoreChannelKind, CoreContactAddress, CoreContactChannel,
+    CoreContactDraft, CoreIcsEvent, CoreNoteDraft, ExportedObject, LocalState, SealbookClient,
+    DEFAULT_ADDRESS_BOOK_ID, DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_BOOKMARK_COLLECTION_NAME,
+    DEFAULT_CALENDAR_COLOR, DEFAULT_CALENDAR_ID, DEFAULT_CALENDAR_NAME, DEFAULT_NOTEBOOK_NAME,
 };
 use sha2::{Digest, Sha256};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
@@ -173,6 +173,11 @@ enum ContactsCommand {
         email: Option<String>,
         #[arg(long)]
         book: Option<String>,
+        /// A postal address, as `key=value` pairs split by `;`. Keys: kind
+        /// (home, work, or any other word as a label), street1, street2, city,
+        /// region, postcode, country. Repeat for more than one.
+        #[arg(long = "address", value_parser = parse_address_spec)]
+        addresses: Vec<CoreContactAddress>,
     },
     Update {
         #[arg(long)]
@@ -183,6 +188,13 @@ enum ContactsCommand {
         email: Option<String>,
         #[arg(long)]
         book: Option<String>,
+        /// As for `put`. Given at least once, replaces the card's addresses;
+        /// left out, keeps them.
+        #[arg(long = "address", value_parser = parse_address_spec)]
+        addresses: Vec<CoreContactAddress>,
+        /// Removes every address the card has.
+        #[arg(long, conflicts_with = "addresses")]
+        clear_addresses: bool,
     },
     Delete {
         #[arg(long)]
@@ -572,7 +584,12 @@ async fn main() -> Result<()> {
             }
         }
         Command::Contacts { command } => match command {
-            ContactsCommand::Put { name, email, book } => {
+            ContactsCommand::Put {
+                name,
+                email,
+                book,
+                addresses,
+            } => {
                 let state = load_state(&cli.state)?;
                 let password = std::env::var("SEALBOOK_PASSWORD")
                     .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
@@ -586,7 +603,7 @@ async fn main() -> Result<()> {
                 let books = client.list_address_books().await.context("books")?;
                 let book_id =
                     resolve_book(&books, book.as_deref())?.unwrap_or(DEFAULT_ADDRESS_BOOK_ID);
-                let contact = jscontact(&name, email.as_deref(), book_id, None)?;
+                let contact = jscontact(&name, email.as_deref(), Some(addresses), book_id, None)?;
                 let id = Uuid::new_v4();
                 let revision = client.put_contact(id, &contact).await.context("put")?;
                 println!("stored encrypted contact {id} at revision {revision}");
@@ -597,6 +614,8 @@ async fn main() -> Result<()> {
                 name,
                 email,
                 book,
+                addresses,
+                clear_addresses,
             } => {
                 let state = load_state(&cli.state)?;
                 let password = std::env::var("SEALBOOK_PASSWORD")
@@ -615,7 +634,9 @@ async fn main() -> Result<()> {
                 // not take are kept. Rebuilding from the three it does took a
                 // card with a job, an address and a photo down to a name.
                 let existing = find_contact(&mut client, id).await?;
-                let contact = jscontact(&name, email.as_deref(), book_id, Some(&existing))?;
+                let addresses = (clear_addresses || !addresses.is_empty()).then_some(addresses);
+                let contact =
+                    jscontact(&name, email.as_deref(), addresses, book_id, Some(&existing))?;
                 let revision = client.put_contact(id, &contact).await.context("update")?;
                 println!("updated encrypted contact {id} at revision {revision}");
                 save_state(&cli.state, client.state.as_ref().unwrap())?;
@@ -1521,10 +1542,11 @@ fn write_contacts(
 /// not take are kept, and written through core like every other client's. The
 /// email replaces the first one the card has and leaves the rest: this used to
 /// replace the whole map, which dropped every other address and the context each
-/// one carried.
+/// one carried. `addresses`, when given, replaces the card's list.
 fn jscontact(
     name: &str,
     email: Option<&str>,
+    addresses: Option<Vec<CoreContactAddress>>,
     book_id: Uuid,
     previous: Option<&str>,
 ) -> Result<String> {
@@ -1534,6 +1556,9 @@ fn jscontact(
     };
     draft.name = name.to_string();
     draft.address_book_id = book_id.to_string();
+    if let Some(addresses) = addresses {
+        draft.addresses = addresses;
+    }
     if let Some(email) = email {
         match draft.emails.first_mut() {
             Some(first) => first.value = email.to_string(),
@@ -1546,6 +1571,42 @@ fn jscontact(
         }
     }
     Ok(contact_write(&draft, &now_rfc3339())?)
+}
+
+/// One `--address` value: `kind=work;street1=1 Main St;city=Leeds`.
+fn parse_address_spec(spec: &str) -> Result<CoreContactAddress, String> {
+    let mut address = CoreContactAddress::default();
+    for pair in spec
+        .split(';')
+        .map(str::trim)
+        .filter(|pair| !pair.is_empty())
+    {
+        let (key, value) = pair
+            .split_once('=')
+            .ok_or_else(|| format!("expected key=value, found {pair:?}"))?;
+        let value = Some(value.trim().to_string()).filter(|value| !value.is_empty());
+        match key.trim().to_ascii_lowercase().as_str() {
+            "kind" | "type" => match value.as_deref().map(str::to_ascii_lowercase).as_deref() {
+                None | Some("home") => address.kind = CoreChannelKind::Home,
+                Some("work") => address.kind = CoreChannelKind::Work,
+                Some(_) => {
+                    address.kind = CoreChannelKind::Custom;
+                    address.label = value;
+                }
+            },
+            "street1" | "street" => address.street1 = value,
+            "street2" => address.street2 = value,
+            "city" | "locality" | "town" => address.locality = value,
+            "region" | "state" | "province" => address.region = value,
+            "postcode" | "zip" | "postal" => address.postcode = value,
+            "country" => address.country = value,
+            other => return Err(format!("unknown address key {other:?}")),
+        }
+    }
+    if address.is_blank() {
+        return Err("an address needs at least one line".into());
+    }
+    Ok(address)
 }
 
 /// The whole vault as one JSON document, written by core.
@@ -2093,6 +2154,7 @@ mod tests {
         let card = jscontact(
             "Ada King",
             Some("ada@example.com"),
+            None,
             DEFAULT_ADDRESS_BOOK_ID,
             Some(&stored),
         )
@@ -2112,6 +2174,58 @@ mod tests {
         );
         assert_eq!(value["ranking"], 9);
         assert!(value["updated"].is_string());
+    }
+
+    #[test]
+    fn an_address_spec_reads_every_key_and_refuses_a_blank_one() {
+        let work = parse_address_spec("kind=work; street1=1 Main St; city=Leeds; zip=LS1").unwrap();
+        assert_eq!(work.kind, CoreChannelKind::Work);
+        assert_eq!(work.street1.as_deref(), Some("1 Main St"));
+        assert_eq!(work.locality.as_deref(), Some("Leeds"));
+        assert_eq!(work.postcode.as_deref(), Some("LS1"));
+        let cabin = parse_address_spec("kind=Cabin;country=Norway").unwrap();
+        assert_eq!(cabin.kind, CoreChannelKind::Custom);
+        assert_eq!(cabin.label.as_deref(), Some("Cabin"));
+        assert!(parse_address_spec("kind=home").is_err());
+        assert!(parse_address_spec("planet=Mars").is_err());
+        assert!(parse_address_spec("city").is_err());
+    }
+
+    #[test]
+    fn addresses_given_to_an_update_replace_the_list_and_none_keep_it() {
+        let stored = r#"{"@type":"Card","name":{"full":"Ada"},"addresses":{"a1":{"locality":"London"},"a2":{"locality":"Paris"}}}"#;
+        let given = vec![
+            parse_address_spec("city=Leeds").unwrap(),
+            parse_address_spec("kind=work;city=York").unwrap(),
+        ];
+        let card = jscontact(
+            "Ada",
+            None,
+            Some(given),
+            DEFAULT_ADDRESS_BOOK_ID,
+            Some(stored),
+        )
+        .unwrap();
+        let read = contact_parse("c", &card);
+        let cities: Vec<_> = read
+            .addresses
+            .iter()
+            .map(|a| a.locality.clone().unwrap())
+            .collect();
+        assert_eq!(cities, ["Leeds", "York"]);
+
+        let kept = jscontact("Ada", None, None, DEFAULT_ADDRESS_BOOK_ID, Some(stored)).unwrap();
+        assert_eq!(contact_parse("c", &kept).addresses.len(), 2);
+
+        let cleared = jscontact(
+            "Ada",
+            None,
+            Some(Vec::new()),
+            DEFAULT_ADDRESS_BOOK_ID,
+            Some(stored),
+        )
+        .unwrap();
+        assert!(contact_parse("c", &cleared).addresses.is_empty());
     }
 
     /// The lenient read lives in core now, and the shared fixture pins it. What

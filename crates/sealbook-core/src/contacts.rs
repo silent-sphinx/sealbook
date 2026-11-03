@@ -12,11 +12,13 @@
 //! Three decisions are this type's own.
 //!
 //! **An entry the editor cannot show is carried, not deleted.** A card shows one
-//! address, one nickname, one note and one photo, and both hosts wrote the whole
-//! property back from that one, so a card imported from another app with two
-//! addresses lost the second on the first edit. The writer now replaces the entry
-//! the host sees and carries every other. Clearing the visible one removes only
-//! that one, which is what a list does.
+//! nickname, one note and one photo, and both hosts wrote the whole property back
+//! from that one, so a card imported from another app with two nicknames lost the
+//! second on the first edit. The writer now replaces the entry the host sees and
+//! carries every other. Clearing the visible one removes only that one, which is
+//! what a list does. Addresses are a list the editors show whole, so the writer
+//! writes every one it is handed and carries only the stored entries it cannot
+//! read.
 //!
 //! **Key order is the key's number, not the key.** `serde_json` keeps maps sorted,
 //! so `e10` would read before `e2`. Entries are read in the order of the number a
@@ -104,12 +106,13 @@ pub const CONTACT_KEYS: &[&str] = &[
 /// Every key an address book writer owns.
 pub const ADDRESS_BOOK_KEYS: &[&str] = &["@type", "version", "name"];
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum CoreChannelKind {
     Work,
+    #[default]
     Home,
     Mobile,
     Custom,
@@ -130,10 +133,16 @@ pub struct CoreContactChannel {
     pub extra: Option<String>,
 }
 
+/// A postal address. `kind` is `Home`, `Work` or `Custom`, as the editors offer
+/// them; an unmarked one reads as `Home`. `label` is only meaningful for `Custom`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct CoreContactAddress {
+    pub kind: CoreChannelKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "uniffi", uniffi(default = None))]
+    pub label: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub street1: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -146,6 +155,41 @@ pub struct CoreContactAddress {
     pub postcode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub country: Option<String>,
+    /// Keys of the stored entry this build does not write, as a JSON object.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "uniffi", uniffi(default = None))]
+    pub extra: Option<String>,
+}
+
+impl CoreContactAddress {
+    /// True when no line of it holds text, whatever its kind.
+    pub fn is_blank(&self) -> bool {
+        [
+            &self.street1,
+            &self.street2,
+            &self.locality,
+            &self.region,
+            &self.postcode,
+            &self.country,
+        ]
+        .into_iter()
+        .all(|line| present(line).is_none())
+    }
+
+    /// The lines that hold text, in the order an envelope puts them.
+    pub fn lines(&self) -> Vec<String> {
+        [
+            &self.street1,
+            &self.street2,
+            &self.locality,
+            &self.region,
+            &self.postcode,
+            &self.country,
+        ]
+        .into_iter()
+        .filter_map(present)
+        .collect()
+    }
 }
 
 /// One workplace and, when there is one, the title held there.
@@ -214,8 +258,7 @@ pub struct CoreContactDraft {
     pub pronouns: Option<String>,
     pub emails: Vec<CoreContactChannel>,
     pub phones: Vec<CoreContactChannel>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub address: Option<CoreContactAddress>,
+    pub addresses: Vec<CoreContactAddress>,
     pub work: Vec<CoreContactWork>,
     pub dates: Vec<CoreContactDate>,
     pub socials: Vec<CoreContactSocial>,
@@ -259,8 +302,7 @@ pub struct CoreContact {
     pub pronouns: Option<String>,
     pub emails: Vec<CoreContactChannel>,
     pub phones: Vec<CoreContactChannel>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub address: Option<CoreContactAddress>,
+    pub addresses: Vec<CoreContactAddress>,
     pub work: Vec<CoreContactWork>,
     pub dates: Vec<CoreContactDate>,
     pub socials: Vec<CoreContactSocial>,
@@ -314,7 +356,7 @@ impl CoreContact {
             pronouns: self.pronouns.clone(),
             emails: self.emails.clone(),
             phones: self.phones.clone(),
-            address: self.address.clone(),
+            addresses: self.addresses.clone(),
             work: self.work.clone(),
             dates: self.dates.clone(),
             socials: self.socials.clone(),
@@ -442,10 +484,16 @@ fn parse_channels(
         .collect()
 }
 
-fn parse_address(card: &Map<String, Value>) -> Option<CoreContactAddress> {
+const ADDRESS_KEYS: &[&str] = &[
+    "street", "locality", "region", "postCode", "postcode", "country", "contexts", "features",
+    "label",
+];
+
+fn parse_addresses(card: &Map<String, Value>) -> Vec<CoreContactAddress> {
     objects(card, "addresses")
         .into_iter()
-        .find_map(|(_, entry)| address_of(entry))
+        .filter_map(|(_, entry)| address_of(entry))
+        .collect()
 }
 
 fn address_of(entry: &Map<String, Value>) -> Option<CoreContactAddress> {
@@ -458,15 +506,19 @@ fn address_of(entry: &Map<String, Value>) -> Option<CoreContactAddress> {
         _ => Vec::new(),
     };
     let line = |index: usize| street.get(index).filter(|text| !text.is_empty()).cloned();
+    let (kind, label) = channel_kind(entry, CoreChannelKind::Home);
     let address = CoreContactAddress {
+        kind,
+        label,
         street1: line(0),
         street2: line(1),
         locality: trimmed(entry, "locality"),
         region: trimmed(entry, "region"),
         postcode: first_of(entry, &["postCode", "postcode"]),
         country: trimmed(entry, "country"),
+        extra: extra_of(entry, ADDRESS_KEYS),
     };
-    (address != CoreContactAddress::default()).then_some(address)
+    (!address.is_blank()).then_some(address)
 }
 
 fn parse_work(card: &Map<String, Value>) -> Vec<CoreContactWork> {
@@ -682,7 +734,7 @@ pub fn contact_parse(id: &str, raw: &str) -> CoreContact {
         pronouns,
         emails,
         phones,
-        address: parse_address(&card),
+        addresses: parse_addresses(&card),
         work,
         dates: parse_dates(&card),
         socials: parse_socials(&card),
@@ -716,32 +768,45 @@ fn channel_entries(
         index += 1;
         let mut entry = entry_with(&channel.extra);
         entry.insert(value_key.into(), json!(value));
-        match channel.kind {
-            CoreChannelKind::Work => {
-                entry.insert("contexts".into(), json!({ "work": true }));
-            }
-            CoreChannelKind::Home => {
-                entry.insert("contexts".into(), json!({ "private": true }));
-            }
-            CoreChannelKind::Mobile if mobile_in_features => {
-                entry.insert("features".into(), json!({ "mobile": true }));
-            }
-            CoreChannelKind::Mobile => {
-                entry.insert("label".into(), json!("Mobile"));
-            }
-            CoreChannelKind::Custom => {
-                if let Some(label) = present(&channel.label) {
-                    entry.insert("label".into(), json!(label));
-                }
-            }
-        }
+        put_kind(&mut entry, channel.kind, &channel.label, mobile_in_features);
         out.insert(format!("{prefix}{index}"), Value::Object(entry));
     }
     (!out.is_empty()).then_some(Value::Object(out))
 }
 
+/// Writes the kind the way [`channel_kind`] reads it back.
+fn put_kind(
+    entry: &mut Map<String, Value>,
+    kind: CoreChannelKind,
+    label: &Option<String>,
+    mobile_in_features: bool,
+) {
+    match kind {
+        CoreChannelKind::Work => {
+            entry.insert("contexts".into(), json!({ "work": true }));
+        }
+        CoreChannelKind::Home => {
+            entry.insert("contexts".into(), json!({ "private": true }));
+        }
+        CoreChannelKind::Mobile if mobile_in_features => {
+            entry.insert("features".into(), json!({ "mobile": true }));
+        }
+        CoreChannelKind::Mobile => {
+            entry.insert("label".into(), json!("Mobile"));
+        }
+        CoreChannelKind::Custom => {
+            if let Some(label) = present(label) {
+                entry.insert("label".into(), json!(label));
+            }
+        }
+    }
+}
+
 fn address_entry(address: &CoreContactAddress) -> Option<Value> {
-    let mut entry = Map::new();
+    if address.is_blank() {
+        return None;
+    }
+    let mut entry = entry_with(&address.extra);
     let street: Vec<String> = [&address.street1, &address.street2]
         .into_iter()
         .filter_map(present)
@@ -759,7 +824,37 @@ fn address_entry(address: &CoreContactAddress) -> Option<Value> {
             entry.insert(key.into(), json!(value));
         }
     }
-    (!entry.is_empty()).then_some(Value::Object(entry))
+    put_kind(&mut entry, address.kind, &address.label, false);
+    Some(Value::Object(entry))
+}
+
+/// Every address the draft holds, numbered in order, plus each stored entry this
+/// build cannot read, kept under its own id. A fresh entry's number skips the ids
+/// those hold.
+fn address_entries(
+    previous: &Map<String, Value>,
+    addresses: &[CoreContactAddress],
+) -> Option<Value> {
+    let mut map = Map::new();
+    if let Some(stored) = previous.get("addresses").and_then(Value::as_object) {
+        for (id, value) in stored {
+            if value.as_object().and_then(address_of).is_none() {
+                map.insert(id.clone(), value.clone());
+            }
+        }
+    }
+    let mut number = 0;
+    for entry in addresses.iter().filter_map(address_entry) {
+        let id = loop {
+            number += 1;
+            let id = format!("a{number}");
+            if !map.contains_key(&id) {
+                break id;
+            }
+        };
+        map.insert(id, entry);
+    }
+    (!map.is_empty()).then_some(Value::Object(map))
 }
 
 /// Replaces the entry of `key` that a host shows, and carries every other.
@@ -909,17 +1004,7 @@ pub fn contact_write(draft: &CoreContactDraft, now: &str) -> Result<String, Core
         "phones",
         channel_entries(&draft.phones, "p", "number", true),
     );
-    put(
-        "addresses",
-        replace_shown(
-            &previous,
-            "addresses",
-            None,
-            |entry| address_of(entry).is_some(),
-            draft.address.as_ref().and_then(address_entry),
-            "a1",
-        ),
-    );
+    put("addresses", address_entries(&previous, &draft.addresses));
     let (organizations, titles) = work_entries(&draft.work);
     put("organizations", organizations);
     put("titles", titles);
@@ -1133,23 +1218,46 @@ mod tests {
     }
 
     #[test]
-    fn a_second_address_survives_an_edit_to_the_first() {
-        let raw = r#"{"@type":"Card","name":{"full":"Ada"},"addresses":{"a1":{"locality":"London"},"a2":{"locality":"Paris"}}}"#;
+    fn every_address_reads_and_an_edit_to_one_keeps_the_others() {
+        let raw = r#"{"@type":"Card","name":{"full":"Ada"},"addresses":{"a1":{"locality":"London"},"a2":{"locality":"Paris","contexts":{"work":true}}}}"#;
         let mut draft = draft_of(raw);
-        draft.address.as_mut().unwrap().locality = Some("Leeds".into());
+        assert_eq!(draft.addresses.len(), 2);
+        assert_eq!(draft.addresses[1].kind, CoreChannelKind::Work);
+        draft.addresses[0].locality = Some("Leeds".into());
         let written = parsed(&contact_write(&draft, NOW).unwrap());
         assert_eq!(written["addresses"]["a1"]["locality"], "Leeds");
         assert_eq!(written["addresses"]["a2"]["locality"], "Paris");
+        assert_eq!(written["addresses"]["a2"]["contexts"]["work"], true);
     }
 
     #[test]
-    fn clearing_the_shown_address_leaves_the_next_to_be_shown() {
+    fn removing_an_address_removes_only_that_one() {
         let raw = r#"{"addresses":{"a1":{"locality":"London"},"a2":{"locality":"Paris"}}}"#;
         let mut draft = draft_of(raw);
-        draft.address = None;
+        draft.addresses.remove(0);
         let written = contact_write(&draft, NOW).unwrap();
         let again = contact_parse("c", &written);
-        assert_eq!(again.address.unwrap().locality.as_deref(), Some("Paris"));
+        assert_eq!(again.addresses.len(), 1);
+        assert_eq!(again.addresses[0].locality.as_deref(), Some("Paris"));
+    }
+
+    #[test]
+    fn an_address_this_build_cannot_read_is_carried_and_not_overwritten() {
+        let raw = r#"{"addresses":{"a1":{"components":[{"kind":"locality","value":"Oslo"}]},"a2":{"locality":"Paris","coordinates":"geo:1,2"}}}"#;
+        let mut draft = draft_of(raw);
+        assert_eq!(draft.addresses.len(), 1);
+        draft.addresses.push(CoreContactAddress {
+            kind: CoreChannelKind::Custom,
+            label: Some("Cabin".into()),
+            locality: Some("Bergen".into()),
+            ..Default::default()
+        });
+        let written = parsed(&contact_write(&draft, NOW).unwrap());
+        assert_eq!(written["addresses"]["a1"]["components"][0]["value"], "Oslo");
+        assert_eq!(written["addresses"]["a2"]["locality"], "Paris");
+        assert_eq!(written["addresses"]["a2"]["coordinates"], "geo:1,2");
+        assert_eq!(written["addresses"]["a3"]["locality"], "Bergen");
+        assert_eq!(written["addresses"]["a3"]["label"], "Cabin");
     }
 
     #[test]
