@@ -72,7 +72,7 @@ pub fn payload_schema() -> Value {
         ("Attachment", attachment()),
         ("Profile", profile()),
         ("Note", note()),
-        ("Notebook", named("Notebook")),
+        ("Notebook", notebook()),
         ("Bookmark", bookmark()),
         ("BookmarkCollection", bookmark_collection()),
         ("Task", task()),
@@ -230,8 +230,15 @@ fn note() -> Value {
     schema
 }
 
-fn named(type_name: &str) -> Value {
-    payload(type_name, json!({ "name": string() }), &["name"])
+fn notebook() -> Value {
+    payload(
+        "Notebook",
+        json!({
+            "name": string(),
+            "color": text("An accent key or a CSS colour."),
+        }),
+        &["name"],
+    )
 }
 
 fn address_book() -> Value {

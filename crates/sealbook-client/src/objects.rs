@@ -289,7 +289,8 @@ impl SealbookClient {
         name: &str,
         previous: Option<&str>,
     ) -> Result<u64, ClientError> {
-        let plaintext = sealbook_core::notebook_write(name, previous)?;
+        let color = previous.and_then(|raw| sealbook_core::notebook_parse("", raw).color);
+        let plaintext = sealbook_core::notebook_write(name, color.as_deref(), previous)?;
         self.put_sealed(object_id, plaintext.as_bytes(), NOTEBOOK_CONTENT_TYPE)
             .await
     }

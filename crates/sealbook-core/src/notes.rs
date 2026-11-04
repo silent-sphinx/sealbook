@@ -71,7 +71,7 @@ pub const NOTE_KEYS: &[&str] = &[
     "attachments",
 ];
 
-pub const NOTEBOOK_KEYS: &[&str] = &["@type", "version", "name"];
+pub const NOTEBOOK_KEYS: &[&str] = &["@type", "version", "name", "color"];
 
 /// The owned set for a write that has an opinion about `pinned`.
 ///
@@ -200,6 +200,8 @@ pub struct CoreNote {
 pub struct CoreNotebook {
     pub id: String,
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
     pub readable: bool,
     pub raw: String,
 }
@@ -308,22 +310,29 @@ pub fn notebook_parse(id: &str, raw: &str) -> CoreNotebook {
     CoreNotebook {
         id: id.to_string(),
         name: stored.unwrap_or_else(|| fallback_notebook_name(id)),
+        color: object.as_ref().and_then(|object| trimmed(object, "color")),
         readable: object.as_ref().map(declared_readable).unwrap_or(true),
         raw: raw.to_string(),
     }
 }
 
-pub fn notebook_write(name: &str, previous_raw: Option<&str>) -> Result<String, CoreError> {
+/// `color` is owned: a caller renaming a notebook passes the stored one back,
+/// and `None` clears it.
+pub fn notebook_write(
+    name: &str,
+    color: Option<&str>,
+    previous_raw: Option<&str>,
+) -> Result<String, CoreError> {
     refuse_newer_major(previous_raw)?;
-    Ok(write_payload(
-        previous_raw,
-        json!({
-            "@type": "Notebook",
-            "version": PAYLOAD_SCHEMA_VERSION,
-            "name": name.trim(),
-        }),
-        NOTEBOOK_KEYS,
-    ))
+    let mut fields = json!({
+        "@type": "Notebook",
+        "version": PAYLOAD_SCHEMA_VERSION,
+        "name": name.trim(),
+    });
+    if let Some(color) = color.map(str::trim).filter(|color| !color.is_empty()) {
+        fields["color"] = json!(color);
+    }
+    Ok(write_payload(previous_raw, fields, NOTEBOOK_KEYS))
 }
 
 /// The name to show for a note's notebook, when the notebook itself is in hand.
@@ -340,10 +349,15 @@ pub fn notebook_name_by_id(notebooks: &[CoreNotebook], notebook_id: Option<Strin
         .unwrap_or_else(|| DEFAULT_NOTEBOOK_NAME.to_string())
 }
 
-/// A notebook stores no colour, so its dot is derived from its id by the same
-/// rule as an uncoloured collection: every client lands on the same tone.
-pub fn notebook_tone(id: &str) -> String {
-    crate::bookmarks::tone(&[], id)
+/// The stored colour, or one derived from the id by the same rule as an
+/// uncoloured collection, so every client lands on the same tone.
+pub fn notebook_tone(id: &str, color: Option<&str>) -> String {
+    let node = crate::bookmarks::ToneNode {
+        id,
+        parent_id: None,
+        color: color.map(str::trim).filter(|color| !color.is_empty()),
+    };
+    crate::bookmarks::tone(&[node], id)
 }
 
 /// The default notebook is the one container every client creates for itself, so
@@ -490,8 +504,12 @@ pub mod ffi {
     }
 
     #[uniffi::export(name = "notebook_write")]
-    pub fn notebook_write(name: String, previous_raw: Option<String>) -> Result<String, CoreError> {
-        super::notebook_write(&name, previous_raw.as_deref())
+    pub fn notebook_write(
+        name: String,
+        color: Option<String>,
+        previous_raw: Option<String>,
+    ) -> Result<String, CoreError> {
+        super::notebook_write(&name, color.as_deref(), previous_raw.as_deref())
     }
 
     #[uniffi::export(name = "notebook_name_by_id")]
@@ -503,8 +521,8 @@ pub mod ffi {
     }
 
     #[uniffi::export(name = "notebook_tone")]
-    pub fn notebook_tone(id: String) -> String {
-        super::notebook_tone(&id)
+    pub fn notebook_tone(id: String, color: Option<String>) -> String {
+        super::notebook_tone(&id, color.as_deref())
     }
 }
 
@@ -724,9 +742,25 @@ mod tests {
     #[test]
     fn a_notebook_rename_carries_what_it_does_not_own() {
         let stored = r#"{"@type":"Notebook","version":"1.0","name":"old","colour":"blue"}"#;
-        let renamed = as_object(&notebook_write("  new  ", Some(stored)).unwrap()).unwrap();
+        let renamed = as_object(&notebook_write("  new  ", None, Some(stored)).unwrap()).unwrap();
         assert_eq!(renamed["name"], "new");
         assert_eq!(renamed["colour"], "blue");
+    }
+
+    #[test]
+    fn a_notebook_colour_is_written_and_cleared() {
+        let coloured = notebook_write("Work", Some(" #123456 "), None).unwrap();
+        assert_eq!(notebook_parse("n", &coloured).color.as_deref(), Some("#123456"));
+        let cleared = notebook_write("Work", None, Some(&coloured)).unwrap();
+        assert_eq!(notebook_parse("n", &cleared).color, None);
+        assert!(!cleared.contains("color"));
+    }
+
+    #[test]
+    fn a_notebook_tone_prefers_the_stored_colour() {
+        assert_eq!(notebook_tone("n", Some("#123456")), "#123456");
+        assert_eq!(notebook_tone("n", Some("  ")), notebook_tone("n", None));
+        assert_eq!(notebook_tone("n", None), crate::bookmarks::tone(&[], "n"));
     }
 
     /// Two clients disagreed here, so one notebook listed under two names.

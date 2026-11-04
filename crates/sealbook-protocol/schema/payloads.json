@@ -803,6 +803,10 @@
         "@type": {
           "const": "Notebook"
         },
+        "color": {
+          "description": "An accent key or a CSS colour.",
+          "type": "string"
+        },
         "name": {
           "type": "string"
         },

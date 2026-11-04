@@ -133,6 +133,7 @@
           "op": "notebook.write",
           "args": [
             "name",
+            "color",
             "previous"
           ],
           "expect": "payload"
@@ -150,7 +151,8 @@
           "table": "notebook_tones",
           "op": "notebook.tone",
           "args": [
-            "id"
+            "id",
+            "color"
           ],
           "expect": "tone"
         }

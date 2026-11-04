@@ -72,6 +72,8 @@ struct NotebookWriteCase {
     case: String,
     name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     previous: Option<String>,
     payload: String,
 }
@@ -88,6 +90,8 @@ struct NotebookParseCase {
 struct NotebookToneCase {
     case: String,
     id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    color: Option<String>,
     tone: String,
 }
 
@@ -280,22 +284,43 @@ fn parse_cases() -> Vec<(String, String, String)> {
     ]
 }
 
-fn notebook_write_cases() -> Vec<(String, String, Option<String>)> {
+fn notebook_write_cases() -> Vec<(String, String, Option<String>, Option<String>)> {
     vec![
         (
             "a notebook created from scratch".into(),
             "Work".into(),
+            None,
             None,
         ),
         (
             "a name with surrounding space".into(),
             "  Work  ".into(),
             None,
+            None,
         ),
         (
             "a rename that keeps what this build does not own".into(),
             "Renamed".into(),
+            None,
             Some(r#"{"@type":"Notebook","version":"1.0","name":"Work","colour":"amber"}"#.into()),
+        ),
+        (
+            "a notebook with a colour".into(),
+            "Work".into(),
+            Some("  #7aa2f7  ".into()),
+            None,
+        ),
+        (
+            "a rename that passes the stored colour back".into(),
+            "Renamed".into(),
+            Some("#7aa2f7".into()),
+            Some(r##"{"@type":"Notebook","version":"1.0","name":"Work","color":"#7aa2f7"}"##.into()),
+        ),
+        (
+            "a write without a colour clears the stored one".into(),
+            "Work".into(),
+            None,
+            Some(r##"{"@type":"Notebook","version":"1.0","name":"Work","color":"#7aa2f7"}"##.into()),
         ),
     ]
 }
@@ -316,6 +341,11 @@ fn notebook_parse_cases() -> Vec<(String, String, String)> {
             "any other notebook, unnamed".into(),
             OTHER_NOTEBOOK.into(),
             "not json".into(),
+        ),
+        (
+            "a notebook with a colour".into(),
+            OTHER_NOTEBOOK.into(),
+            r##"{"@type":"Notebook","version":"1.0","name":"Work","color":" #7aa2f7 "}"##.into(),
         ),
     ]
 }
@@ -354,12 +384,12 @@ fn every_payload_reads_back_as_the_record_the_fixture_holds() {
 
 #[test]
 fn every_notebook_payload_is_the_one_spelling_the_fixture_holds() {
-    for (expected, (case, name, previous)) in
+    for (expected, (case, name, color, previous)) in
         fixture().notebook_writes.iter().zip(notebook_write_cases())
     {
         assert_eq!(expected.case, case);
         assert_eq!(
-            notebook_write(&name, previous.as_deref()).expect("writes"),
+            notebook_write(&name, color.as_deref(), previous.as_deref()).expect("writes"),
             expected.payload,
             "{case}"
         );
@@ -376,7 +406,7 @@ fn every_notebook_reads_back_as_the_record_the_fixture_holds() {
 }
 
 /// Ids with astral characters and accents, since the hash runs over UTF-16 units.
-fn notebook_tone_cases() -> Vec<(String, String)> {
+fn notebook_tone_cases() -> Vec<(String, String, Option<String>)> {
     [
         ("the default notebook", default_notebook_id()),
         ("another notebook", OTHER_NOTEBOOK.to_string()),
@@ -391,7 +421,19 @@ fn notebook_tone_cases() -> Vec<(String, String)> {
         ("a long id", "x".repeat(500)),
     ]
     .into_iter()
-    .map(|(case, id)| (case.to_string(), id))
+    .map(|(case, id)| (case.to_string(), id, None))
+    .chain([
+        (
+            "a stored colour".to_string(),
+            OTHER_NOTEBOOK.to_string(),
+            Some("#ff8800".to_string()),
+        ),
+        (
+            "a blank stored colour".to_string(),
+            OTHER_NOTEBOOK.to_string(),
+            Some("  ".to_string()),
+        ),
+    ])
     .collect()
 }
 
@@ -399,10 +441,10 @@ fn notebook_tone_cases() -> Vec<(String, String)> {
 fn every_notebook_tone_is_the_one_the_fixture_holds() {
     let fixture = fixture();
     assert_eq!(fixture.notebook_tones.len(), notebook_tone_cases().len());
-    for (expected, (case, id)) in fixture.notebook_tones.iter().zip(notebook_tone_cases()) {
+    for (expected, (case, id, color)) in fixture.notebook_tones.iter().zip(notebook_tone_cases()) {
         assert_eq!(expected.case, case);
         assert_eq!(expected.id, id, "{case}");
-        assert_eq!(notebook_tone(&id), expected.tone, "{case}");
+        assert_eq!(notebook_tone(&id, color.as_deref()), expected.tone, "{case}");
     }
 }
 
@@ -444,7 +486,7 @@ fn a_payload_from_a_newer_schema_major_is_read_but_never_written_over() {
 
     let notebook = r#"{"@type":"Notebook","version":"3.1","name":"future"}"#;
     assert!(!notebook_parse(&default_notebook_id(), notebook).readable);
-    let refused = notebook_write("edited", Some(notebook)).expect_err("refuses");
+    let refused = notebook_write("edited", None, Some(notebook)).expect_err("refuses");
     assert_eq!(error_name(&refused), refusals[1].error);
 }
 
@@ -502,10 +544,12 @@ fn regenerate() {
             .collect(),
         notebook_writes: notebook_write_cases()
             .into_iter()
-            .map(|(case, name, previous)| NotebookWriteCase {
+            .map(|(case, name, color, previous)| NotebookWriteCase {
                 case,
-                payload: notebook_write(&name, previous.as_deref()).expect("writes"),
+                payload: notebook_write(&name, color.as_deref(), previous.as_deref())
+                    .expect("writes"),
                 name,
+                color,
                 previous,
             })
             .collect(),
@@ -520,10 +564,11 @@ fn regenerate() {
             .collect(),
         notebook_tones: notebook_tone_cases()
             .into_iter()
-            .map(|(case, id)| NotebookToneCase {
+            .map(|(case, id, color)| NotebookToneCase {
                 case,
-                tone: notebook_tone(&id),
+                tone: notebook_tone(&id, color.as_deref()),
                 id,
+                color,
             })
             .collect(),
         refusals: vec![

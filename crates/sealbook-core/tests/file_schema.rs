@@ -91,6 +91,7 @@ fn a_notes_backup_meets_the_schema() {
     let notebooks = vec![CoreNotebook {
         id: default_notebook_id(),
         name: "Journal".into(),
+        color: None,
         readable: true,
         raw: String::new(),
     }];

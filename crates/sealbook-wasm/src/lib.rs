@@ -2092,8 +2092,13 @@ pub fn core_notebook_parse(id: &str, raw: &str) -> Result<Ts<CoreNotebook>, JsEr
 }
 
 #[wasm_bindgen]
-pub fn core_notebook_write(name: &str, previous_raw: Option<String>) -> Result<String, JsError> {
-    sealbook_core::notebook_write(name, previous_raw.as_deref()).map_err(core_err)
+pub fn core_notebook_write(
+    name: &str,
+    color: Option<String>,
+    previous_raw: Option<String>,
+) -> Result<String, JsError> {
+    sealbook_core::notebook_write(name, color.as_deref(), previous_raw.as_deref())
+        .map_err(core_err)
 }
 
 /// The name to show for a note's notebook. A notebook that is gone shows the
@@ -2109,10 +2114,10 @@ pub fn core_notebook_name_by_id(
     ))
 }
 
-/// A notebook's colour, derived from its id.
+/// A notebook's stored colour, or one derived from its id.
 #[wasm_bindgen]
-pub fn core_notebook_tone(id: &str) -> String {
-    sealbook_core::notebook_tone(id)
+pub fn core_notebook_tone(id: &str, color: Option<String>) -> String {
+    sealbook_core::notebook_tone(id, color.as_deref())
 }
 
 #[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]

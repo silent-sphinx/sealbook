@@ -67,10 +67,14 @@ fn call(op: &str, args: &[Value]) -> Value {
             &arg::<String>(args, 0),
             &arg::<String>(args, 1),
         ))),
-        "notebook.tone" => out::<_, String>(Ok(notebook_tone(&arg::<String>(args, 0)))),
+        "notebook.tone" => out::<_, String>(Ok(notebook_tone(
+            &arg::<String>(args, 0),
+            arg::<Option<String>>(args, 1).as_deref(),
+        ))),
         "notebook.write" => out(notebook_write(
             &arg::<String>(args, 0),
             arg::<Option<String>>(args, 1).as_deref(),
+            arg::<Option<String>>(args, 2).as_deref(),
         )),
         "notebook.parse" => out::<_, String>(Ok(notebook_parse(
             &arg::<String>(args, 0),

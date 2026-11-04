@@ -17,7 +17,8 @@
     "notebook_keys": [
       "@type",
       "version",
-      "name"
+      "name",
+      "color"
     ],
     "default_notebook_id": "00000000-0000-0000-0000-000000000002",
     "default_notebook_name": "Default Notebook",
@@ -283,6 +284,25 @@
       "name": "Renamed",
       "previous": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"Work\",\"colour\":\"amber\"}",
       "payload": "{\"@type\":\"Notebook\",\"colour\":\"amber\",\"name\":\"Renamed\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a notebook with a colour",
+      "name": "Work",
+      "color": "  #7aa2f7  ",
+      "payload": "{\"@type\":\"Notebook\",\"color\":\"#7aa2f7\",\"name\":\"Work\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a rename that passes the stored colour back",
+      "name": "Renamed",
+      "color": "#7aa2f7",
+      "previous": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"Work\",\"color\":\"#7aa2f7\"}",
+      "payload": "{\"@type\":\"Notebook\",\"color\":\"#7aa2f7\",\"name\":\"Renamed\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a write without a colour clears the stored one",
+      "name": "Work",
+      "previous": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"Work\",\"color\":\"#7aa2f7\"}",
+      "payload": "{\"@type\":\"Notebook\",\"name\":\"Work\",\"version\":\"1.0\"}"
     }
   ],
   "notebook_parses": [
@@ -317,6 +337,18 @@
         "name": "Untitled",
         "readable": true,
         "raw": "not json"
+      }
+    },
+    {
+      "case": "a notebook with a colour",
+      "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "raw": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"Work\",\"color\":\" #7aa2f7 \"}",
+      "notebook": {
+        "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "name": "Work",
+        "color": "#7aa2f7",
+        "readable": true,
+        "raw": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"Work\",\"color\":\" #7aa2f7 \"}"
       }
     }
   ],
@@ -360,6 +392,18 @@
       "case": "a long id",
       "id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
       "tone": "#7aa2f7"
+    },
+    {
+      "case": "a stored colour",
+      "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "color": "#ff8800",
+      "tone": "#ff8800"
+    },
+    {
+      "case": "a blank stored colour",
+      "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "color": "  ",
+      "tone": "#7dcfff"
     }
   ],
   "refusals": [
