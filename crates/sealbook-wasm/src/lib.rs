@@ -2618,6 +2618,12 @@ pub fn core_address_book_write(draft: Ts<CoreAddressBookDraft>) -> Result<String
     sealbook_core::address_book_write(&draft.to_rust()?).map_err(core_err)
 }
 
+/// An address book's stored colour, or one derived from its id.
+#[wasm_bindgen]
+pub fn core_address_book_tone(id: &str, color: Option<String>) -> String {
+    sealbook_core::address_book_tone(id, color.as_deref())
+}
+
 /// The name to show for a card's address book. A book that is gone shows the
 /// default book's name.
 #[wasm_bindgen]

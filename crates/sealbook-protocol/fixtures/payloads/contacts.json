@@ -37,7 +37,8 @@
       "@type",
       "version",
       "name",
-      "archived"
+      "archived",
+      "color"
     ],
     "profile_keys": [
       "@type",
@@ -1954,6 +1955,16 @@
         "raw": "{\"@type\":\"AddressBook\",\"name\":\"Family\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
       },
       "payload": "{\"@type\":\"AddressBook\",\"archived\":true,\"name\":\"Relatives\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a colour given on a rename",
+      "draft": {
+        "name": "Relatives",
+        "archived": false,
+        "color": "  #9ece6a  ",
+        "raw": "{\"@type\":\"AddressBook\",\"name\":\"Family\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
+      },
+      "payload": "{\"@type\":\"AddressBook\",\"color\":\"#9ece6a\",\"name\":\"Relatives\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
     }
   ],
   "address_book_parses": [

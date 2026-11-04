@@ -109,6 +109,10 @@
           "description": "Written only when true.",
           "type": "boolean"
         },
+        "color": {
+          "description": "An accent key or a CSS colour.",
+          "type": "string"
+        },
         "name": {
           "type": "string"
         },

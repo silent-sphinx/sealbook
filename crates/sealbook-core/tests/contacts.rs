@@ -661,6 +661,7 @@ fn book_write_cases() -> Vec<(String, CoreAddressBookDraft)> {
             CoreAddressBookDraft {
                 name: "  Family  ".into(),
                 archived: false,
+                color: None,
                 raw: None,
             },
         ),
@@ -669,6 +670,7 @@ fn book_write_cases() -> Vec<(String, CoreAddressBookDraft)> {
             CoreAddressBookDraft {
                 name: "Relatives".into(),
                 archived: false,
+                color: None,
                 raw: Some(stored.clone()),
             },
         ),
@@ -677,6 +679,16 @@ fn book_write_cases() -> Vec<(String, CoreAddressBookDraft)> {
             CoreAddressBookDraft {
                 name: "Relatives".into(),
                 archived: true,
+                color: None,
+                raw: Some(stored.clone()),
+            },
+        ),
+        (
+            "a colour given on a rename".into(),
+            CoreAddressBookDraft {
+                name: "Relatives".into(),
+                archived: false,
+                color: Some("  #9ece6a  ".into()),
                 raw: Some(stored),
             },
         ),
@@ -830,6 +842,7 @@ fn a_payload_from_a_newer_schema_major_is_read_but_never_written_over() {
     let refused = address_book_write(&CoreAddressBookDraft {
         name: "edited".into(),
         archived: false,
+        color: None,
         raw: Some(future.into()),
     })
     .expect_err("refuses");

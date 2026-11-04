@@ -118,7 +118,7 @@ pub const CONTACT_KEYS: &[&str] = &[
 ];
 
 /// Every key an address book writer owns.
-pub const ADDRESS_BOOK_KEYS: &[&str] = &["@type", "version", "name", "archived"];
+pub const ADDRESS_BOOK_KEYS: &[&str] = &["@type", "version", "name", "archived", "color"];
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -374,6 +374,9 @@ pub struct CoreAddressBookDraft {
     /// from a build predating the field.
     #[serde(default)]
     pub archived: bool,
+    /// Owned: a rename passes the stored colour back, and `None` clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<String>,
 }
@@ -385,6 +388,8 @@ pub struct CoreAddressBook {
     pub id: String,
     pub name: String,
     pub archived: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
     pub readable: bool,
     pub raw: String,
 }
@@ -1234,6 +1239,7 @@ pub fn address_book_parse(id: &str, raw: &str) -> CoreAddressBook {
             .and_then(|object| object.get("archived"))
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        color: object.as_ref().and_then(|object| trimmed(object, "color")),
         readable: object.as_ref().map(declared_readable).unwrap_or(true),
         raw: raw.to_string(),
     }
@@ -1249,11 +1255,20 @@ pub fn address_book_write(draft: &CoreAddressBookDraft) -> Result<String, CoreEr
     if draft.archived {
         fields.insert("archived".into(), json!(true));
     }
+    if let Some(color) = present(&draft.color) {
+        fields.insert("color".into(), json!(color));
+    }
     Ok(write_payload(
         draft.raw.as_deref(),
         Value::Object(fields),
         ADDRESS_BOOK_KEYS,
     ))
+}
+
+/// The stored colour, or one derived from the id by the same rule as an
+/// uncoloured collection, so every client lands on the same tone.
+pub fn address_book_tone(id: &str, color: Option<&str>) -> String {
+    crate::notes::notebook_tone(id, color)
 }
 
 /// The name to show for a card's address book. A book that is gone, or a card in
@@ -1335,6 +1350,11 @@ pub mod ffi {
     #[uniffi::export(name = "address_book_write")]
     pub fn address_book_write(draft: CoreAddressBookDraft) -> Result<String, CoreError> {
         super::address_book_write(&draft)
+    }
+
+    #[uniffi::export(name = "address_book_tone")]
+    pub fn address_book_tone(id: String, color: Option<String>) -> String {
+        super::address_book_tone(&id, color.as_deref())
     }
 
     #[uniffi::export(name = "address_book_name_by_id")]

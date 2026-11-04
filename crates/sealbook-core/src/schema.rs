@@ -247,6 +247,7 @@ fn address_book() -> Value {
         json!({
             "name": string(),
             "archived": { "type": "boolean", "description": "Written only when true." },
+            "color": text("An accent key or a CSS colour."),
         }),
         &["name"],
     )

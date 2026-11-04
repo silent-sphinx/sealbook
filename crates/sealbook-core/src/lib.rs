@@ -116,15 +116,16 @@ pub use contact_profile::{
     CoreProfileRelationship,
 };
 pub use contacts::{
-    address_book_name_by_id, address_book_parse, address_book_write, contact_parse, contact_write,
-    default_address_book_id, resolve_address_book_id, CoreAddressBook, CoreAddressBookDraft,
-    CoreChannelKind, CoreContact, CoreContactAddress, CoreContactChannel, CoreContactDate,
-    CoreContactDateKind, CoreContactDraft, CoreContactSocial, CoreContactWork,
-    ADDRESS_BOOK_CONTENT_TYPE, ADDRESS_BOOK_ID_PROP, ADDRESS_BOOK_KEYS, CONTACT_ARCHIVED_PROP,
-    CONTACT_ATTACHMENTS_PROP, CONTACT_KEYS, CONTACT_PROFILE_PROP, DEFAULT_ADDRESS_BOOK_NAME,
-    DEFAULT_RELATIONSHIP_KIND, JSCONTACT_CONTENT_TYPE, MAX_PROFILE_ENTRIES, MAX_PROFILE_TEXT_CHARS,
-    PERIOD_CURRENT_PROP, PERIOD_END_PROP, PERIOD_START_PROP, PROFILE_KEYS, UNNAMED_CONTACT_NAME,
-    UNTITLED_ADDRESS_BOOK_NAME, WORK_NOTE_PROP,
+    address_book_name_by_id, address_book_parse, address_book_tone, address_book_write,
+    contact_parse, contact_write, default_address_book_id, resolve_address_book_id,
+    CoreAddressBook, CoreAddressBookDraft, CoreChannelKind, CoreContact, CoreContactAddress,
+    CoreContactChannel, CoreContactDate, CoreContactDateKind, CoreContactDraft, CoreContactSocial,
+    CoreContactWork, ADDRESS_BOOK_CONTENT_TYPE, ADDRESS_BOOK_ID_PROP, ADDRESS_BOOK_KEYS,
+    CONTACT_ARCHIVED_PROP, CONTACT_ATTACHMENTS_PROP, CONTACT_KEYS, CONTACT_PROFILE_PROP,
+    DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_RELATIONSHIP_KIND, JSCONTACT_CONTENT_TYPE,
+    MAX_PROFILE_ENTRIES, MAX_PROFILE_TEXT_CHARS, PERIOD_CURRENT_PROP, PERIOD_END_PROP,
+    PERIOD_START_PROP, PROFILE_KEYS, UNNAMED_CONTACT_NAME, UNTITLED_ADDRESS_BOOK_NAME,
+    WORK_NOTE_PROP,
 };
 pub use error::CoreError;
 pub use flush::{

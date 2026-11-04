@@ -1527,6 +1527,7 @@ fn write_contacts(
                     id: id.to_string(),
                     name: name.clone(),
                     archived: false,
+                    color: None,
                     readable: true,
                     raw: String::new(),
                 })
