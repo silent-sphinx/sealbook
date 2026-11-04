@@ -750,7 +750,10 @@ mod tests {
     #[test]
     fn a_notebook_colour_is_written_and_cleared() {
         let coloured = notebook_write("Work", Some(" #123456 "), None).unwrap();
-        assert_eq!(notebook_parse("n", &coloured).color.as_deref(), Some("#123456"));
+        assert_eq!(
+            notebook_parse("n", &coloured).color.as_deref(),
+            Some("#123456")
+        );
         let cleared = notebook_write("Work", None, Some(&coloured)).unwrap();
         assert_eq!(notebook_parse("n", &cleared).color, None);
         assert!(!cleared.contains("color"));

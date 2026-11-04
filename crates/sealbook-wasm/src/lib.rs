@@ -2097,8 +2097,7 @@ pub fn core_notebook_write(
     color: Option<String>,
     previous_raw: Option<String>,
 ) -> Result<String, JsError> {
-    sealbook_core::notebook_write(name, color.as_deref(), previous_raw.as_deref())
-        .map_err(core_err)
+    sealbook_core::notebook_write(name, color.as_deref(), previous_raw.as_deref()).map_err(core_err)
 }
 
 /// The name to show for a note's notebook. A notebook that is gone shows the

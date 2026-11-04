@@ -314,13 +314,17 @@ fn notebook_write_cases() -> Vec<(String, String, Option<String>, Option<String>
             "a rename that passes the stored colour back".into(),
             "Renamed".into(),
             Some("#7aa2f7".into()),
-            Some(r##"{"@type":"Notebook","version":"1.0","name":"Work","color":"#7aa2f7"}"##.into()),
+            Some(
+                r##"{"@type":"Notebook","version":"1.0","name":"Work","color":"#7aa2f7"}"##.into(),
+            ),
         ),
         (
             "a write without a colour clears the stored one".into(),
             "Work".into(),
             None,
-            Some(r##"{"@type":"Notebook","version":"1.0","name":"Work","color":"#7aa2f7"}"##.into()),
+            Some(
+                r##"{"@type":"Notebook","version":"1.0","name":"Work","color":"#7aa2f7"}"##.into(),
+            ),
         ),
     ]
 }
@@ -444,7 +448,11 @@ fn every_notebook_tone_is_the_one_the_fixture_holds() {
     for (expected, (case, id, color)) in fixture.notebook_tones.iter().zip(notebook_tone_cases()) {
         assert_eq!(expected.case, case);
         assert_eq!(expected.id, id, "{case}");
-        assert_eq!(notebook_tone(&id, color.as_deref()), expected.tone, "{case}");
+        assert_eq!(
+            notebook_tone(&id, color.as_deref()),
+            expected.tone,
+            "{case}"
+        );
     }
 }
 

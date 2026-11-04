@@ -58,7 +58,14 @@ pub const BOOKMARK_KEYS: &[&str] = &[
     "updatedAt",
 ];
 
-pub const BOOKMARK_COLLECTION_KEYS: &[&str] = &["@type", "version", "name", "parentId", "color", "hideFromAll"];
+pub const BOOKMARK_COLLECTION_KEYS: &[&str] = &[
+    "@type",
+    "version",
+    "name",
+    "parentId",
+    "color",
+    "hideFromAll",
+];
 
 /// Tones for a collection that has never been given a colour.
 const COLLECTION_TONES: &[&str] = &[
