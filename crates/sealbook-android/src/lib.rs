@@ -634,6 +634,21 @@ pub struct HttpResponse {
     pub body: String,
 }
 
+/// One request or response header, for [`HttpClient::request_bytes`].
+#[derive(uniffi::Record)]
+pub struct HttpHeader {
+    pub name: String,
+    pub value: String,
+}
+
+/// As [`HttpResponse`], with the body as bytes and the one header asked for.
+#[derive(uniffi::Record)]
+pub struct HttpBytesResponse {
+    pub status: u16,
+    pub body: Vec<u8>,
+    pub header: Option<String>,
+}
+
 #[derive(uniffi::Object)]
 pub struct HttpClient {
     inner: reqwest::blocking::Client,
@@ -702,6 +717,61 @@ impl HttpClient {
             .text()
             .map_err(|e| HttpError::Transport { msg: e.to_string() })?;
         Ok(HttpResponse { status, body })
+    }
+
+    /// One request with a byte body, for attachment chunks and the requests
+    /// core builds for them. The body is octet-stream unless `headers` says
+    /// otherwise.
+    ///
+    /// `read_header` names the response header handed back, which is where a
+    /// chunk's nonce travels.
+    pub fn request_bytes(
+        &self,
+        method: String,
+        url: String,
+        body: Option<Vec<u8>>,
+        headers: Vec<HttpHeader>,
+        read_header: Option<String>,
+        bearer: Option<String>,
+    ) -> Result<HttpBytesResponse, HttpError> {
+        let method = reqwest::Method::from_bytes(method.as_bytes())
+            .map_err(|e| HttpError::Transport { msg: e.to_string() })?;
+        let typed = headers
+            .iter()
+            .any(|h| h.name.eq_ignore_ascii_case("content-type"));
+        let mut req = self.inner.request(method, &url);
+        for header in headers {
+            req = req.header(header.name, header.value);
+        }
+        if let Some(body) = body {
+            if !typed {
+                req = req.header(reqwest::header::CONTENT_TYPE, "application/octet-stream");
+            }
+            req = req.body(body);
+        }
+        if let Some(token) = bearer {
+            req = req.bearer_auth(token);
+        }
+        let response = req.send().map_err(|e| HttpError::Transport {
+            msg: transport_message(&e),
+        })?;
+        let status = response.status().as_u16();
+        let header = read_header.and_then(|name| {
+            response
+                .headers()
+                .get(name.as_str())
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned)
+        });
+        let body = response
+            .bytes()
+            .map_err(|e| HttpError::Transport { msg: e.to_string() })?
+            .to_vec();
+        Ok(HttpBytesResponse {
+            status,
+            body,
+            header,
+        })
     }
 }
 
