@@ -641,21 +641,22 @@ pub struct HttpClient {
 
 #[uniffi::export]
 impl HttpClient {
-    /// `extra_trust_pem` is a certificate trusted *in addition to* the public
-    /// roots, for reaching a development server that no public CA has signed.
-    /// It is additive on purpose: a debug build has to reach both that server
-    /// and a normally-named one, and dropping the public roots would break the
-    /// second. Release builds pass nothing.
+    /// Trusts the public roots, plus `extra_trust_pem` (a development server's
+    /// certificate, debug builds only) and `platform_roots`, the DER
+    /// certificates of the device's own trust store.
     #[uniffi::constructor]
     pub fn new(
         extra_trust_pem: Option<String>,
+        platform_roots: Vec<Vec<u8>>,
         timeout_seconds: u32,
     ) -> Result<Arc<Self>, HttpError> {
-        let trust = match extra_trust_pem {
-            Some(pem) => TrustAnchors::WebPkiPlus(
-                certificate_from_pem(&pem).map_err(|e| HttpError::Tls { msg: e.to_string() })?,
-            ),
-            None => TrustAnchors::WebPki,
+        let extra = extra_trust_pem
+            .map(|pem| certificate_from_pem(&pem))
+            .transpose()
+            .map_err(|e| HttpError::Tls { msg: e.to_string() })?;
+        let trust = TrustAnchors::WebPkiPlus {
+            extra,
+            platform: platform_roots.into_iter().map(Into::into).collect(),
         };
         let config = pq_tls_config(trust).map_err(|e| HttpError::Tls { msg: e.to_string() })?;
         let timeout = std::time::Duration::from_secs(timeout_seconds as u64);

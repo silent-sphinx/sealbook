@@ -21,9 +21,13 @@ pub enum TrustAnchors {
     WebPki,
     /// Exactly this certificate. The public roots are not trusted.
     Pinned(CertificateDer<'static>),
-    /// The public roots, plus this certificate. For a client that has to reach
-    /// both a publicly-named server and a development one in the same build.
-    WebPkiPlus(CertificateDer<'static>),
+    /// The public roots, plus `extra` and the device's own trust store. `extra`
+    /// must be a usable anchor; `platform` entries that are not are skipped,
+    /// since a device store can hold certificates webpki rejects.
+    WebPkiPlus {
+        extra: Option<CertificateDer<'static>>,
+        platform: Vec<CertificateDer<'static>>,
+    },
 }
 
 impl TrustAnchors {
@@ -34,11 +38,14 @@ impl TrustAnchors {
             Self::Pinned(cert) => roots
                 .add(cert)
                 .map_err(|e| ClientError::Tls(e.to_string()))?,
-            Self::WebPkiPlus(cert) => {
+            Self::WebPkiPlus { extra, platform } => {
                 roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-                roots
-                    .add(cert)
-                    .map_err(|e| ClientError::Tls(e.to_string()))?;
+                if let Some(cert) = extra {
+                    roots
+                        .add(cert)
+                        .map_err(|e| ClientError::Tls(e.to_string()))?;
+                }
+                roots.add_parsable_certificates(platform);
             }
         }
         Ok(roots)
@@ -128,8 +135,26 @@ mod tests {
         let pinned = TrustAnchors::Pinned(cert.clone())
             .into_store()
             .expect("store");
-        let plus = TrustAnchors::WebPkiPlus(cert).into_store().expect("store");
+        let plus = TrustAnchors::WebPkiPlus {
+            extra: Some(cert),
+            platform: Vec::new(),
+        }
+        .into_store()
+        .expect("store");
         assert_eq!(pinned.len(), 1);
         assert!(plus.len() > 1);
+    }
+
+    #[test]
+    fn platform_roots_are_trusted_and_unusable_ones_skipped() {
+        let cert = certificate_from_pem(TEST_CERT).expect("cert");
+        let public = TrustAnchors::WebPki.into_store().expect("store").len();
+        let store = TrustAnchors::WebPkiPlus {
+            extra: None,
+            platform: vec![cert, CertificateDer::from(vec![0u8; 8])],
+        }
+        .into_store()
+        .expect("store");
+        assert_eq!(store.len(), public + 1);
     }
 }
