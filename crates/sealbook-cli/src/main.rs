@@ -20,9 +20,10 @@ use sealbook_client::{
     account_export_parse, account_export_write, contact_parse, contact_write, event_parse,
     ics_parse, note_parse, note_write, notes_import, CoreAddressBookDraft, CoreCalendarDraft,
     CoreCalendarEventDraft, CoreChannelKind, CoreContactAddress, CoreContactChannel,
-    CoreContactDraft, CoreIcsEvent, CoreNoteDraft, ExportedObject, LocalState, SealbookClient,
-    DEFAULT_ADDRESS_BOOK_ID, DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_BOOKMARK_COLLECTION_NAME,
-    DEFAULT_CALENDAR_COLOR, DEFAULT_CALENDAR_ID, DEFAULT_CALENDAR_NAME, DEFAULT_NOTEBOOK_NAME,
+    CoreContactDraft, CoreDeviceKind, CoreIcsEvent, CoreNoteDraft, ExportedObject, LocalState,
+    SealbookClient, DEFAULT_ADDRESS_BOOK_ID, DEFAULT_ADDRESS_BOOK_NAME,
+    DEFAULT_BOOKMARK_COLLECTION_NAME, DEFAULT_CALENDAR_COLOR, DEFAULT_CALENDAR_ID,
+    DEFAULT_CALENDAR_NAME, DEFAULT_NOTEBOOK_NAME,
 };
 use sha2::{Digest, Sha256};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
@@ -152,6 +153,14 @@ enum DevicesCommand {
     Revoke {
         #[arg(long)]
         device_id: Uuid,
+    },
+    /// Rename a device. Leave out --device-id to rename this one, and give an
+    /// empty name to restore the generated one.
+    Rename {
+        #[arg(long)]
+        device_id: Option<Uuid>,
+        #[arg(long)]
+        name: String,
     },
 }
 
@@ -400,6 +409,7 @@ async fn main() -> Result<()> {
                 .await
                 .context("register")?;
             println!("registered {username}");
+            label_this_device(&mut client).await;
             println!("Write these recovery words down. They are shown once:\n{phrase}");
             save_state(&cli.state, client.state.as_ref().unwrap())?;
         }
@@ -409,6 +419,7 @@ async fn main() -> Result<()> {
             let mut client =
                 SealbookClient::with_state_and_tls(state, pinned.clone()).context("tls client")?;
             sign_in(&mut client, &password).await?;
+            label_this_device(&mut client).await;
             save_state(&cli.state, client.state.as_ref().unwrap())?;
             println!("logged in");
         }
@@ -930,24 +941,49 @@ async fn main() -> Result<()> {
             let this_device = client.state.as_ref().unwrap().device_id;
             match command {
                 DevicesCommand::List {} => {
-                    for device in client.list_devices().await? {
-                        let marker = if device.device_id == this_device {
-                            " (this device)"
+                    let _ = client
+                        .ensure_device_label(CoreDeviceKind::Cli, &this_platform())
+                        .await;
+                    for device in client.device_entries().await? {
+                        let marker = if device.is_current {
+                            "  (this device)"
                         } else {
                             ""
                         };
-                        println!("{}{marker}", device.device_id);
+                        println!(
+                            "{}  {}  {}{marker}",
+                            device.name, device.detail, device.device_id
+                        );
                     }
                 }
+                DevicesCommand::Rename { device_id, name } => {
+                    let target = device_id.unwrap_or(this_device);
+                    client.rename_device(target, &name).await?;
+                    let renamed = client
+                        .device_entries()
+                        .await?
+                        .into_iter()
+                        .find(|device| device.device_id == target)
+                        .map(|device| device.name)
+                        .unwrap_or_default();
+                    println!("device {target} is now named {renamed}");
+                }
                 DevicesCommand::Revoke { device_id } => {
+                    let name = client
+                        .device_entries()
+                        .await?
+                        .into_iter()
+                        .find(|device| device.device_id == device_id)
+                        .map(|device| format!("{} ({device_id})", device.name))
+                        .unwrap_or_else(|| device_id.to_string());
                     println!(
-                        "Revoking {device_id} rotates the vault key and re-encrypts every \
+                        "Revoking {name} rotates the vault key and re-encrypts every \
                          object.\nYour current recovery phrase will stop working and a new \
                          one will be issued."
                     );
                     let phrase = client.revoke_device(device_id, &password).await?;
                     save_state(&cli.state, client.state.as_ref().unwrap())?;
-                    println!("\ndevice {device_id} revoked and the vault key rotated");
+                    println!("\ndevice {name} revoked and the vault key rotated");
                     println!(
                         "\nYour previous recovery phrase no longer works. Write these words \
                          down; they are shown once:"
@@ -1270,6 +1306,22 @@ fn read_note_body(body: Option<String>, file: Option<PathBuf>) -> Result<String>
 /// died in between, every later command would otherwise refuse to write with
 /// nothing to act on. Doing it here means any command picks the rotation up, and
 /// the replacement phrase is printed where the user will see it.
+fn this_platform() -> String {
+    sealbook_client::os_display_name(std::env::consts::OS)
+}
+
+/// Best effort: a device that cannot write its label still works, and shows
+/// under its generated name until it can.
+async fn label_this_device(client: &mut SealbookClient) {
+    match client
+        .ensure_device_label(CoreDeviceKind::Cli, &this_platform())
+        .await
+    {
+        Ok(name) => println!("this device is named {name}"),
+        Err(err) => eprintln!("warning: could not record this device's name: {err}"),
+    }
+}
+
 async fn sign_in(client: &mut SealbookClient, password: &str) -> Result<()> {
     match client.login(password).await {
         Ok(()) => Ok(()),

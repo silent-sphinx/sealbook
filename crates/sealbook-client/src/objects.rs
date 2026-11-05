@@ -14,14 +14,16 @@ use sealbook_protocol::{
     CALENDAR_CONTENT_TYPE, CALENDAR_EVENT_CONTENT_TYPE, DEFAULT_ADDRESS_BOOK_ID,
     DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_BOOKMARK_COLLECTION_ID, DEFAULT_BOOKMARK_COLLECTION_NAME,
     DEFAULT_CALENDAR_COLOR, DEFAULT_CALENDAR_ID, DEFAULT_CALENDAR_NAME, DEFAULT_NOTEBOOK_ID,
-    DEFAULT_NOTEBOOK_NAME, JSCONTACT_CONTENT_TYPE, NOTEBOOK_CONTENT_TYPE, NOTE_CONTENT_TYPE,
-    SEALED_CONTENT_TYPE,
+    DEFAULT_NOTEBOOK_NAME, DEVICE_LABEL_CONTENT_TYPE, JSCONTACT_CONTENT_TYPE,
+    NOTEBOOK_CONTENT_TYPE, NOTE_CONTENT_TYPE, SEALED_CONTENT_TYPE,
 };
 
 use crate::{ClientError, SealbookClient};
 use sealbook_core::{
-    manifest_apply, open_stored, BucketedManifest, CoreAddressBookDraft, CoreCalendarDraft,
-    CoreCalendarEventDraft, ManifestPlan, RowOutcome, StoredRow,
+    device_entries, device_label_ensure, device_label_rename, manifest_apply, open_stored,
+    stale_device_labels, BucketedManifest, CoreAddressBookDraft, CoreCalendarDraft,
+    CoreCalendarEventDraft, CoreDeviceEntry, CoreDeviceKind, CoreDeviceLabelObject, ManifestPlan,
+    RowOutcome, StoredRow,
 };
 
 /// One object's encrypted bytes, waiting to be written.
@@ -432,6 +434,100 @@ impl SealbookClient {
         }
         out = ordered_containers(&DEFAULT_BOOKMARK_COLLECTION_ID.to_string(), out);
         Ok(out)
+    }
+
+    async fn device_labels(&mut self) -> Result<Vec<CoreDeviceLabelObject>, ClientError> {
+        Ok(self
+            .listed_objects()
+            .await?
+            .into_iter()
+            .filter(|obj| obj.content_type == DEVICE_LABEL_CONTENT_TYPE)
+            .map(|obj| CoreDeviceLabelObject {
+                object_id: obj.id.to_string(),
+                payload: obj.plaintext,
+            })
+            .collect())
+    }
+
+    async fn put_device_label(
+        &mut self,
+        label: &CoreDeviceLabelObject,
+    ) -> Result<u64, ClientError> {
+        let id = label
+            .object_id
+            .parse::<Uuid>()
+            .map_err(|err| ClientError::Server(format!("device label id: {err}")))?;
+        self.put_sealed(id, label.payload.as_bytes(), DEVICE_LABEL_CONTENT_TYPE)
+            .await
+    }
+
+    /// Writes this device's label when it is missing or out of date, and
+    /// returns the name it goes by.
+    pub async fn ensure_device_label(
+        &mut self,
+        kind: CoreDeviceKind,
+        platform: &str,
+    ) -> Result<String, ClientError> {
+        let device_id = self.state.as_ref().ok_or(ClientError::NoState)?.device_id;
+        let mut labels = self.device_labels().await?;
+        if let Some(label) = device_label_ensure(&labels, device_id, kind, platform)? {
+            self.put_device_label(&label).await?;
+            labels.retain(|stored| stored.object_id != label.object_id);
+            labels.push(label);
+        }
+        Ok(device_entries(&[device_id], &labels, device_id)
+            .remove(0)
+            .name)
+    }
+
+    /// The verified roster's devices with their names, this device first.
+    pub async fn device_entries(&mut self) -> Result<Vec<CoreDeviceEntry>, ClientError> {
+        let current = self.state.as_ref().ok_or(ClientError::NoState)?.device_id;
+        let roster: Vec<Uuid> = self
+            .list_devices()
+            .await?
+            .into_iter()
+            .map(|device| device.device_id)
+            .collect();
+        let labels = self.device_labels().await?;
+        Ok(device_entries(&roster, &labels, current))
+    }
+
+    /// Renames any device on the roster. An empty name restores its default.
+    pub async fn rename_device(&mut self, device_id: Uuid, name: &str) -> Result<(), ClientError> {
+        if !self
+            .list_devices()
+            .await?
+            .iter()
+            .any(|device| device.device_id == device_id)
+        {
+            return Err(ClientError::Server(format!(
+                "device {device_id} is not on this account's roster"
+            )));
+        }
+        let labels = self.device_labels().await?;
+        let label = device_label_rename(&labels, device_id, name)?;
+        self.put_device_label(&label).await?;
+        Ok(())
+    }
+
+    /// Tombstones labels left by revoked devices and by write races.
+    pub async fn remove_stale_device_labels(&mut self) -> Result<usize, ClientError> {
+        let roster: Vec<Uuid> = self
+            .list_devices()
+            .await?
+            .into_iter()
+            .map(|device| device.device_id)
+            .collect();
+        let labels = self.device_labels().await?;
+        let stale = stale_device_labels(&roster, &labels);
+        for id in &stale {
+            if let Ok(id) = id.parse::<Uuid>() {
+                self.write_object(id, Vec::new(), Vec::new(), 0, true)
+                    .await?;
+            }
+        }
+        Ok(stale.len())
     }
 
     /// Every live object in the collection, whatever its content type.

@@ -743,6 +743,49 @@
       "type": "object",
       "x-sealbook-content-type": "application/jscontact+json"
     },
+    "DeviceLabel": {
+      "properties": {
+        "@type": {
+          "const": "DeviceLabel"
+        },
+        "deviceId": {
+          "description": "The roster device this label describes.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "kind": {
+          "description": "One of the kinds this build knows, or a later one read as unknown.",
+          "examples": [
+            "web",
+            "firefox",
+            "android",
+            "cli"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 40,
+          "minLength": 1,
+          "type": "string"
+        },
+        "platform": {
+          "description": "Coarse: browser and OS, or the phone model. Never a version or hostname.",
+          "maxLength": 60,
+          "type": "string"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        }
+      },
+      "required": [
+        "@type",
+        "version",
+        "deviceId",
+        "name"
+      ],
+      "type": "object",
+      "x-sealbook-content-type": "application/sealbook.device+json"
+    },
     "Note": {
       "properties": {
         "@type": {

@@ -189,6 +189,7 @@ pub enum CorePayloadKind {
     Task,
     TaskList,
     AccountSettings,
+    DeviceLabel,
     Unknown,
 }
 
@@ -220,6 +221,7 @@ pub fn payload_kind(content_type: &str, raw: &str) -> CorePayloadKind {
             crate::settings::ACCOUNT_SETTINGS_CONTENT_TYPE,
             AccountSettings,
         ),
+        (crate::devices::DEVICE_LABEL_CONTENT_TYPE, DeviceLabel),
     ];
     if let Some((_, kind)) = by_content_type
         .iter()
@@ -243,6 +245,7 @@ pub fn payload_kind(content_type: &str, raw: &str) -> CorePayloadKind {
         Some("Task") => Task,
         Some("TaskList") => TaskList,
         Some("AccountSettings") => AccountSettings,
+        Some("DeviceLabel") => DeviceLabel,
         Some("Card") => Contact,
         Some(_) => Unknown,
         None if object

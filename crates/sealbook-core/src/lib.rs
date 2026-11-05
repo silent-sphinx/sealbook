@@ -12,7 +12,8 @@
 //! [`PROTOCOL_VERSION`].
 //!
 //! Randomness is the one exception, confined to [`new_device`],
-//! [`new_registration`], [`attachment_plan`] and the key wraps the auth bodies
+//! [`new_registration`], [`attachment_plan`], the object id a new device label
+//! takes and the key wraps the auth bodies
 //! build: each returns what it drew for the host to persist. It lives here
 //! rather than in each binding crate because three copies of "what a new device
 //! is" is how two hosts came to choose the collection id and one did not.
@@ -28,6 +29,7 @@ mod contact_profile;
 mod contact_search;
 mod contacts;
 mod csv;
+mod devices;
 mod error;
 mod flush;
 mod http;
@@ -126,6 +128,14 @@ pub use contacts::{
     MAX_PROFILE_ENTRIES, MAX_PROFILE_TEXT_CHARS, PERIOD_CURRENT_PROP, PERIOD_END_PROP,
     PERIOD_START_PROP, PROFILE_KEYS, UNNAMED_CONTACT_NAME, UNTITLED_ADDRESS_BOOK_NAME,
     WORK_NOTE_PROP,
+};
+pub use devices::{
+    android_model_name, describe_user_agent, device_default_name, device_entries,
+    device_kind_label, device_label_ensure, device_label_parse, device_label_rename,
+    normalize_device_name, os_display_name, stale_device_labels, user_agent_browser, user_agent_os,
+    CoreDeviceEntry, CoreDeviceKind, CoreDeviceLabel, CoreDeviceLabelObject, DEVICE_KINDS,
+    DEVICE_LABEL_CONTENT_TYPE, DEVICE_LABEL_KEYS, MAX_DEVICE_NAME_CHARS, MAX_DEVICE_PLATFORM_CHARS,
+    UNREPORTED_DEVICE_DETAIL,
 };
 pub use error::CoreError;
 pub use flush::{

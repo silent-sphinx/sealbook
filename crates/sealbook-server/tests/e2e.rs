@@ -7545,3 +7545,86 @@ async fn a_tampered_chunk_fails_the_download_integrity_check() {
         "a tampered chunk was not rejected: {result:?}"
     );
 }
+
+/// Each device seals its own label; any device can rename another; and a
+/// revoke leaves no label behind for the device it removed.
+#[tokio::test]
+async fn devices_label_themselves_and_lose_the_label_on_revoke() {
+    let dir = std::env::temp_dir().join(format!("sealbook-labels-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+    let password = "correct horse battery";
+
+    let mut owner = SealbookClient::plaintext_http();
+    owner
+        .register(&base, "labelled", password)
+        .await
+        .expect("register");
+    let owner_id = owner.state.as_ref().unwrap().device_id;
+    let owner_name = owner
+        .ensure_device_label(sealbook_client::CoreDeviceKind::Cli, "macOS")
+        .await
+        .expect("label owner");
+    assert_eq!(owner_name, sealbook_client::device_default_name(owner_id));
+
+    let mut joiner = SealbookClient::plaintext_http();
+    let (pair_code, confirm) = joiner.pair_join(&base, "labelled").await.expect("join");
+    owner
+        .pair_approve(&pair_code, &confirm)
+        .await
+        .expect("approve");
+    assert!(joiner.pair_ready(&pair_code).await.expect("ready"));
+    joiner.login(password).await.expect("joiner login");
+    let joiner_id = joiner.state.as_ref().unwrap().device_id;
+
+    let entries = owner.device_entries().await.expect("entries");
+    assert_eq!(entries.len(), 2);
+    assert!(entries[0].is_current);
+    assert_eq!(entries[0].detail, "CLI · macOS");
+    assert_eq!(entries[1].detail, sealbook_client::UNREPORTED_DEVICE_DETAIL);
+
+    joiner
+        .ensure_device_label(sealbook_client::CoreDeviceKind::Cli, "Linux")
+        .await
+        .expect("label joiner");
+    owner
+        .rename_device(joiner_id, "Build box")
+        .await
+        .expect("rename");
+    let joiner_entry = owner
+        .device_entries()
+        .await
+        .expect("entries")
+        .into_iter()
+        .find(|entry| entry.device_id == joiner_id)
+        .unwrap();
+    assert_eq!(joiner_entry.name, "Build box");
+    assert_eq!(joiner_entry.detail, "CLI · Linux");
+
+    // An unchanged label is not written again.
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    let revisions = || async {
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM object_revisions")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+    let before = revisions().await;
+    joiner
+        .ensure_device_label(sealbook_client::CoreDeviceKind::Cli, "Linux")
+        .await
+        .expect("relabel");
+    assert_eq!(revisions().await, before);
+
+    owner
+        .revoke_device(joiner_id, password)
+        .await
+        .expect("revoke");
+    let after = owner.device_entries().await.expect("entries");
+    assert_eq!(after.len(), 1);
+    assert_eq!(after[0].device_id, owner_id);
+    assert_eq!(owner.remove_stale_device_labels().await.expect("sweep"), 0);
+}

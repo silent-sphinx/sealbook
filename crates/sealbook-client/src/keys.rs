@@ -86,7 +86,10 @@ impl SealbookClient {
         device_id: Uuid,
         password: &str,
     ) -> Result<String, ClientError> {
-        self.rotate(Some(device_id), password).await
+        let phrase = self.rotate(Some(device_id), password).await?;
+        // The revoke has landed; a label left behind is only clutter.
+        let _ = self.remove_stale_device_labels().await;
+        Ok(phrase)
     }
 
     /// Issues a new recovery phrase and rotates the collection key onto it.

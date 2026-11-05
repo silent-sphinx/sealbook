@@ -46,6 +46,9 @@ pub use sealbook_core::{
     CoreExportObject, CoreIcsEvent, CoreNote, CoreNoteAttachment, CoreNoteDraft, CoreNotebook,
     CoreOrderItem, CoreRecurrence, PairPoll, PAIR_POLL_INTERVAL_MS,
 };
+pub use sealbook_core::{
+    device_default_name, os_display_name, CoreDeviceEntry, CoreDeviceKind, UNREPORTED_DEVICE_DETAIL,
+};
 
 pub use sealbook_protocol::{
     merge_payload, ACCOUNT_EXPORT_TYPE, ACCOUNT_EXPORT_VERSION, ADDRESS_BOOK_CONTENT_TYPE,

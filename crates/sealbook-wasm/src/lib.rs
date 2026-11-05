@@ -7,15 +7,16 @@ use sealbook_core::{
     CoreBookmark, CoreBookmarkCollection, CoreBookmarkCollectionDraft, CoreBookmarkDraft,
     CoreBuild, CoreCalendar, CoreCalendarDraft, CoreCalendarEvent, CoreCalendarEventDraft,
     CoreContact, CoreContactDraft, CoreContactFile, CoreContactImport, CoreContactProfile,
-    CoreDevice, CoreDeviceSecrets, CoreDeviceState, CoreExportAccount, CoreExportObject,
-    CoreIcsExportEvent, CoreIcsImport, CoreManifestEntry, CoreNote, CoreNoteDraft, CoreNoteFile,
-    CoreNoteFileEntry, CoreNotebook, CorePairPreview, CoreRecurrence, CoreRoster, CoreRosterPin,
-    CoreSealedRow, CoreSession, CoreTask, CoreTaskDraft, CoreTaskList, CoreTaskListDraft,
-    HttpRequest, HttpResponse, LoggedIn, LoginStarting, ManifestContext, ManifestOutcome,
-    ManifestPlan, ManifestSigner, OpaqueStart, PairApproval, PairJoined, PairPoll, PairStatus,
-    PasswordChange, PasswordChangeStarted, RecoverStarted, Recovering, RegisterIdentity,
-    Registering, ResealRow, RosterContext, RotationPlan, RotationState, RowOutcome, RowRef,
-    SignedManifest, SweepCursor, SweepPage, VerifiedRoster, WalkCursor, WalkStep,
+    CoreDevice, CoreDeviceEntry, CoreDeviceKind, CoreDeviceLabel, CoreDeviceLabelObject,
+    CoreDeviceSecrets, CoreDeviceState, CoreExportAccount, CoreExportObject, CoreIcsExportEvent,
+    CoreIcsImport, CoreManifestEntry, CoreNote, CoreNoteDraft, CoreNoteFile, CoreNoteFileEntry,
+    CoreNotebook, CorePairPreview, CoreRecurrence, CoreRoster, CoreRosterPin, CoreSealedRow,
+    CoreSession, CoreTask, CoreTaskDraft, CoreTaskList, CoreTaskListDraft, HttpRequest,
+    HttpResponse, LoggedIn, LoginStarting, ManifestContext, ManifestOutcome, ManifestPlan,
+    ManifestSigner, OpaqueStart, PairApproval, PairJoined, PairPoll, PairStatus, PasswordChange,
+    PasswordChangeStarted, RecoverStarted, Recovering, RegisterIdentity, Registering, ResealRow,
+    RosterContext, RotationPlan, RotationState, RowOutcome, RowRef, SignedManifest, SweepCursor,
+    SweepPage, VerifiedRoster, WalkCursor, WalkStep,
 };
 use sealbook_crypto::RosterPin;
 use sealbook_crypto::{
@@ -2702,6 +2703,96 @@ pub fn core_can_disable_feature(
     Ok(sealbook_core::can_disable_feature(
         &settings.to_rust()?,
         feature,
+    ))
+}
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct DeviceLabelList(pub Vec<CoreDeviceLabelObject>);
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct DeviceEntryList(pub Vec<CoreDeviceEntry>);
+
+fn parse_uuids(ids: &[String]) -> Result<Vec<Uuid>, JsError> {
+    ids.iter().map(|id| parse_uuid(id)).collect()
+}
+
+/// "Firefox on macOS" from a user agent string.
+#[wasm_bindgen]
+pub fn core_describe_user_agent(user_agent: &str) -> String {
+    sealbook_core::describe_user_agent(user_agent)
+}
+
+#[wasm_bindgen]
+pub fn core_user_agent_os(user_agent: &str) -> String {
+    sealbook_core::user_agent_os(user_agent)
+}
+
+#[wasm_bindgen]
+pub fn core_device_label_parse(raw: &str) -> Result<Option<Ts<CoreDeviceLabel>>, JsError> {
+    match sealbook_core::device_label_parse(raw) {
+        Some(label) => Ok(Some(label.into_ts()?)),
+        None => Ok(None),
+    }
+}
+
+/// The label write this device owes, or undefined when its label is current.
+#[wasm_bindgen]
+pub fn core_device_label_ensure(
+    labels: Ts<DeviceLabelList>,
+    device_id: &str,
+    kind: Ts<CoreDeviceKind>,
+    platform: &str,
+) -> Result<Option<Ts<CoreDeviceLabelObject>>, JsError> {
+    let written = sealbook_core::device_label_ensure(
+        &labels.to_rust()?.0,
+        parse_uuid(device_id)?,
+        kind.to_rust()?,
+        platform,
+    )
+    .map_err(core_err)?;
+    match written {
+        Some(object) => Ok(Some(object.into_ts()?)),
+        None => Ok(None),
+    }
+}
+
+#[wasm_bindgen]
+pub fn core_device_label_rename(
+    labels: Ts<DeviceLabelList>,
+    device_id: &str,
+    name: &str,
+) -> Result<Ts<CoreDeviceLabelObject>, JsError> {
+    Ok(
+        sealbook_core::device_label_rename(&labels.to_rust()?.0, parse_uuid(device_id)?, name)
+            .map_err(core_err)?
+            .into_ts()?,
+    )
+}
+
+#[wasm_bindgen]
+pub fn core_device_entries(
+    roster: Vec<String>,
+    labels: Ts<DeviceLabelList>,
+    current: &str,
+) -> Result<Ts<DeviceEntryList>, JsError> {
+    Ok(DeviceEntryList(sealbook_core::device_entries(
+        &parse_uuids(&roster)?,
+        &labels.to_rust()?.0,
+        parse_uuid(current)?,
+    ))
+    .into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_stale_device_labels(
+    roster: Vec<String>,
+    labels: Ts<DeviceLabelList>,
+) -> Result<Vec<String>, JsError> {
+    Ok(sealbook_core::stale_device_labels(
+        &parse_uuids(&roster)?,
+        &labels.to_rust()?.0,
     ))
 }
 

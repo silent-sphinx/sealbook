@@ -17,11 +17,12 @@ use crate::{
     ADDRESS_BOOK_ID_PROP, ADDRESS_BOOK_KEYS, BOOKMARK_COLLECTION_CONTENT_TYPE,
     BOOKMARK_COLLECTION_KEYS, BOOKMARK_CONTENT_TYPE, BOOKMARK_KEYS, CALENDAR_CONTENT_TYPE,
     CALENDAR_EVENT_CONTENT_TYPE, CALENDAR_EVENT_KEYS, CALENDAR_KEYS, CONTACT_ARCHIVED_PROP,
-    CONTACT_ATTACHMENTS_PROP, CONTACT_KEYS, CONTACT_MODES, CONTACT_PROFILE_PROP, FEATURES,
-    JSCONTACT_CONTENT_TYPE, MAX_BOOKMARK_TAGS, MAX_PROFILE_ENTRIES, MAX_TASK_COMPLETIONS,
-    NOTEBOOK_CONTENT_TYPE, NOTEBOOK_KEYS, NOTE_CONTENT_TYPE, NOTE_KEYS, PERIOD_CURRENT_PROP,
-    PERIOD_END_PROP, PERIOD_START_PROP, PROFILE_KEYS, TASK_CONTENT_TYPE, TASK_EXPORT_TYPE,
-    TASK_KEYS, TASK_LIST_CONTENT_TYPE, TASK_LIST_KEYS, WORK_NOTE_PROP,
+    CONTACT_ATTACHMENTS_PROP, CONTACT_KEYS, CONTACT_MODES, CONTACT_PROFILE_PROP, DEVICE_KINDS,
+    DEVICE_LABEL_CONTENT_TYPE, DEVICE_LABEL_KEYS, FEATURES, JSCONTACT_CONTENT_TYPE,
+    MAX_BOOKMARK_TAGS, MAX_DEVICE_NAME_CHARS, MAX_DEVICE_PLATFORM_CHARS, MAX_PROFILE_ENTRIES,
+    MAX_TASK_COMPLETIONS, NOTEBOOK_CONTENT_TYPE, NOTEBOOK_KEYS, NOTE_CONTENT_TYPE, NOTE_KEYS,
+    PERIOD_CURRENT_PROP, PERIOD_END_PROP, PERIOD_START_PROP, PROFILE_KEYS, TASK_CONTENT_TYPE,
+    TASK_EXPORT_TYPE, TASK_KEYS, TASK_LIST_CONTENT_TYPE, TASK_LIST_KEYS, WORK_NOTE_PROP,
 };
 
 pub const PAYLOAD_SCHEMA_ID: &str = "urn:sealbook:schema:payloads";
@@ -52,6 +53,7 @@ pub const PAYLOAD_TYPES: &[(&str, &str, &[&str])] = &[
         ACCOUNT_SETTINGS_CONTENT_TYPE,
         ACCOUNT_SETTINGS_KEYS,
     ),
+    ("DeviceLabel", DEVICE_LABEL_CONTENT_TYPE, DEVICE_LABEL_KEYS),
 ];
 
 const RULES: &[&str] = &[
@@ -82,6 +84,7 @@ pub fn payload_schema() -> Value {
         ("Card", card()),
         ("AddressBook", address_book()),
         ("AccountSettings", account_settings()),
+        ("DeviceLabel", device_label()),
     ] {
         defs.insert(name.into(), schema);
     }
@@ -523,6 +526,19 @@ fn account_settings() -> Value {
             "accent": { "enum": ACCENTS },
         }),
         &["features", "contactMode", "accent"],
+    )
+}
+
+fn device_label() -> Value {
+    payload(
+        "DeviceLabel",
+        json!({
+            "deviceId": { "type": "string", "format": "uuid", "description": "The roster device this label describes." },
+            "name": { "type": "string", "minLength": 1, "maxLength": MAX_DEVICE_NAME_CHARS },
+            "kind": { "type": "string", "description": "One of the kinds this build knows, or a later one read as unknown.", "examples": DEVICE_KINDS },
+            "platform": { "type": "string", "maxLength": MAX_DEVICE_PLATFORM_CHARS, "description": "Coarse: browser and OS, or the phone model. Never a version or hostname." },
+        }),
+        &["deviceId", "name"],
     )
 }
 

@@ -33,6 +33,7 @@ pub const BOOKMARK_CONTENT_TYPE: &str = "application/sealbook.bookmark+json";
 pub const BOOKMARK_COLLECTION_CONTENT_TYPE: &str = "application/sealbook.bookmark-collection+json";
 pub const TASK_CONTENT_TYPE: &str = "application/sealbook.task+json";
 pub const TASK_LIST_CONTENT_TYPE: &str = "application/sealbook.task-list+json";
+pub const DEVICE_LABEL_CONTENT_TYPE: &str = "application/sealbook.device+json";
 pub const ADDRESS_BOOK_ID_PROP: &str = "sealbook:addressBookId";
 
 /// The `@type` and `version` of a full account export, the one file that carries
@@ -1115,6 +1116,7 @@ mod tests {
             BOOKMARK_COLLECTION_CONTENT_TYPE,
             TASK_CONTENT_TYPE,
             TASK_LIST_CONTENT_TYPE,
+            DEVICE_LABEL_CONTENT_TYPE,
         ];
         let distinct: std::collections::BTreeSet<_> = types.iter().collect();
         assert_eq!(distinct.len(), types.len());

@@ -1,0 +1,485 @@
+{
+  "constants": {
+    "content_type": "application/sealbook.device+json",
+    "keys": [
+      "@type",
+      "version",
+      "deviceId",
+      "name",
+      "kind",
+      "platform"
+    ],
+    "kinds": [
+      "web",
+      "firefox",
+      "android",
+      "cli"
+    ],
+    "kind_labels": [
+      [
+        "web",
+        "Web browser"
+      ],
+      [
+        "firefox",
+        "Firefox extension"
+      ],
+      [
+        "android",
+        "Android device"
+      ],
+      [
+        "cli",
+        "CLI"
+      ],
+      [
+        "unknown",
+        "Device"
+      ]
+    ],
+    "max_name_chars": 40,
+    "max_platform_chars": 60,
+    "unreported_detail": "Device type not reported yet"
+  },
+  "names": [
+    {
+      "device_id": "3ee1943d-0a63-4600-a9b0-983990be5e4b",
+      "name": "Keen Dune"
+    },
+    {
+      "device_id": "7a4cdd6a-40b8-419f-b20c-279a8d946029",
+      "name": "Lively Owl"
+    },
+    {
+      "device_id": "51e5b1fb-d44e-4ff3-a261-5e82e12675b0",
+      "name": "Smoky Reef"
+    },
+    {
+      "device_id": "00000000-0000-0000-0000-000000000000",
+      "name": "Amber Badger"
+    },
+    {
+      "device_id": "ffffffff-ffff-4fff-bfff-ffffffffffff",
+      "name": "Zesty Zephyr"
+    }
+  ],
+  "user_agents": [
+    {
+      "case": "Firefox on macOS",
+      "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:140.0) Gecko/20100101 Firefox/140.0",
+      "browser": "Firefox",
+      "os": "macOS",
+      "described": "Firefox on macOS"
+    },
+    {
+      "case": "Chrome on Windows",
+      "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+      "browser": "Chrome",
+      "os": "Windows",
+      "described": "Chrome on Windows"
+    },
+    {
+      "case": "Edge on Windows",
+      "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 Edg/140.0.0.0",
+      "browser": "Edge",
+      "os": "Windows",
+      "described": "Edge on Windows"
+    },
+    {
+      "case": "Safari on macOS",
+      "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
+      "browser": "Safari",
+      "os": "macOS",
+      "described": "Safari on macOS"
+    },
+    {
+      "case": "Safari on iOS",
+      "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+      "browser": "Safari",
+      "os": "iOS",
+      "described": "Safari on iOS"
+    },
+    {
+      "case": "Chrome on Android",
+      "user_agent": "Mozilla/5.0 (Linux; Android 15; Pixel 8a) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36",
+      "browser": "Chrome",
+      "os": "Android",
+      "described": "Chrome on Android"
+    },
+    {
+      "case": "Firefox on Linux",
+      "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0",
+      "browser": "Firefox",
+      "os": "Linux",
+      "described": "Firefox on Linux"
+    },
+    {
+      "case": "Chrome on ChromeOS",
+      "user_agent": "Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+      "browser": "Chrome",
+      "os": "ChromeOS",
+      "described": "Chrome on ChromeOS"
+    },
+    {
+      "case": "Firefox on iPadOS",
+      "user_agent": "Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/140.0 Mobile/15E148 Safari/605.1.15",
+      "browser": "Firefox",
+      "os": "iPadOS",
+      "described": "Firefox on iPadOS"
+    },
+    {
+      "case": "nothing recognised",
+      "user_agent": "curl/8.7.1",
+      "browser": "",
+      "os": "",
+      "described": ""
+    },
+    {
+      "case": "empty",
+      "user_agent": "",
+      "browser": "",
+      "os": "",
+      "described": ""
+    }
+  ],
+  "android_models": [
+    {
+      "manufacturer": "Google",
+      "model": "Pixel 8a",
+      "named": "Google Pixel 8a"
+    },
+    {
+      "manufacturer": "samsung",
+      "model": "SM-S921B",
+      "named": "Samsung SM-S921B"
+    },
+    {
+      "manufacturer": "OnePlus",
+      "model": "OnePlus 12",
+      "named": "OnePlus 12"
+    },
+    {
+      "manufacturer": "Xiaomi",
+      "model": "  Redmi   Note 13 ",
+      "named": "Xiaomi Redmi Note 13"
+    },
+    {
+      "manufacturer": "",
+      "model": "Pixel 9",
+      "named": "Pixel 9"
+    }
+  ],
+  "writes": [
+    {
+      "case": "a device with no label writes one under its default name",
+      "labels": [],
+      "device_id": "5ea1b00c-0000-4000-8000-000000000001",
+      "rename": null,
+      "kind": "firefox",
+      "platform": "macOS",
+      "payload": "{\"@type\":\"DeviceLabel\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"kind\":\"firefox\",\"name\":\"Amber Beacon\",\"platform\":\"macOS\",\"version\":\"1.0\"}",
+      "reused_object": false
+    },
+    {
+      "case": "a label that already says what the device is needs no write",
+      "labels": [
+        {
+          "object_id": "00000000-0000-0000-0000-00000000000a",
+          "payload": "{\"@type\":\"DeviceLabel\",\"version\":\"1.0\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"name\":\"Work laptop\",\"kind\":\"web\",\"platform\":\"Firefox on macOS\",\"pinned\":true}"
+        }
+      ],
+      "device_id": "5ea1b00c-0000-4000-8000-000000000001",
+      "rename": null,
+      "kind": "web",
+      "platform": "Firefox on macOS",
+      "payload": null,
+      "reused_object": false
+    },
+    {
+      "case": "a new platform keeps the chosen name and unknown keys",
+      "labels": [
+        {
+          "object_id": "00000000-0000-0000-0000-00000000000a",
+          "payload": "{\"@type\":\"DeviceLabel\",\"version\":\"1.0\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"name\":\"Work laptop\",\"kind\":\"web\",\"platform\":\"Firefox on macOS\",\"pinned\":true}"
+        }
+      ],
+      "device_id": "5ea1b00c-0000-4000-8000-000000000001",
+      "rename": null,
+      "kind": "web",
+      "platform": "Firefox on Linux",
+      "payload": "{\"@type\":\"DeviceLabel\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"kind\":\"web\",\"name\":\"Work laptop\",\"pinned\":true,\"platform\":\"Firefox on Linux\",\"version\":\"1.0\"}",
+      "reused_object": true
+    },
+    {
+      "case": "a label from a newer major is left alone",
+      "labels": [
+        {
+          "object_id": "00000000-0000-0000-0000-00000000000c",
+          "payload": "{\"@type\":\"DeviceLabel\",\"version\":\"9.0\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"name\":\"Future\",\"kind\":\"web\"}"
+        }
+      ],
+      "device_id": "5ea1b00c-0000-4000-8000-000000000001",
+      "rename": null,
+      "kind": "web",
+      "platform": "Chrome on Windows",
+      "payload": null,
+      "reused_object": false
+    },
+    {
+      "case": "a rename keeps the kind and platform",
+      "labels": [
+        {
+          "object_id": "00000000-0000-0000-0000-00000000000a",
+          "payload": "{\"@type\":\"DeviceLabel\",\"version\":\"1.0\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"name\":\"Work laptop\",\"kind\":\"web\",\"platform\":\"Firefox on macOS\",\"pinned\":true}"
+        }
+      ],
+      "device_id": "5ea1b00c-0000-4000-8000-000000000001",
+      "rename": "  Office   iMac ",
+      "kind": "unknown",
+      "platform": "",
+      "payload": "{\"@type\":\"DeviceLabel\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"kind\":\"web\",\"name\":\"Office iMac\",\"pinned\":true,\"platform\":\"Firefox on macOS\",\"version\":\"1.0\"}",
+      "reused_object": true
+    },
+    {
+      "case": "a rename keeps a kind this build does not know",
+      "labels": [
+        {
+          "object_id": "00000000-0000-0000-0000-00000000000b",
+          "payload": "{\"@type\":\"DeviceLabel\",\"version\":\"1.2\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"name\":\"Kitchen tablet\",\"kind\":\"ios\",\"platform\":\"iPadOS\"}"
+        }
+      ],
+      "device_id": "5ea1b00c-0000-4000-8000-000000000001",
+      "rename": "Tablet",
+      "kind": "unknown",
+      "platform": "",
+      "payload": "{\"@type\":\"DeviceLabel\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"kind\":\"ios\",\"name\":\"Tablet\",\"platform\":\"iPadOS\",\"version\":\"1.2\"}",
+      "reused_object": true
+    },
+    {
+      "case": "an empty rename restores the default",
+      "labels": [
+        {
+          "object_id": "00000000-0000-0000-0000-00000000000a",
+          "payload": "{\"@type\":\"DeviceLabel\",\"version\":\"1.0\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"name\":\"Work laptop\",\"kind\":\"web\",\"platform\":\"Firefox on macOS\",\"pinned\":true}"
+        }
+      ],
+      "device_id": "5ea1b00c-0000-4000-8000-000000000001",
+      "rename": "   ",
+      "kind": "unknown",
+      "platform": "",
+      "payload": "{\"@type\":\"DeviceLabel\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"kind\":\"web\",\"name\":\"Amber Beacon\",\"pinned\":true,\"platform\":\"Firefox on macOS\",\"version\":\"1.0\"}",
+      "reused_object": true
+    },
+    {
+      "case": "renaming a device that never reported writes a label with no kind",
+      "labels": [],
+      "device_id": "5ea1b00c-0000-4000-8000-000000000001",
+      "rename": "Old phone",
+      "kind": "unknown",
+      "platform": "",
+      "payload": "{\"@type\":\"DeviceLabel\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"name\":\"Old phone\",\"version\":\"1.0\"}",
+      "reused_object": false
+    },
+    {
+      "case": "a long name is cut to the limit",
+      "labels": [],
+      "device_id": "5ea1b00c-0000-4000-8000-000000000001",
+      "rename": "A name that goes on far longer than anyone would want to read",
+      "kind": "unknown",
+      "platform": "",
+      "payload": "{\"@type\":\"DeviceLabel\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"name\":\"A name that goes on far longer than anyo\",\"version\":\"1.0\"}",
+      "reused_object": false
+    }
+  ],
+  "parses": [
+    {
+      "case": "a full label",
+      "raw": "{\"@type\":\"DeviceLabel\",\"version\":\"1.0\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000002\",\"name\":\"Swift Otter\",\"kind\":\"android\",\"platform\":\"Google Pixel 8a\"}",
+      "label": {
+        "device_id": "5ea1b00c-0000-4000-8000-000000000002",
+        "name": "Swift Otter",
+        "kind": "android",
+        "platform": "Google Pixel 8a",
+        "readable": true
+      }
+    },
+    {
+      "case": "an unknown kind reads as unknown",
+      "raw": "{\"@type\":\"DeviceLabel\",\"version\":\"1.0\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000002\",\"name\":\"Tab\",\"kind\":\"ios\"}",
+      "label": {
+        "device_id": "5ea1b00c-0000-4000-8000-000000000002",
+        "name": "Tab",
+        "kind": "unknown",
+        "platform": "",
+        "readable": true
+      }
+    },
+    {
+      "case": "a newer major is read but marked",
+      "raw": "{\"@type\":\"DeviceLabel\",\"version\":\"9.0\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000002\",\"name\":\"Next\"}",
+      "label": {
+        "device_id": "5ea1b00c-0000-4000-8000-000000000002",
+        "name": "Next",
+        "kind": "unknown",
+        "platform": "",
+        "readable": false
+      }
+    },
+    {
+      "case": "no device id is no label",
+      "raw": "{\"@type\":\"DeviceLabel\",\"version\":\"1.0\",\"name\":\"Orphan\"}",
+      "label": null
+    },
+    {
+      "case": "not JSON",
+      "raw": "garbage",
+      "label": null
+    }
+  ],
+  "entries": [
+    {
+      "case": "labelled, unlabelled, raced and revoked devices",
+      "roster": [
+        "5ea1b00c-0000-4000-8000-000000000002",
+        "5ea1b00c-0000-4000-8000-000000000001",
+        "5ea1b00c-0000-4000-8000-000000000003"
+      ],
+      "labels": [
+        {
+          "object_id": "00000000-0000-0000-0000-000000000014",
+          "payload": "{\"@type\":\"DeviceLabel\",\"version\":\"1.0\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"name\":\"Desk\",\"kind\":\"web\",\"platform\":\"Firefox on macOS\"}"
+        },
+        {
+          "object_id": "00000000-0000-0000-0000-000000000015",
+          "payload": "{\"@type\":\"DeviceLabel\",\"version\":\"1.0\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000002\",\"name\":\"Phone\",\"kind\":\"android\",\"platform\":\"Google Pixel 8a\"}"
+        },
+        {
+          "object_id": "00000000-0000-0000-0000-000000000016",
+          "payload": "{\"@type\":\"DeviceLabel\",\"version\":\"1.0\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000004\",\"name\":\"Revoked\",\"kind\":\"cli\",\"platform\":\"Linux\"}"
+        },
+        {
+          "object_id": "00000000-0000-0000-0000-000000000013",
+          "payload": "{\"@type\":\"DeviceLabel\",\"version\":\"1.0\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000002\",\"name\":\"Phone (race)\",\"kind\":\"android\"}"
+        },
+        {
+          "object_id": "00000000-0000-0000-0000-000000000017",
+          "payload": "not a label"
+        }
+      ],
+      "current": "5ea1b00c-0000-4000-8000-000000000001",
+      "entries": [
+        {
+          "device_id": "5ea1b00c-0000-4000-8000-000000000001",
+          "name": "Desk",
+          "kind": "web",
+          "detail": "Web browser · Firefox on macOS",
+          "is_current": true,
+          "label": {
+            "object_id": "00000000-0000-0000-0000-000000000014",
+            "payload": "{\"@type\":\"DeviceLabel\",\"version\":\"1.0\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"name\":\"Desk\",\"kind\":\"web\",\"platform\":\"Firefox on macOS\"}"
+          }
+        },
+        {
+          "device_id": "5ea1b00c-0000-4000-8000-000000000002",
+          "name": "Phone (race)",
+          "kind": "android",
+          "detail": "Android device",
+          "is_current": false,
+          "label": {
+            "object_id": "00000000-0000-0000-0000-000000000013",
+            "payload": "{\"@type\":\"DeviceLabel\",\"version\":\"1.0\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000002\",\"name\":\"Phone (race)\",\"kind\":\"android\"}"
+          }
+        },
+        {
+          "device_id": "5ea1b00c-0000-4000-8000-000000000003",
+          "name": "Amber Brook",
+          "kind": "unknown",
+          "detail": "Device type not reported yet",
+          "is_current": false
+        }
+      ],
+      "stale": [
+        "00000000-0000-0000-0000-000000000015",
+        "00000000-0000-0000-0000-000000000016",
+        "00000000-0000-0000-0000-000000000017"
+      ]
+    },
+    {
+      "case": "two devices sharing a name are told apart",
+      "roster": [
+        "5ea1b00c-0000-4000-8000-000000000001",
+        "5ea1b00c-0000-4000-8000-000000000002",
+        "5ea1b00c-0000-4000-8000-000000000003"
+      ],
+      "labels": [
+        {
+          "object_id": "00000000-0000-0000-0000-00000000001e",
+          "payload": "{\"@type\":\"DeviceLabel\",\"version\":\"1.0\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000002\",\"name\":\"Laptop\",\"kind\":\"web\"}"
+        },
+        {
+          "object_id": "00000000-0000-0000-0000-00000000001f",
+          "payload": "{\"@type\":\"DeviceLabel\",\"version\":\"1.0\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000003\",\"name\":\"laptop\",\"kind\":\"cli\",\"platform\":\"macOS\"}"
+        }
+      ],
+      "current": "5ea1b00c-0000-4000-8000-000000000001",
+      "entries": [
+        {
+          "device_id": "5ea1b00c-0000-4000-8000-000000000001",
+          "name": "Amber Beacon",
+          "kind": "unknown",
+          "detail": "Device type not reported yet",
+          "is_current": true
+        },
+        {
+          "device_id": "5ea1b00c-0000-4000-8000-000000000002",
+          "name": "Laptop (0002)",
+          "kind": "web",
+          "detail": "Web browser",
+          "is_current": false,
+          "label": {
+            "object_id": "00000000-0000-0000-0000-00000000001e",
+            "payload": "{\"@type\":\"DeviceLabel\",\"version\":\"1.0\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000002\",\"name\":\"Laptop\",\"kind\":\"web\"}"
+          }
+        },
+        {
+          "device_id": "5ea1b00c-0000-4000-8000-000000000003",
+          "name": "laptop (0003)",
+          "kind": "cli",
+          "detail": "CLI · macOS",
+          "is_current": false,
+          "label": {
+            "object_id": "00000000-0000-0000-0000-00000000001f",
+            "payload": "{\"@type\":\"DeviceLabel\",\"version\":\"1.0\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000003\",\"name\":\"laptop\",\"kind\":\"cli\",\"platform\":\"macOS\"}"
+          }
+        }
+      ],
+      "stale": []
+    },
+    {
+      "case": "no labels at all",
+      "roster": [
+        "5ea1b00c-0000-4000-8000-000000000002",
+        "5ea1b00c-0000-4000-8000-000000000001"
+      ],
+      "labels": [],
+      "current": "5ea1b00c-0000-4000-8000-000000000001",
+      "entries": [
+        {
+          "device_id": "5ea1b00c-0000-4000-8000-000000000001",
+          "name": "Amber Beacon",
+          "kind": "unknown",
+          "detail": "Device type not reported yet",
+          "is_current": true
+        },
+        {
+          "device_id": "5ea1b00c-0000-4000-8000-000000000002",
+          "name": "Amber Bison",
+          "kind": "unknown",
+          "detail": "Device type not reported yet",
+          "is_current": false
+        }
+      ],
+      "stale": []
+    }
+  ]
+}
