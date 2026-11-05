@@ -19,10 +19,11 @@ use crate::{
     CALENDAR_EVENT_CONTENT_TYPE, CALENDAR_EVENT_KEYS, CALENDAR_KEYS, CONTACT_ARCHIVED_PROP,
     CONTACT_ATTACHMENTS_PROP, CONTACT_KEYS, CONTACT_MODES, CONTACT_PROFILE_PROP, DEVICE_KINDS,
     DEVICE_LABEL_CONTENT_TYPE, DEVICE_LABEL_KEYS, FEATURES, JSCONTACT_CONTENT_TYPE,
-    MAX_BOOKMARK_TAGS, MAX_DEVICE_NAME_CHARS, MAX_DEVICE_PLATFORM_CHARS, MAX_PROFILE_ENTRIES,
-    MAX_TASK_COMPLETIONS, NOTEBOOK_CONTENT_TYPE, NOTEBOOK_KEYS, NOTE_CONTENT_TYPE, NOTE_KEYS,
-    PERIOD_CURRENT_PROP, PERIOD_END_PROP, PERIOD_START_PROP, PROFILE_KEYS, TASK_CONTENT_TYPE,
-    TASK_EXPORT_TYPE, TASK_KEYS, TASK_LIST_CONTENT_TYPE, TASK_LIST_KEYS, WORK_NOTE_PROP,
+    MAX_ALERT_MINUTES_BEFORE, MAX_BOOKMARK_TAGS, MAX_DEVICE_NAME_CHARS, MAX_DEVICE_PLATFORM_CHARS,
+    MAX_PROFILE_ENTRIES, MAX_TASK_COMPLETIONS, MIN_ALERT_MINUTES_BEFORE, NOTEBOOK_CONTENT_TYPE,
+    NOTEBOOK_KEYS, NOTE_CONTENT_TYPE, NOTE_KEYS, PERIOD_CURRENT_PROP, PERIOD_END_PROP,
+    PERIOD_START_PROP, PROFILE_KEYS, TASK_CONTENT_TYPE, TASK_EXPORT_TYPE, TASK_KEYS,
+    TASK_LIST_CONTENT_TYPE, TASK_LIST_KEYS, WORK_NOTE_PROP,
 };
 
 pub const PAYLOAD_SCHEMA_ID: &str = "urn:sealbook:schema:payloads";
@@ -352,6 +353,25 @@ fn calendar_event() -> Value {
             "timezone": text("An IANA zone name."),
             "calendarId": id("Absent is no calendar."),
             "recurrence": stored_recurrence(),
+            "alerts": {
+                "type": "array",
+                "description": "Reminders. An entry this build cannot read is written back as it was stored.",
+                "items": {
+                    "anyOf": [
+                        {
+                            "type": "object",
+                            "required": ["minutesBefore"],
+                            "properties": { "minutesBefore": {
+                                "type": "integer",
+                                "minimum": MIN_ALERT_MINUTES_BEFORE,
+                                "maximum": MAX_ALERT_MINUTES_BEFORE,
+                                "description": "Before a timed start, or before local midnight on an all-day event's first day.",
+                            } },
+                        },
+                        { "type": "object" },
+                    ],
+                },
+            },
         }),
         &["title", "start"],
     )

@@ -74,7 +74,18 @@ pub const CALENDAR_EVENT_KEYS: &[&str] = &[
     "timezone",
     "calendarId",
     "recurrence",
+    "alerts",
 ];
+
+/// The most reminders an event keeps; a writer drops the rest.
+pub const MAX_EVENT_ALERTS: usize = 10;
+
+/// The furthest a reminder may sit before the event's start, four weeks.
+pub const MAX_ALERT_MINUTES_BEFORE: i32 = 40_320;
+
+/// The furthest a reminder may sit after the start: the end of an all-day
+/// event's first day, counted from its midnight.
+pub const MIN_ALERT_MINUTES_BEFORE: i32 = -1_439;
 
 /// How often a rule repeats.
 ///
@@ -122,6 +133,21 @@ impl CoreRecurrenceFrequency {
 pub struct CoreNthWeekday {
     pub ordinal: u32,
     pub weekday: u32,
+    /// Keys of the stored entry this build does not write, as a JSON object.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "uniffi", uniffi(default = None))]
+    pub extra: Option<String>,
+}
+
+/// One reminder on an event.
+///
+/// `minutes_before` counts back from a timed event's start instant, or from local
+/// midnight on an all-day event's first day, so -540 is 09:00 on the day.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct CoreEventAlert {
+    pub minutes_before: i32,
     /// Keys of the stored entry this build does not write, as a JSON object.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "uniffi", uniffi(default = None))]
@@ -243,6 +269,15 @@ pub struct CoreCalendarEventDraft {
     /// only set its own; a host clearing the repeat clears both.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unreadable_recurrence: Option<String>,
+    /// Empty writes no `alerts` key, unless `unreadable_alerts` has entries.
+    #[serde(default)]
+    #[cfg_attr(feature = "uniffi", uniffi(default = []))]
+    pub alerts: Vec<CoreEventAlert>,
+    /// Stored entries this build could not read, as JSON, carried from
+    /// [`CoreCalendarEvent::unreadable_alerts`] and written back after `alerts`.
+    #[serde(default)]
+    #[cfg_attr(feature = "uniffi", uniffi(default = []))]
+    pub unreadable_alerts: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<String>,
 }
@@ -277,6 +312,11 @@ pub struct CoreCalendarEvent {
     /// `CoreNoteAttachment::extra` is for a photo.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unreadable_recurrence: Option<String>,
+    /// Sorted soonest-to-start last, without duplicates.
+    #[serde(default)]
+    pub alerts: Vec<CoreEventAlert>,
+    #[serde(default)]
+    pub unreadable_alerts: Vec<String>,
     pub readable: bool,
     pub raw: String,
 }
@@ -342,10 +382,13 @@ pub fn event_parse(id: &str, raw: &str) -> CoreCalendarEvent {
             calendar_id: None,
             recurrence: None,
             unreadable_recurrence: None,
+            alerts: Vec::new(),
+            unreadable_alerts: Vec::new(),
             readable: true,
             raw: raw.to_string(),
         };
     };
+    let (alerts, unreadable_alerts) = parse_alerts(object.get("alerts"));
     CoreCalendarEvent {
         id: id.to_string(),
         title: trimmed(&object, "title").unwrap_or_else(|| UNTITLED_EVENT_TITLE.to_string()),
@@ -360,6 +403,8 @@ pub fn event_parse(id: &str, raw: &str) -> CoreCalendarEvent {
         unreadable_recurrence: stored_rule(&object)
             .filter(|stored| parse_recurrence(stored).is_none())
             .map(|stored| Value::Object(stored.clone()).to_string()),
+        alerts,
+        unreadable_alerts,
         readable: declared_readable(&object),
         raw: raw.to_string(),
     }
@@ -393,6 +438,10 @@ pub fn event_write(draft: &CoreCalendarEventDraft) -> Result<String, CoreError> 
         fields.insert("recurrence".into(), recurrence_json(rule));
     } else if let Some(stored) = draft.unreadable_recurrence.as_deref().and_then(as_object) {
         fields.insert("recurrence".into(), Value::Object(stored));
+    }
+    let alerts = alerts_json(&draft.alerts, &draft.unreadable_alerts);
+    if !alerts.is_empty() {
+        fields.insert("alerts".into(), Value::Array(alerts));
     }
     Ok(write_payload(
         draft.raw.as_deref(),
@@ -578,6 +627,131 @@ pub(crate) fn recurrence_json(rule: &CoreRecurrence) -> Value {
     Value::Object(object)
 }
 
+const ALERT_KEYS: &[&str] = &["minutesBefore"];
+
+fn valid_alert(minutes_before: i32) -> bool {
+    (MIN_ALERT_MINUTES_BEFORE..=MAX_ALERT_MINUTES_BEFORE).contains(&minutes_before)
+}
+
+/// Readable alerts, sorted and deduplicated, and the entries that would not read.
+fn parse_alerts(value: Option<&Value>) -> (Vec<CoreEventAlert>, Vec<String>) {
+    let Some(entries) = value.and_then(Value::as_array) else {
+        return (Vec::new(), Vec::new());
+    };
+    let mut alerts = Vec::new();
+    let mut unreadable = Vec::new();
+    for entry in entries {
+        let Some(object) = entry.as_object() else {
+            continue;
+        };
+        let minutes = object
+            .get("minutesBefore")
+            .and_then(Value::as_i64)
+            .and_then(|minutes| i32::try_from(minutes).ok())
+            .filter(|minutes| valid_alert(*minutes));
+        match minutes {
+            Some(minutes_before) => alerts.push(CoreEventAlert {
+                minutes_before,
+                extra: extra_of(object, ALERT_KEYS),
+            }),
+            None => unreadable.push(entry.to_string()),
+        }
+    }
+    (normalized_alerts(&alerts), unreadable)
+}
+
+fn normalized_alerts(alerts: &[CoreEventAlert]) -> Vec<CoreEventAlert> {
+    let mut sorted: Vec<CoreEventAlert> = alerts
+        .iter()
+        .filter(|alert| valid_alert(alert.minutes_before))
+        .cloned()
+        .collect();
+    sorted.sort_by_key(|alert| std::cmp::Reverse(alert.minutes_before));
+    sorted.dedup_by_key(|alert| alert.minutes_before);
+    sorted
+}
+
+fn alerts_json(alerts: &[CoreEventAlert], unreadable: &[String]) -> Vec<Value> {
+    let mut entries: Vec<Value> = normalized_alerts(alerts)
+        .iter()
+        .map(|alert| {
+            let mut entry = entry_with(&alert.extra);
+            entry.insert("minutesBefore".into(), json!(alert.minutes_before));
+            Value::Object(entry)
+        })
+        .collect();
+    entries.extend(
+        unreadable
+            .iter()
+            .filter_map(|raw| as_object(raw))
+            .map(Value::Object),
+    );
+    entries.truncate(MAX_EVENT_ALERTS);
+    entries
+}
+
+/// The reminders an event editor offers, soonest-to-start last.
+pub fn alert_presets(all_day: bool) -> Vec<i32> {
+    if all_day {
+        vec![9_540, 2_340, 900, -540]
+    } else {
+        vec![10_080, 2_880, 1_440, 120, 60, 30, 15, 10, 5, 0]
+    }
+}
+
+/// How a reminder is named in every client: "15 minutes before", "1 day before
+/// at 09:00".
+pub fn alert_label(minutes_before: i32, all_day: bool) -> String {
+    if all_day {
+        let days_before = (minutes_before + 1_439).div_euclid(1_440);
+        let time = (days_before * 1_440 - minutes_before).rem_euclid(1_440);
+        let clock = format!("{:02}:{:02}", time / 60, time % 60);
+        return match days_before {
+            0 => format!("On the day at {clock}"),
+            7 => format!("1 week before at {clock}"),
+            14 => format!("2 weeks before at {clock}"),
+            days => format!("{} before at {clock}", plural(days, "day")),
+        };
+    }
+    if minutes_before == 0 {
+        return "At start".to_string();
+    }
+    let span = duration_words(minutes_before.unsigned_abs());
+    if minutes_before > 0 {
+        format!("{span} before")
+    } else {
+        format!("{span} after start")
+    }
+}
+
+/// A reminder carried across an event switching to all-day (`all_day`) or back,
+/// keeping how many days before it fires: a timed one lands at 09:00, an
+/// all-day one at the start.
+pub fn alert_retimed(minutes_before: i32, all_day: bool) -> i32 {
+    if all_day {
+        minutes_before.max(0).div_euclid(1_440) * 1_440 - 540
+    } else {
+        (minutes_before + 1_439).div_euclid(1_440).max(0) * 1_440
+    }
+}
+
+fn duration_words(minutes: u32) -> String {
+    for (size, unit) in [(10_080, "week"), (1_440, "day"), (60, "hour")] {
+        if minutes.is_multiple_of(size) {
+            return plural((minutes / size) as i32, unit);
+        }
+    }
+    plural(minutes as i32, "minute")
+}
+
+fn plural(count: i32, unit: &str) -> String {
+    if count == 1 {
+        format!("1 {unit}")
+    } else {
+        format!("{count} {unit}s")
+    }
+}
+
 /// Everything above, in the shapes the bindings can carry.
 #[cfg(feature = "uniffi")]
 pub mod ffi {
@@ -624,6 +798,21 @@ pub mod ffi {
     #[uniffi::export(name = "event_write")]
     pub fn event_write(draft: CoreCalendarEventDraft) -> Result<String, CoreError> {
         super::event_write(&draft)
+    }
+
+    #[uniffi::export(name = "alert_presets")]
+    pub fn alert_presets(all_day: bool) -> Vec<i32> {
+        super::alert_presets(all_day)
+    }
+
+    #[uniffi::export(name = "alert_label")]
+    pub fn alert_label(minutes_before: i32, all_day: bool) -> String {
+        super::alert_label(minutes_before, all_day)
+    }
+
+    #[uniffi::export(name = "alert_retimed")]
+    pub fn alert_retimed(minutes_before: i32, all_day: bool) -> i32 {
+        super::alert_retimed(minutes_before, all_day)
     }
 
     #[uniffi::export(name = "calendar_name_by_id")]
@@ -839,5 +1028,110 @@ mod tests {
             calendar_name_by_id(&calendars, Some("gone".into())),
             Some(DEFAULT_CALENDAR_NAME.into())
         );
+    }
+
+    #[test]
+    fn alerts_are_sorted_deduplicated_and_an_unreadable_entry_rides_through() {
+        let stored = r#"{"title":"t","start":"2026-10-01T09:00:00Z","alerts":[{"minutesBefore":15},{"minutesBefore":60,"sound":"chime"},{"minutesBefore":15},{"at":"2026-09-30T08:00:00Z"},{"minutesBefore":99999},"junk"]}"#;
+        let event = event_parse("e1", stored);
+        assert_eq!(
+            event
+                .alerts
+                .iter()
+                .map(|alert| alert.minutes_before)
+                .collect::<Vec<_>>(),
+            [60, 15]
+        );
+        assert_eq!(
+            event.alerts[0].extra.as_deref(),
+            Some(r#"{"sound":"chime"}"#)
+        );
+        assert_eq!(event.unreadable_alerts.len(), 2);
+
+        let written = parsed(
+            &event_write(&CoreCalendarEventDraft {
+                title: event.title,
+                start: event.start,
+                alerts: event.alerts,
+                unreadable_alerts: event.unreadable_alerts,
+                raw: Some(event.raw),
+                ..Default::default()
+            })
+            .unwrap(),
+        );
+        assert_eq!(
+            written["alerts"],
+            json!([
+                { "minutesBefore": 60, "sound": "chime" },
+                { "minutesBefore": 15 },
+                { "at": "2026-09-30T08:00:00Z" },
+                { "minutesBefore": 99999 }
+            ])
+        );
+    }
+
+    #[test]
+    fn clearing_every_alert_removes_the_key() {
+        let stored = r#"{"title":"t","start":"2026-10-01","alerts":[{"minutesBefore":-540}]}"#;
+        let written = parsed(
+            &event_write(&CoreCalendarEventDraft {
+                raw: Some(stored.into()),
+                ..event()
+            })
+            .unwrap(),
+        );
+        assert!(!written.contains_key("alerts"));
+    }
+
+    #[test]
+    fn every_preset_has_the_label_the_editors_show() {
+        let labels = |all_day| {
+            alert_presets(all_day)
+                .into_iter()
+                .map(|minutes| alert_label(minutes, all_day))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            labels(false),
+            [
+                "1 week before",
+                "2 days before",
+                "1 day before",
+                "2 hours before",
+                "1 hour before",
+                "30 minutes before",
+                "15 minutes before",
+                "10 minutes before",
+                "5 minutes before",
+                "At start",
+            ]
+        );
+        assert_eq!(
+            labels(true),
+            [
+                "1 week before at 09:00",
+                "2 days before at 09:00",
+                "1 day before at 09:00",
+                "On the day at 09:00",
+            ]
+        );
+        assert_eq!(alert_label(90, false), "90 minutes before");
+        assert_eq!(alert_label(-30, false), "30 minutes after start");
+        assert_eq!(alert_label(0, true), "On the day at 00:00");
+        assert_eq!(alert_label(1_440, true), "1 day before at 00:00");
+    }
+
+    #[test]
+    fn switching_to_all_day_and_back_keeps_the_days_before() {
+        assert_eq!(alert_retimed(15, true), -540);
+        assert_eq!(alert_retimed(1_440, true), 900);
+        assert_eq!(alert_retimed(10_080, true), 9_540);
+        assert_eq!(alert_retimed(-30, true), -540);
+        assert_eq!(alert_retimed(-540, false), 0);
+        assert_eq!(alert_retimed(900, false), 1_440);
+        assert_eq!(alert_retimed(9_540, false), 10_080);
+        for minutes in alert_presets(false) {
+            assert!(valid_alert(alert_retimed(minutes, true)));
+        }
     }
 }

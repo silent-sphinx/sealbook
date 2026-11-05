@@ -234,7 +234,9 @@ both builds already require for the wasm module and the JNI library.
   three clients disagreed about. Whether a field is trimmed, whether an absent
   one is omitted or written null, which name an unnamed calendar takes, whether a
   rename keeps the colour and the flags, what becomes of a repeat rule this build
-  cannot name, and what happens to a payload from a newer schema major. Read by
+  cannot name, how reminders are ordered and which ones are carried unread, and
+  what happens to a payload from a newer schema major. The constants include
+  the reminder presets and the label every client shows for each. Read by
   `sealbook-core`'s calendar tests,
   `sealbook-web/src/lib/calendarParity.test.ts` and Android's
   `CalendarPayloadTest`.

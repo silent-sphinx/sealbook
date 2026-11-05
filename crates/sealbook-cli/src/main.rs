@@ -17,13 +17,13 @@ use rand::RngCore;
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::CertificateDer;
 use sealbook_client::{
-    account_export_parse, account_export_write, contact_parse, contact_write, event_parse,
-    ics_parse, note_parse, note_write, notes_import, CoreAddressBookDraft, CoreCalendarDraft,
-    CoreCalendarEventDraft, CoreChannelKind, CoreContactAddress, CoreContactChannel,
-    CoreContactDraft, CoreDeviceKind, CoreIcsEvent, CoreNoteDraft, ExportedObject, LocalState,
-    SealbookClient, DEFAULT_ADDRESS_BOOK_ID, DEFAULT_ADDRESS_BOOK_NAME,
-    DEFAULT_BOOKMARK_COLLECTION_NAME, DEFAULT_CALENDAR_COLOR, DEFAULT_CALENDAR_ID,
-    DEFAULT_CALENDAR_NAME, DEFAULT_NOTEBOOK_NAME,
+    account_export_parse, account_export_write, alert_label, contact_parse, contact_write,
+    event_parse, ics_parse, note_parse, note_write, notes_import, CoreAddressBookDraft,
+    CoreCalendarDraft, CoreCalendarEventDraft, CoreChannelKind, CoreContactAddress,
+    CoreContactChannel, CoreContactDraft, CoreDeviceKind, CoreEventAlert, CoreIcsEvent,
+    CoreNoteDraft, ExportedObject, LocalState, SealbookClient, DEFAULT_ADDRESS_BOOK_ID,
+    DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_BOOKMARK_COLLECTION_NAME, DEFAULT_CALENDAR_COLOR,
+    DEFAULT_CALENDAR_ID, DEFAULT_CALENDAR_NAME, DEFAULT_NOTEBOOK_NAME,
 };
 use sha2::{Digest, Sha256};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
@@ -381,8 +381,23 @@ enum CalendarCommand {
         notes: Option<String>,
         #[arg(long)]
         calendar: Option<Uuid>,
+        /// A reminder: 15m, 2h, 1d or 1w before the start. For an all-day
+        /// event add a time, as in 1d@09:00 or 0d@09:00 for the day itself.
+        /// Repeat for more than one.
+        #[arg(long = "alert", allow_hyphen_values = true)]
+        alerts: Vec<String>,
     },
     List,
+    /// Show an event's reminders, or replace them.
+    Alerts {
+        event: Uuid,
+        /// As for `add`. Replaces every reminder the event has.
+        #[arg(long = "alert", allow_hyphen_values = true)]
+        alerts: Vec<String>,
+        /// Remove every reminder.
+        #[arg(long, conflicts_with = "alerts")]
+        clear: bool,
+    },
     /// Add the events in an `.ics` file, read by the same code every client uses.
     Import {
         /// File to read. Omit to read from stdin.
@@ -1030,7 +1045,9 @@ async fn main() -> Result<()> {
                     end,
                     notes,
                     calendar,
+                    alerts,
                 } => {
+                    let alerts = parse_alerts(&alerts)?;
                     let id = Uuid::new_v4();
                     let revision = client
                         .put_calendar_event(
@@ -1048,6 +1065,7 @@ async fn main() -> Result<()> {
                                 calendar_id: Some(
                                     calendar.unwrap_or(DEFAULT_CALENDAR_ID).to_string(),
                                 ),
+                                alerts,
                                 ..Default::default()
                             },
                         )
@@ -1070,6 +1088,38 @@ async fn main() -> Result<()> {
                             })
                             .unwrap_or("no calendar");
                         println!("{id} [{name}] {} {}", event.start, event.title);
+                        for line in alert_lines(&event) {
+                            println!("    {line}");
+                        }
+                    }
+                }
+                CalendarCommand::Alerts {
+                    event,
+                    alerts,
+                    clear,
+                } => {
+                    let alerts = parse_alerts(&alerts)?;
+                    let stored = client
+                        .list_calendar_events()
+                        .await?
+                        .into_iter()
+                        .find(|(id, _)| *id == event)
+                        .map(|(_, json)| json)
+                        .with_context(|| format!("no event {event}"))?;
+                    let parsed = event_parse(&event.to_string(), &stored);
+                    if alerts.is_empty() && !clear {
+                        let lines = alert_lines(&parsed);
+                        if lines.is_empty() {
+                            println!("no reminders");
+                        }
+                        for line in lines {
+                            println!("{line}");
+                        }
+                    } else {
+                        let revision = client
+                            .put_calendar_event(event, &event_alerts_draft(parsed, alerts))
+                            .await?;
+                        println!("stored encrypted calendar event {event} at revision {revision}");
                     }
                 }
                 CalendarCommand::Import {
@@ -1469,6 +1519,88 @@ fn note_update_draft(
         pinned: None,
         raw: Some(stored.to_string()),
     }
+}
+
+/// Every field the event was read with, so replacing its reminders keeps the rest.
+fn event_alerts_draft(
+    event: sealbook_client::CoreCalendarEvent,
+    alerts: Vec<CoreEventAlert>,
+) -> CoreCalendarEventDraft {
+    CoreCalendarEventDraft {
+        title: event.title,
+        start: event.start,
+        end: event.end,
+        notes: event.notes,
+        location: event.location,
+        participants: event.participants,
+        timezone: event.timezone,
+        calendar_id: event.calendar_id,
+        recurrence: event.recurrence,
+        unreadable_recurrence: event.unreadable_recurrence,
+        alerts,
+        unreadable_alerts: event.unreadable_alerts,
+        raw: Some(event.raw),
+    }
+}
+
+fn alert_lines(event: &sealbook_client::CoreCalendarEvent) -> Vec<String> {
+    let all_day = !event.start.contains('T');
+    event
+        .alerts
+        .iter()
+        .map(|alert| format!("reminder: {}", alert_label(alert.minutes_before, all_day)))
+        .collect()
+}
+
+fn parse_alerts(values: &[String]) -> Result<Vec<CoreEventAlert>> {
+    values
+        .iter()
+        .map(|value| {
+            parse_alert(value)
+                .map(|minutes_before| CoreEventAlert {
+                    minutes_before,
+                    extra: None,
+                })
+                .with_context(|| {
+                    format!("read the reminder {value:?}: try 15m, 2h, 1d or 1d@09:00")
+                })
+        })
+        .collect()
+}
+
+/// `15m`, `2h`, `1d`, `1w` or bare minutes before the start, and for an
+/// all-day event a whole number of days with a time: `1d@09:00`.
+fn parse_alert(value: &str) -> Option<i32> {
+    let (span, time) = match value.trim().split_once('@') {
+        Some((span, time)) => (span.trim(), Some(time.trim())),
+        None => (value.trim(), None),
+    };
+    let (number, unit) = match span.char_indices().last()? {
+        (index, unit) if unit.is_ascii_alphabetic() => (&span[..index], unit),
+        _ => (span, 'm'),
+    };
+    let count: i32 = number.parse().ok()?;
+    let minutes = count.checked_mul(match unit.to_ascii_lowercase() {
+        'm' => 1,
+        'h' => 60,
+        'd' => 1_440,
+        'w' => 10_080,
+        _ => return None,
+    })?;
+    let minutes = match time {
+        None => minutes,
+        Some(time) => {
+            let (hours, mins) = time.split_once(':')?;
+            let (hours, mins): (i32, i32) = (hours.parse().ok()?, mins.parse().ok()?);
+            if minutes % 1_440 != 0 || !(0..24).contains(&hours) || !(0..60).contains(&mins) {
+                return None;
+            }
+            minutes - hours * 60 - mins
+        }
+    };
+    (sealbook_client::MIN_ALERT_MINUTES_BEFORE..=sealbook_client::MAX_ALERT_MINUTES_BEFORE)
+        .contains(&minutes)
+        .then_some(minutes)
 }
 
 fn now_rfc3339() -> String {
@@ -1956,6 +2088,41 @@ fn validate_state_permissions(path: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_reminder_reads_in_every_spelling_the_help_names() {
+        assert_eq!(parse_alert("15m"), Some(15));
+        assert_eq!(parse_alert("15"), Some(15));
+        assert_eq!(parse_alert("2h"), Some(120));
+        assert_eq!(parse_alert("1d"), Some(1_440));
+        assert_eq!(parse_alert("1w"), Some(10_080));
+        assert_eq!(parse_alert("1d@09:00"), Some(900));
+        assert_eq!(parse_alert("0d@09:00"), Some(-540));
+        assert_eq!(parse_alert("90m@09:00"), None);
+        assert_eq!(parse_alert("5w"), None);
+        assert_eq!(parse_alert("soon"), None);
+    }
+
+    #[test]
+    fn replacing_reminders_keeps_everything_else_the_event_had() {
+        let stored = r#"{"@type":"CalendarEvent","version":"1.0","title":"Standup","start":"2026-10-01T09:00:00Z","location":"Room 3","recurrence":{"frequency":"daily"},"alerts":[{"minutesBefore":5},{"at":"later"}],"x":1}"#;
+        let draft = event_alerts_draft(
+            event_parse("e1", stored),
+            vec![CoreEventAlert {
+                minutes_before: 30,
+                extra: None,
+            }],
+        );
+        let written: serde_json::Value =
+            serde_json::from_str(&sealbook_client::event_write(&draft).unwrap()).unwrap();
+        assert_eq!(written["location"], "Room 3");
+        assert_eq!(written["recurrence"]["frequency"], "daily");
+        assert_eq!(written["x"], 1);
+        assert_eq!(
+            written["alerts"],
+            serde_json::json!([{ "minutesBefore": 30 }, { "at": "later" }])
+        );
+    }
     use super::*;
     use sealbook_client::PAYLOAD_SCHEMA_VERSION;
 

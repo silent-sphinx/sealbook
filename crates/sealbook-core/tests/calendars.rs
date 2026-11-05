@@ -45,6 +45,27 @@ struct Constants {
     default_calendar_color: String,
     untitled_calendar_name: String,
     untitled_event_title: String,
+    max_event_alerts: usize,
+    min_alert_minutes_before: i32,
+    max_alert_minutes_before: i32,
+    timed_alert_presets: Vec<AlertLabel>,
+    all_day_alert_presets: Vec<AlertLabel>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+struct AlertLabel {
+    minutes_before: i32,
+    label: String,
+}
+
+fn alert_labels(all_day: bool) -> Vec<AlertLabel> {
+    alert_presets(all_day)
+        .into_iter()
+        .map(|minutes_before| AlertLabel {
+            minutes_before,
+            label: alert_label(minutes_before, all_day),
+        })
+        .collect()
 }
 
 #[derive(Serialize, Deserialize)]
@@ -112,6 +133,8 @@ fn blank_event() -> CoreCalendarEventDraft {
         calendar_id: None,
         recurrence: None,
         unreadable_recurrence: None,
+        alerts: Vec::new(),
+        unreadable_alerts: Vec::new(),
         raw: None,
     }
 }
@@ -150,6 +173,7 @@ fn stored_event() -> String {
             "weekdays": [1, 2, 3, 4, 5],
             "until": "2026-12-31"
         },
+        "alerts": [{ "minutesBefore": 10 }, { "at": "from a later build" }],
         "conference": { "from": "a later build" }
     })
     .to_string()
@@ -310,6 +334,8 @@ fn event_write_cases() -> Vec<(String, CoreCalendarEventDraft)> {
                 timezone: parsed.timezone.clone(),
                 calendar_id: parsed.calendar_id.clone(),
                 recurrence: parsed.recurrence.clone(),
+                alerts: parsed.alerts.clone(),
+                unreadable_alerts: parsed.unreadable_alerts.clone(),
                 raw: Some(stored.clone()),
                 ..blank_event()
             },
@@ -338,12 +364,42 @@ fn event_write_cases() -> Vec<(String, CoreCalendarEventDraft)> {
             },
         ),
         (
-            "an edit that clears the repeat, the guests and the notes".into(),
+            "an edit that clears the repeat, the guests, the notes and the reminders".into(),
             CoreCalendarEventDraft {
                 title: parsed.title.clone(),
                 start: parsed.start.clone(),
                 calendar_id: parsed.calendar_id.clone(),
                 raw: Some(stored),
+                ..blank_event()
+            },
+        ),
+        (
+            "timed reminders out of order, one twice, one out of range".into(),
+            CoreCalendarEventDraft {
+                title: "Dentist".into(),
+                start: "2026-10-01T09:00:00.000Z".into(),
+                alerts: [15, 1440, 15, 99_999]
+                    .into_iter()
+                    .map(|minutes_before| CoreEventAlert {
+                        minutes_before,
+                        extra: None,
+                    })
+                    .collect(),
+                ..blank_event()
+            },
+        ),
+        (
+            "all-day reminders the day before and on the day, at 09:00".into(),
+            CoreCalendarEventDraft {
+                title: "Birthday".into(),
+                start: "2026-10-01".into(),
+                alerts: [-540, 900]
+                    .into_iter()
+                    .map(|minutes_before| CoreEventAlert {
+                        minutes_before,
+                        extra: None,
+                    })
+                    .collect(),
                 ..blank_event()
             },
         ),
@@ -397,6 +453,11 @@ fn event_parse_cases() -> Vec<(String, String, String)> {
             "a rule whose fields are out of range".into(),
             EVENT.into(),
             r#"{"title":"t","recurrence":{"frequency":"WEEKLY","interval":1,"weekdays":[1,9,3],"count":0,"dayOfMonth":40,"nthWeekday":{"ordinal":7,"weekday":2}}}"#.into(),
+        ),
+        (
+            "reminders that are not all readable".into(),
+            EVENT.into(),
+            r#"{"title":"t","start":"2026-10-01","alerts":[{"minutesBefore":-540},"junk",{"minutesBefore":1.5},{"minutesBefore":900,"sound":"chime"},{"minutesBefore":-540}]}"#.into(),
         ),
         (
             "a payload from a newer schema major".into(),
@@ -474,6 +535,11 @@ fn the_fixture_states_the_constants_the_three_hosts_mirror() {
     assert_eq!(constants.default_calendar_color, DEFAULT_CALENDAR_COLOR);
     assert_eq!(constants.untitled_calendar_name, UNTITLED_CALENDAR_NAME);
     assert_eq!(constants.untitled_event_title, UNTITLED_EVENT_TITLE);
+    assert_eq!(constants.max_event_alerts, MAX_EVENT_ALERTS);
+    assert_eq!(constants.min_alert_minutes_before, MIN_ALERT_MINUTES_BEFORE);
+    assert_eq!(constants.max_alert_minutes_before, MAX_ALERT_MINUTES_BEFORE);
+    assert_eq!(constants.timed_alert_presets, alert_labels(false));
+    assert_eq!(constants.all_day_alert_presets, alert_labels(true));
 }
 
 /// The one refusal this layer has. Both records answer to it, because a field
@@ -541,6 +607,11 @@ fn regenerate() {
             default_calendar_color: DEFAULT_CALENDAR_COLOR.into(),
             untitled_calendar_name: UNTITLED_CALENDAR_NAME.into(),
             untitled_event_title: UNTITLED_EVENT_TITLE.into(),
+            max_event_alerts: MAX_EVENT_ALERTS,
+            min_alert_minutes_before: MIN_ALERT_MINUTES_BEFORE,
+            max_alert_minutes_before: MAX_ALERT_MINUTES_BEFORE,
+            timed_alert_presets: alert_labels(false),
+            all_day_alert_presets: alert_labels(true),
         },
         calendar_writes: calendar_write_cases()
             .into_iter()

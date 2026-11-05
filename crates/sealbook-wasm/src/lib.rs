@@ -2544,6 +2544,23 @@ pub fn core_event_write(draft: Ts<CoreCalendarEventDraft>) -> Result<String, JsE
     sealbook_core::event_write(&draft.to_rust()?).map_err(core_err)
 }
 
+/// The reminders an event editor offers, in minutes before the start.
+#[wasm_bindgen]
+pub fn core_alert_presets(all_day: bool) -> Vec<i32> {
+    sealbook_core::alert_presets(all_day)
+}
+
+#[wasm_bindgen]
+pub fn core_alert_label(minutes_before: i32, all_day: bool) -> String {
+    sealbook_core::alert_label(minutes_before, all_day)
+}
+
+/// A reminder carried across an event switching to or from all-day.
+#[wasm_bindgen]
+pub fn core_alert_retimed(minutes_before: i32, all_day: bool) -> i32 {
+    sealbook_core::alert_retimed(minutes_before, all_day)
+}
+
 /// The name to show for an event's calendar. A calendar that is gone shows the
 /// default calendar's name; an event in no calendar has no name to show.
 #[wasm_bindgen]

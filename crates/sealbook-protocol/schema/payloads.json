@@ -310,6 +310,31 @@
         "@type": {
           "const": "CalendarEvent"
         },
+        "alerts": {
+          "description": "Reminders. An entry this build cannot read is written back as it was stored.",
+          "items": {
+            "anyOf": [
+              {
+                "properties": {
+                  "minutesBefore": {
+                    "description": "Before a timed start, or before local midnight on an all-day event's first day.",
+                    "maximum": 40320,
+                    "minimum": -1439,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "minutesBefore"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "object"
+              }
+            ]
+          },
+          "type": "array"
+        },
         "calendarId": {
           "description": "Absent is no calendar.",
           "format": "uuid",

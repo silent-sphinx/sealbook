@@ -33,7 +33,7 @@ pub use tls::{certificate_from_pem, pq_tls_config, TrustAnchors};
 /// note through these, so the CLI has no key list of its own.
 pub use sealbook_core::{
     account_export_parse, account_export_write, address_book_name_by_id, address_book_parse,
-    address_book_write, bookmark_collection_name_by_id, bookmark_collection_parse,
+    address_book_write, alert_label, bookmark_collection_name_by_id, bookmark_collection_parse,
     bookmark_collection_tone, bookmark_collection_write, bookmark_parse, bookmark_write,
     calendar_name_by_id, calendar_parse, calendar_write, contact_parse, contact_write,
     contacts_import, csv_import, csv_write, event_parse, event_write, ics_parse, note_parse,
@@ -42,9 +42,10 @@ pub use sealbook_core::{
     CoreAddressBook, CoreAddressBookDraft, CoreBookmark, CoreBookmarkCollection,
     CoreBookmarkCollectionDraft, CoreBookmarkDraft, CoreCalendar, CoreCalendarDraft,
     CoreCalendarEvent, CoreCalendarEventDraft, CoreChannelKind, CoreContact, CoreContactAddress,
-    CoreContactChannel, CoreContactDraft, CoreContactFile, CoreContactImport, CoreExportAccount,
-    CoreExportObject, CoreIcsEvent, CoreNote, CoreNoteAttachment, CoreNoteDraft, CoreNotebook,
-    CoreOrderItem, CoreRecurrence, PairPoll, PAIR_POLL_INTERVAL_MS,
+    CoreContactChannel, CoreContactDraft, CoreContactFile, CoreContactImport, CoreEventAlert,
+    CoreExportAccount, CoreExportObject, CoreIcsEvent, CoreNote, CoreNoteAttachment, CoreNoteDraft,
+    CoreNotebook, CoreOrderItem, CoreRecurrence, PairPoll, MAX_ALERT_MINUTES_BEFORE,
+    MIN_ALERT_MINUTES_BEFORE, PAIR_POLL_INTERVAL_MS,
 };
 pub use sealbook_core::{
     device_default_name, os_display_name, CoreDeviceEntry, CoreDeviceKind, UNREPORTED_DEVICE_DETAIL,

@@ -21,13 +21,77 @@
       "participants",
       "timezone",
       "calendarId",
-      "recurrence"
+      "recurrence",
+      "alerts"
     ],
     "default_calendar_id": "00000000-0000-0000-0000-000000000003",
     "default_calendar_name": "Default Calendar",
     "default_calendar_color": "#7aa2f7",
     "untitled_calendar_name": "Untitled calendar",
-    "untitled_event_title": "Untitled event"
+    "untitled_event_title": "Untitled event",
+    "max_event_alerts": 10,
+    "min_alert_minutes_before": -1439,
+    "max_alert_minutes_before": 40320,
+    "timed_alert_presets": [
+      {
+        "minutes_before": 10080,
+        "label": "1 week before"
+      },
+      {
+        "minutes_before": 2880,
+        "label": "2 days before"
+      },
+      {
+        "minutes_before": 1440,
+        "label": "1 day before"
+      },
+      {
+        "minutes_before": 120,
+        "label": "2 hours before"
+      },
+      {
+        "minutes_before": 60,
+        "label": "1 hour before"
+      },
+      {
+        "minutes_before": 30,
+        "label": "30 minutes before"
+      },
+      {
+        "minutes_before": 15,
+        "label": "15 minutes before"
+      },
+      {
+        "minutes_before": 10,
+        "label": "10 minutes before"
+      },
+      {
+        "minutes_before": 5,
+        "label": "5 minutes before"
+      },
+      {
+        "minutes_before": 0,
+        "label": "At start"
+      }
+    ],
+    "all_day_alert_presets": [
+      {
+        "minutes_before": 9540,
+        "label": "1 week before at 09:00"
+      },
+      {
+        "minutes_before": 2340,
+        "label": "2 days before at 09:00"
+      },
+      {
+        "minutes_before": 900,
+        "label": "1 day before at 09:00"
+      },
+      {
+        "minutes_before": -540,
+        "label": "On the day at 09:00"
+      }
+    ]
   },
   "calendar_writes": [
     {
@@ -185,7 +249,9 @@
       "draft": {
         "title": "Standup",
         "start": "2026-10-01T09:00:00.000Z",
-        "participants": []
+        "participants": [],
+        "alerts": [],
+        "unreadable_alerts": []
       },
       "payload": "{\"@type\":\"CalendarEvent\",\"start\":\"2026-10-01T09:00:00.000Z\",\"title\":\"Standup\",\"version\":\"1.0\"}"
     },
@@ -196,7 +262,9 @@
         "start": "2026-10-01",
         "end": "2026-10-03",
         "participants": [],
-        "calendar_id": "00000000-0000-0000-0000-000000000003"
+        "calendar_id": "00000000-0000-0000-0000-000000000003",
+        "alerts": [],
+        "unreadable_alerts": []
       },
       "payload": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"00000000-0000-0000-0000-000000000003\",\"end\":\"2026-10-03\",\"start\":\"2026-10-01\",\"title\":\"Conference\",\"version\":\"1.0\"}"
     },
@@ -212,7 +280,9 @@
           "  ",
           " alice@example.com "
         ],
-        "calendar_id": "  "
+        "calendar_id": "  ",
+        "alerts": [],
+        "unreadable_alerts": []
       },
       "payload": "{\"@type\":\"CalendarEvent\",\"location\":\"Room 3\",\"participants\":[\"alice@example.com\"],\"start\":\"2026-10-01T09:00:00.000Z\",\"title\":\"Standup\",\"version\":\"1.0\"}"
     },
@@ -242,9 +312,17 @@
             5
           ]
         },
-        "raw": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"conference\":{\"from\":\"a later build\"},\"end\":\"2026-10-01T09:15:00.000Z\",\"location\":\"Room 3\",\"notes\":\"Daily sync\",\"participants\":[\"alice@example.com\",\"bob@example.com\"],\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"until\":\"2026-12-31\",\"weekdays\":[1,2,3,4,5]},\"start\":\"2026-10-01T09:00:00.000Z\",\"timezone\":\"Europe/London\",\"title\":\"Standup\",\"version\":\"1.0\"}"
+        "alerts": [
+          {
+            "minutes_before": 10
+          }
+        ],
+        "unreadable_alerts": [
+          "{\"at\":\"from a later build\"}"
+        ],
+        "raw": "{\"@type\":\"CalendarEvent\",\"alerts\":[{\"minutesBefore\":10},{\"at\":\"from a later build\"}],\"calendarId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"conference\":{\"from\":\"a later build\"},\"end\":\"2026-10-01T09:15:00.000Z\",\"location\":\"Room 3\",\"notes\":\"Daily sync\",\"participants\":[\"alice@example.com\",\"bob@example.com\"],\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"until\":\"2026-12-31\",\"weekdays\":[1,2,3,4,5]},\"start\":\"2026-10-01T09:00:00.000Z\",\"timezone\":\"Europe/London\",\"title\":\"Standup\",\"version\":\"1.0\"}"
       },
-      "payload": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"conference\":{\"from\":\"a later build\"},\"end\":\"2026-10-01T09:15:00.000Z\",\"location\":\"Room 3\",\"notes\":\"Daily sync\",\"participants\":[\"alice@example.com\",\"bob@example.com\"],\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"until\":\"2026-12-31\",\"weekdays\":[1,2,3,4,5]},\"start\":\"2026-10-01T09:00:00.000Z\",\"timezone\":\"Europe/London\",\"title\":\"Standup\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"CalendarEvent\",\"alerts\":[{\"minutesBefore\":10},{\"at\":\"from a later build\"}],\"calendarId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"conference\":{\"from\":\"a later build\"},\"end\":\"2026-10-01T09:15:00.000Z\",\"location\":\"Room 3\",\"notes\":\"Daily sync\",\"participants\":[\"alice@example.com\",\"bob@example.com\"],\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"until\":\"2026-12-31\",\"weekdays\":[1,2,3,4,5]},\"start\":\"2026-10-01T09:00:00.000Z\",\"timezone\":\"Europe/London\",\"title\":\"Standup\",\"version\":\"1.0\"}"
     },
     {
       "case": "the third Tuesday of every month, counted out",
@@ -261,20 +339,66 @@
             "ordinal": 3,
             "weekday": 2
           }
-        }
+        },
+        "alerts": [],
+        "unreadable_alerts": []
       },
       "payload": "{\"@type\":\"CalendarEvent\",\"recurrence\":{\"count\":12,\"frequency\":\"monthly\",\"nthWeekday\":{\"ordinal\":3,\"weekday\":2}},\"start\":\"2026-10-20T16:00:00.000Z\",\"timezone\":\"Europe/London\",\"title\":\"Board\",\"version\":\"1.0\"}"
     },
     {
-      "case": "an edit that clears the repeat, the guests and the notes",
+      "case": "an edit that clears the repeat, the guests, the notes and the reminders",
       "draft": {
         "title": "Standup",
         "start": "2026-10-01T09:00:00.000Z",
         "participants": [],
         "calendar_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-        "raw": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"conference\":{\"from\":\"a later build\"},\"end\":\"2026-10-01T09:15:00.000Z\",\"location\":\"Room 3\",\"notes\":\"Daily sync\",\"participants\":[\"alice@example.com\",\"bob@example.com\"],\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"until\":\"2026-12-31\",\"weekdays\":[1,2,3,4,5]},\"start\":\"2026-10-01T09:00:00.000Z\",\"timezone\":\"Europe/London\",\"title\":\"Standup\",\"version\":\"1.0\"}"
+        "alerts": [],
+        "unreadable_alerts": [],
+        "raw": "{\"@type\":\"CalendarEvent\",\"alerts\":[{\"minutesBefore\":10},{\"at\":\"from a later build\"}],\"calendarId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"conference\":{\"from\":\"a later build\"},\"end\":\"2026-10-01T09:15:00.000Z\",\"location\":\"Room 3\",\"notes\":\"Daily sync\",\"participants\":[\"alice@example.com\",\"bob@example.com\"],\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"until\":\"2026-12-31\",\"weekdays\":[1,2,3,4,5]},\"start\":\"2026-10-01T09:00:00.000Z\",\"timezone\":\"Europe/London\",\"title\":\"Standup\",\"version\":\"1.0\"}"
       },
       "payload": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"conference\":{\"from\":\"a later build\"},\"start\":\"2026-10-01T09:00:00.000Z\",\"title\":\"Standup\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "timed reminders out of order, one twice, one out of range",
+      "draft": {
+        "title": "Dentist",
+        "start": "2026-10-01T09:00:00.000Z",
+        "participants": [],
+        "alerts": [
+          {
+            "minutes_before": 15
+          },
+          {
+            "minutes_before": 1440
+          },
+          {
+            "minutes_before": 15
+          },
+          {
+            "minutes_before": 99999
+          }
+        ],
+        "unreadable_alerts": []
+      },
+      "payload": "{\"@type\":\"CalendarEvent\",\"alerts\":[{\"minutesBefore\":1440},{\"minutesBefore\":15}],\"start\":\"2026-10-01T09:00:00.000Z\",\"title\":\"Dentist\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "all-day reminders the day before and on the day, at 09:00",
+      "draft": {
+        "title": "Birthday",
+        "start": "2026-10-01",
+        "participants": [],
+        "alerts": [
+          {
+            "minutes_before": -540
+          },
+          {
+            "minutes_before": 900
+          }
+        ],
+        "unreadable_alerts": []
+      },
+      "payload": "{\"@type\":\"CalendarEvent\",\"alerts\":[{\"minutesBefore\":900},{\"minutesBefore\":-540}],\"start\":\"2026-10-01\",\"title\":\"Birthday\",\"version\":\"1.0\"}"
     },
     {
       "case": "an edit to an event whose rule this build cannot name",
@@ -283,6 +407,8 @@
         "start": "2026-10-01",
         "participants": [],
         "unreadable_recurrence": "{\"frequency\":\"hourly\",\"interval\":3}",
+        "alerts": [],
+        "unreadable_alerts": [],
         "raw": "{\"@type\":\"CalendarEvent\",\"recurrence\":{\"frequency\":\"hourly\",\"interval\":3},\"start\":\"2026-10-01\",\"title\":\"Pay day\",\"version\":\"1.0\"}"
       },
       "payload": "{\"@type\":\"CalendarEvent\",\"recurrence\":{\"frequency\":\"hourly\",\"interval\":3},\"start\":\"2026-10-01\",\"title\":\"Pay day, moved\",\"version\":\"1.0\"}"
@@ -292,7 +418,7 @@
     {
       "case": "the richest payload any client writes",
       "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
-      "raw": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"conference\":{\"from\":\"a later build\"},\"end\":\"2026-10-01T09:15:00.000Z\",\"location\":\"Room 3\",\"notes\":\"Daily sync\",\"participants\":[\"alice@example.com\",\"bob@example.com\"],\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"until\":\"2026-12-31\",\"weekdays\":[1,2,3,4,5]},\"start\":\"2026-10-01T09:00:00.000Z\",\"timezone\":\"Europe/London\",\"title\":\"Standup\",\"version\":\"1.0\"}",
+      "raw": "{\"@type\":\"CalendarEvent\",\"alerts\":[{\"minutesBefore\":10},{\"at\":\"from a later build\"}],\"calendarId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"conference\":{\"from\":\"a later build\"},\"end\":\"2026-10-01T09:15:00.000Z\",\"location\":\"Room 3\",\"notes\":\"Daily sync\",\"participants\":[\"alice@example.com\",\"bob@example.com\"],\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"until\":\"2026-12-31\",\"weekdays\":[1,2,3,4,5]},\"start\":\"2026-10-01T09:00:00.000Z\",\"timezone\":\"Europe/London\",\"title\":\"Standup\",\"version\":\"1.0\"}",
       "event": {
         "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
         "title": "Standup",
@@ -318,8 +444,16 @@
             5
           ]
         },
+        "alerts": [
+          {
+            "minutes_before": 10
+          }
+        ],
+        "unreadable_alerts": [
+          "{\"at\":\"from a later build\"}"
+        ],
         "readable": true,
-        "raw": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"conference\":{\"from\":\"a later build\"},\"end\":\"2026-10-01T09:15:00.000Z\",\"location\":\"Room 3\",\"notes\":\"Daily sync\",\"participants\":[\"alice@example.com\",\"bob@example.com\"],\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"until\":\"2026-12-31\",\"weekdays\":[1,2,3,4,5]},\"start\":\"2026-10-01T09:00:00.000Z\",\"timezone\":\"Europe/London\",\"title\":\"Standup\",\"version\":\"1.0\"}"
+        "raw": "{\"@type\":\"CalendarEvent\",\"alerts\":[{\"minutesBefore\":10},{\"at\":\"from a later build\"}],\"calendarId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"conference\":{\"from\":\"a later build\"},\"end\":\"2026-10-01T09:15:00.000Z\",\"location\":\"Room 3\",\"notes\":\"Daily sync\",\"participants\":[\"alice@example.com\",\"bob@example.com\"],\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"until\":\"2026-12-31\",\"weekdays\":[1,2,3,4,5]},\"start\":\"2026-10-01T09:00:00.000Z\",\"timezone\":\"Europe/London\",\"title\":\"Standup\",\"version\":\"1.0\"}"
       }
     },
     {
@@ -331,6 +465,8 @@
         "title": "Untitled event",
         "start": "",
         "participants": [],
+        "alerts": [],
+        "unreadable_alerts": [],
         "readable": true,
         "raw": "{}"
       }
@@ -344,6 +480,8 @@
         "title": "Untitled event",
         "start": "",
         "participants": [],
+        "alerts": [],
+        "unreadable_alerts": [],
         "readable": true,
         "raw": "this was never an event"
       }
@@ -357,6 +495,8 @@
         "title": "Untitled event",
         "start": "",
         "participants": [],
+        "alerts": [],
+        "unreadable_alerts": [],
         "readable": true,
         "raw": "[1,2,3]"
       }
@@ -370,6 +510,8 @@
         "title": "Untitled event",
         "start": "",
         "participants": [],
+        "alerts": [],
+        "unreadable_alerts": [],
         "readable": true,
         "raw": "{\"title\":\"   \",\"start\":42}"
       }
@@ -385,6 +527,8 @@
         "participants": [
           "alice@example.com"
         ],
+        "alerts": [],
+        "unreadable_alerts": [],
         "readable": true,
         "raw": "{\"title\":\"t\",\"participants\":[\"alice@example.com\",null,\"  \",7]}"
       }
@@ -399,6 +543,8 @@
         "start": "2026-10-01",
         "participants": [],
         "unreadable_recurrence": "{\"frequency\":\"hourly\",\"interval\":3}",
+        "alerts": [],
+        "unreadable_alerts": [],
         "readable": true,
         "raw": "{\"@type\":\"CalendarEvent\",\"recurrence\":{\"frequency\":\"hourly\",\"interval\":3},\"start\":\"2026-10-01\",\"title\":\"Pay day\",\"version\":\"1.0\"}"
       }
@@ -419,8 +565,35 @@
             3
           ]
         },
+        "alerts": [],
+        "unreadable_alerts": [],
         "readable": true,
         "raw": "{\"title\":\"t\",\"recurrence\":{\"frequency\":\"WEEKLY\",\"interval\":1,\"weekdays\":[1,9,3],\"count\":0,\"dayOfMonth\":40,\"nthWeekday\":{\"ordinal\":7,\"weekday\":2}}}"
+      }
+    },
+    {
+      "case": "reminders that are not all readable",
+      "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      "raw": "{\"title\":\"t\",\"start\":\"2026-10-01\",\"alerts\":[{\"minutesBefore\":-540},\"junk\",{\"minutesBefore\":1.5},{\"minutesBefore\":900,\"sound\":\"chime\"},{\"minutesBefore\":-540}]}",
+      "event": {
+        "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "title": "t",
+        "start": "2026-10-01",
+        "participants": [],
+        "alerts": [
+          {
+            "minutes_before": 900,
+            "extra": "{\"sound\":\"chime\"}"
+          },
+          {
+            "minutes_before": -540
+          }
+        ],
+        "unreadable_alerts": [
+          "{\"minutesBefore\":1.5}"
+        ],
+        "readable": true,
+        "raw": "{\"title\":\"t\",\"start\":\"2026-10-01\",\"alerts\":[{\"minutesBefore\":-540},\"junk\",{\"minutesBefore\":1.5},{\"minutesBefore\":900,\"sound\":\"chime\"},{\"minutesBefore\":-540}]}"
       }
     },
     {
@@ -432,6 +605,8 @@
         "title": "future",
         "start": "",
         "participants": [],
+        "alerts": [],
+        "unreadable_alerts": [],
         "readable": false,
         "raw": "{\"@type\":\"CalendarEvent\",\"version\":\"2.0\",\"title\":\"future\"}"
       }
