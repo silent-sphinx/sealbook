@@ -4,7 +4,8 @@
 # Columns, separated by " | ": rule, location, reason, what holds it.
 # The rules "seal" and "type" are enforced by check-host-boundaries.sh.
 # The rule "mirror" is a reviewed duplicate the scan cannot see.
-type   | web lib/bookmarkExport.ts | web-only export envelope, no other writer or reader | none needed
+type   | web lib/bookmarkExport.ts | bookmark export file envelope, not a vault payload | none needed
+type   | Android data/bookmark/BookmarkExport.kt | the same export file envelope as web lib/bookmarkExport.ts | none needed
 type   | web lib/taskExport.ts | web-only export envelope, no other writer or reader | none needed
 mirror | web lib/bookmark.ts normalizeUrl, normalizeTags | called on every keystroke of the editor, a wasm call per key is not worth it | web lib/bookmarkParity.test.ts
 mirror | web and Android default-id fallbacks | an id minted before the first save, replaced by core on write | per-type parity tests

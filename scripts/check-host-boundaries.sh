@@ -28,6 +28,7 @@ while IFS='|' read -r rule location _; do
   rule="${rule//[[:space:]]/}"
   [[ "$rule" == seal || "$rule" == type ]] || continue
   path="${location#*web }"
+  path="${path#*Android }"
   path="${path//[[:space:]]/}"
   EXCEPTIONS+=("$path:$rule")
 done < <(grep -v '^#' "$REGISTER")
