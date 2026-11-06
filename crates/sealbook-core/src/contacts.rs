@@ -731,11 +731,40 @@ fn parse_nickname(card: &Map<String, Value>) -> Option<String> {
 fn parse_notes(card: &Map<String, Value>) -> Option<String> {
     match card.get("notes") {
         Some(Value::String(text)) => Some(text.trim().to_string()).filter(|text| !text.is_empty()),
-        Some(Value::Object(_)) => objects(card, "notes")
-            .into_iter()
-            .find_map(|(_, entry)| trimmed(entry, "note")),
+        Some(Value::Object(_)) => {
+            let notes: Vec<String> = objects(card, "notes")
+                .into_iter()
+                .filter_map(|(_, entry)| trimmed(entry, "note"))
+                .collect();
+            (!notes.is_empty()).then(|| notes.join("\n\n"))
+        }
         _ => None,
     }
+}
+
+/// Every note with text is folded into one, since the draft reads them as one.
+fn note_entries(previous: &Map<String, Value>, notes: &Option<String>) -> Option<Value> {
+    let mut map = Map::new();
+    let mut first_id = None;
+    if let Some(stored) = previous.get("notes").and_then(Value::as_object) {
+        for (id, value) in ordered(stored) {
+            if value
+                .as_object()
+                .is_some_and(|entry| trimmed(entry, "note").is_some())
+            {
+                first_id.get_or_insert_with(|| id.clone());
+            } else {
+                map.insert(id.clone(), value.clone());
+            }
+        }
+    }
+    if let Some(note) = present(notes) {
+        map.insert(
+            first_id.unwrap_or_else(|| "n1".into()),
+            json!({ "note": note }),
+        );
+    }
+    (!map.is_empty()).then_some(Value::Object(map))
 }
 
 fn avatar_of(entry: &Map<String, Value>) -> Option<String> {
@@ -1167,17 +1196,7 @@ pub fn contact_write(draft: &CoreContactDraft, now: &str) -> Result<String, Core
 
     put("anniversaries", date_entries(&draft.dates));
     put("onlineServices", social_entries(&draft.socials));
-    put(
-        "notes",
-        replace_shown(
-            &previous,
-            "notes",
-            None,
-            |entry| trimmed(entry, "note").is_some(),
-            present(&draft.notes).map(|note| json!({ "note": note })),
-            "n1",
-        ),
-    );
+    put("notes", note_entries(&previous, &draft.notes));
     put(
         CONTACT_PROFILE_PROP,
         draft.profile.as_ref().and_then(profile_json),
@@ -1378,6 +1397,31 @@ mod tests {
 
     fn draft_of(raw: &str) -> CoreContactDraft {
         contact_parse("c", raw).draft()
+    }
+
+    #[test]
+    fn every_note_reads_and_an_edit_folds_them_into_one() {
+        let raw = r#"{"@type":"Card","name":{"full":"Ada"},"notes":{"n2":{"note":"Second"},"n1":{"note":"First"},"n3":{"note":"  "}}}"#;
+        let mut draft = draft_of(raw);
+        assert_eq!(draft.notes.as_deref(), Some("First\n\nSecond"));
+        draft.notes = Some("First\n\nSecond, edited".into());
+        let written = parsed(&contact_write(&draft, NOW).unwrap());
+        let notes = written["notes"].as_object().unwrap();
+        assert_eq!(notes["n1"]["note"], "First\n\nSecond, edited");
+        assert!(!notes.contains_key("n2"));
+        assert_eq!(
+            draft_of(&contact_write(&draft, NOW).unwrap()).notes,
+            draft.notes
+        );
+    }
+
+    #[test]
+    fn clearing_notes_removes_every_note() {
+        let raw = r#"{"notes":{"n1":{"note":"First"},"n2":{"note":"Second"}}}"#;
+        let mut draft = draft_of(raw);
+        draft.notes = None;
+        let written = parsed(&contact_write(&draft, NOW).unwrap());
+        assert!(written.get("notes").is_none());
     }
 
     #[test]

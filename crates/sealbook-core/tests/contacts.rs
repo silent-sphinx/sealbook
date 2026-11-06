@@ -521,7 +521,7 @@ fn contact_write_cases() -> Vec<(String, CoreContactDraft)> {
             },
         ),
         (
-            "removing the first address, and clearing the note, which shows the next".into(),
+            "removing the first address, and clearing the notes, which clears every note".into(),
             CoreContactDraft {
                 addresses: edited.addresses[1..].to_vec(),
                 notes: None,
