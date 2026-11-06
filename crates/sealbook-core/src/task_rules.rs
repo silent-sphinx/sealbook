@@ -18,7 +18,7 @@ use serde_json::{json, Map, Value};
 use crate::calendars::recurrence_json;
 use crate::order::name_key;
 use crate::payload::as_object;
-use crate::recurrence::recurrence_next;
+use crate::recurrence::{parse_day, recurrence_next, Day};
 use crate::tasks::{
     default_task_list_id, normalize_due_date, resolve_task_list_id, task_list_name_by_id,
     task_parse, CoreTask, CoreTaskDraft, CoreTaskList, CoreTaskListDraft, MAX_TASK_COMPLETIONS,
@@ -480,6 +480,112 @@ pub fn order_tasks(items: &[CoreTaskOrderItem]) -> Vec<String> {
     sorted.into_iter().map(|item| item.id.clone()).collect()
 }
 
+/// What the agenda needs of one task, its times in the host's local wall clock.
+///
+/// `due_local` is `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, as in [`CoreTaskClock`].
+/// `completed_local` is the local `YYYY-MM-DDTHH:MM` of `completedAt`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct CoreTaskAgendaItem {
+    pub id: String,
+    pub title: String,
+    pub done: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub due_local: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_local: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<u32>,
+}
+
+/// Task ids grouped by when they are due, each group in display order.
+///
+/// `week` holds the five days after tomorrow, so it and `tomorrow` cover the
+/// next seven. A timed task whose time has passed is overdue on its own day.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct CoreTaskAgenda {
+    pub overdue: Vec<String>,
+    pub today: Vec<String>,
+    pub tomorrow: Vec<String>,
+    pub week: Vec<String>,
+    pub later: Vec<String>,
+    pub undated: Vec<String>,
+    pub done_today: Vec<String>,
+}
+
+fn minute_of(value: &str) -> &str {
+    value.get(..16).unwrap_or(value)
+}
+
+/// The open tasks by due date, and the tasks completed today, for a host
+/// whose local time is `now_local` (`YYYY-MM-DDTHH:MM`).
+pub fn task_agenda(items: &[CoreTaskAgendaItem], now_local: &str) -> CoreTaskAgenda {
+    let mut agenda = CoreTaskAgenda::default();
+    let Some(today) = parse_day(now_local) else {
+        return agenda;
+    };
+    let mut open: Vec<(&CoreTaskAgendaItem, Option<Day>)> = Vec::new();
+    let mut done: Vec<&CoreTaskAgendaItem> = Vec::new();
+    for item in items {
+        if item.done {
+            let finished = item.completed_local.as_deref().and_then(parse_day);
+            if finished == Some(today) {
+                done.push(item);
+            }
+        } else {
+            open.push((item, item.due_local.as_deref().and_then(parse_day)));
+        }
+    }
+    fn due_key(item: &CoreTaskAgendaItem) -> Option<&str> {
+        item.due_local.as_deref().map(minute_of)
+    }
+    open.sort_by(|(a, a_day), (b, b_day)| {
+        a_day
+            .is_none()
+            .cmp(&b_day.is_none())
+            .then_with(|| a_day.and(due_key(a)).cmp(&b_day.and(due_key(b))))
+            .then_with(|| b.priority.unwrap_or(0).cmp(&a.priority.unwrap_or(0)))
+            .then_with(|| name_key(&a.title).cmp(&name_key(&b.title)))
+            .then_with(|| a.title.cmp(&b.title))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    let now_minute = minute_of(now_local);
+    for (item, day) in open {
+        let section = match day {
+            None => &mut agenda.undated,
+            Some(day) => {
+                let timed = item
+                    .due_local
+                    .as_deref()
+                    .is_some_and(|due| due.contains('T'));
+                let passed = timed && due_key(item).is_some_and(|due| due < now_minute);
+                match day.0 - today.0 {
+                    delta if delta < 0 => &mut agenda.overdue,
+                    0 if passed => &mut agenda.overdue,
+                    0 => &mut agenda.today,
+                    1 => &mut agenda.tomorrow,
+                    2..=7 => &mut agenda.week,
+                    _ => &mut agenda.later,
+                }
+            }
+        };
+        section.push(item.id.clone());
+    }
+    done.sort_by(|a, b| {
+        b.completed_local
+            .as_deref()
+            .map(minute_of)
+            .cmp(&a.completed_local.as_deref().map(minute_of))
+            .then_with(|| name_key(&a.title).cmp(&name_key(&b.title)))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    agenda.done_today = done.into_iter().map(|item| item.id.clone()).collect();
+    agenda
+}
+
 /// The stored rule, readable or not, as the export writes it.
 fn export_recurrence(task: &CoreTask) -> Option<Value> {
     if let Some(rule) = &task.recurrence {
@@ -671,9 +777,14 @@ fn place(
 #[cfg(feature = "uniffi")]
 pub mod ffi {
     use super::{
-        CoreError, CoreTask, CoreTaskClock, CoreTaskCompletion, CoreTaskDraft, CoreTaskImport,
-        CoreTaskList, CoreTaskOrderItem, CoreTaskPlan,
+        CoreError, CoreTask, CoreTaskAgenda, CoreTaskAgendaItem, CoreTaskClock, CoreTaskCompletion,
+        CoreTaskDraft, CoreTaskImport, CoreTaskList, CoreTaskOrderItem, CoreTaskPlan,
     };
+
+    #[uniffi::export(name = "task_agenda")]
+    pub fn task_agenda(items: Vec<CoreTaskAgendaItem>, now_local: String) -> CoreTaskAgenda {
+        super::task_agenda(&items, &now_local)
+    }
 
     #[uniffi::export(name = "task_subtree")]
     pub fn task_subtree(tasks: Vec<CoreTask>, id: String) -> Vec<String> {

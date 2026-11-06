@@ -35,6 +35,7 @@ struct Fixture {
     completions: Vec<CompletionCase>,
     plans: Vec<PlanCase>,
     orders: Vec<OrderCase>,
+    agendas: Vec<AgendaCase>,
     imports: Vec<ImportCase>,
 }
 
@@ -79,6 +80,14 @@ struct OrderCase {
     case: String,
     items: Vec<CoreTaskOrderItem>,
     order: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct AgendaCase {
+    case: String,
+    now_local: String,
+    items: Vec<CoreTaskAgendaItem>,
+    agenda: CoreTaskAgenda,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -385,6 +394,68 @@ fn order_inputs() -> Vec<(String, Vec<CoreTaskOrderItem>)> {
     )]
 }
 
+fn agenda_inputs() -> Vec<(String, String, Vec<CoreTaskAgendaItem>)> {
+    let item =
+        |id: &str, title: &str, due: Option<&str>, priority: Option<u32>| CoreTaskAgendaItem {
+            id: id.into(),
+            title: title.into(),
+            due_local: due.map(Into::into),
+            priority,
+            ..Default::default()
+        };
+    let done = |id: &str, title: &str, at: &str| CoreTaskAgendaItem {
+        id: id.into(),
+        title: title.into(),
+        done: true,
+        completed_local: Some(at.into()),
+        ..Default::default()
+    };
+    vec![
+        (
+            "open tasks group by due day, a passed time today is overdue".into(),
+            "2026-11-06T14:00".into(),
+            vec![
+                item("old", "Renew passport", Some("2026-11-02"), None),
+                item("noon", "Lunch call", Some("2026-11-06T12:00"), None),
+                item("eve", "Dinner", Some("2026-11-06T19:30"), None),
+                item("day", "Water plants", Some("2026-11-06"), None),
+                item("tom", "Bin day", Some("2026-11-07"), None),
+                item("wk2", "Dentist", Some("2026-11-08"), None),
+                item("wk7", "Invoice", Some("2026-11-13T09:00"), None),
+                item("far", "Holiday", Some("2026-11-14"), None),
+                item("bad", "Garbled", Some("soon"), None),
+                item("u1", "beta", None, None),
+                item("u2", "Álpha", None, None),
+                item("u3", "Fix bike", None, Some(2)),
+            ],
+        ),
+        (
+            "only tasks completed on the local day are done today, newest first".into(),
+            "2026-11-06T14:00".into(),
+            vec![
+                done("d1", "Morning run", "2026-11-06T07:15"),
+                done("d2", "Post letter", "2026-11-06T11:40"),
+                done("d3", "Yesterday's", "2026-11-05T23:59"),
+                CoreTaskAgendaItem {
+                    id: "d4".into(),
+                    title: "No stamp".into(),
+                    done: true,
+                    ..Default::default()
+                },
+            ],
+        ),
+        (
+            "the week runs across a month end".into(),
+            "2026-11-28T08:00".into(),
+            vec![
+                item("a", "Rent", Some("2026-12-01"), None),
+                item("b", "Advent", Some("2026-12-05"), None),
+                item("c", "Party", Some("2026-12-06"), None),
+            ],
+        ),
+    ]
+}
+
 fn import_inputs() -> Vec<(String, String)> {
     let lists = [task_list_parse("work", r#"{"name":"Work"}"#)];
     let exported = task_export(
@@ -495,6 +566,20 @@ fn every_order_is_the_one_the_fixture_holds() {
 }
 
 #[test]
+fn every_agenda_is_the_one_the_fixture_holds() {
+    let fixture = fixture();
+    assert_eq!(fixture.agendas.len(), agenda_inputs().len());
+    for case in fixture.agendas {
+        assert_eq!(
+            task_agenda(&case.items, &case.now_local),
+            case.agenda,
+            "{}",
+            case.case
+        );
+    }
+}
+
+#[test]
 fn every_import_reads_as_the_fixture_holds() {
     let fixture = fixture();
     assert_eq!(fixture.imports.len(), import_inputs().len());
@@ -559,6 +644,15 @@ fn regenerate() {
             .map(|(case, items)| OrderCase {
                 case,
                 order: order_tasks(&items),
+                items,
+            })
+            .collect(),
+        agendas: agenda_inputs()
+            .into_iter()
+            .map(|(case, now_local, items)| AgendaCase {
+                agenda: task_agenda(&items, &now_local),
+                case,
+                now_local,
                 items,
             })
             .collect(),

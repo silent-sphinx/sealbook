@@ -2308,6 +2308,10 @@ pub struct CoreTaskVec(pub Vec<CoreTask>);
 #[serde(transparent)]
 pub struct CoreTaskOrderItemList(pub Vec<sealbook_core::CoreTaskOrderItem>);
 
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct CoreTaskAgendaItemList(pub Vec<sealbook_core::CoreTaskAgendaItem>);
+
 /// The task and every task under it, the task first.
 #[wasm_bindgen]
 pub fn core_task_subtree(tasks: Ts<CoreTaskVec>, id: &str) -> Result<Vec<String>, JsError> {
@@ -2412,6 +2416,14 @@ pub fn core_task_list_remove_plan(
 #[wasm_bindgen]
 pub fn core_order_tasks(items: Ts<CoreTaskOrderItemList>) -> Result<Vec<String>, JsError> {
     Ok(sealbook_core::order_tasks(&items.to_rust()?.0))
+}
+
+#[wasm_bindgen]
+pub fn core_task_agenda(
+    items: Ts<CoreTaskAgendaItemList>,
+    now_local: &str,
+) -> Result<Ts<sealbook_core::CoreTaskAgenda>, JsError> {
+    Ok(sealbook_core::task_agenda(&items.to_rust()?.0, now_local).into_ts()?)
 }
 
 #[wasm_bindgen]

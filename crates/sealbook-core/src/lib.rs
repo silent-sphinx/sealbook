@@ -196,9 +196,10 @@ pub use sync::{
     UnreadableReason, WalkCursor, WalkOutcome, WalkStep, CHANGES_PAGE_LIMIT, SYNC_RESTART_LIMIT,
 };
 pub use task_rules::{
-    order_tasks, task_can_move, task_complete, task_export, task_import, task_list_can_move,
-    task_list_move_plan, task_list_remove_plan, task_move_plan, task_relist_plan, task_remove_plan,
-    task_reopen, task_subtree, CoreImportedTask, CoreTaskClock, CoreTaskCompletion, CoreTaskImport,
+    order_tasks, task_agenda, task_can_move, task_complete, task_export, task_import,
+    task_list_can_move, task_list_move_plan, task_list_remove_plan, task_move_plan,
+    task_relist_plan, task_remove_plan, task_reopen, task_subtree, CoreImportedTask,
+    CoreTaskAgenda, CoreTaskAgendaItem, CoreTaskClock, CoreTaskCompletion, CoreTaskImport,
     CoreTaskListWrite, CoreTaskOrderItem, CoreTaskPlan, CoreTaskWrite,
     DEFAULT_TASK_LIST_REMOVE_REFUSAL, TASK_EXPORT_TYPE, TASK_IMPORT_REFUSAL,
     TASK_LIST_MOVE_REFUSAL, TASK_MOVE_REFUSAL,

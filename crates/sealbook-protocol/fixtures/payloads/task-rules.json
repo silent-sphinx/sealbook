@@ -661,6 +661,190 @@
       ]
     }
   ],
+  "agendas": [
+    {
+      "case": "open tasks group by due day, a passed time today is overdue",
+      "now_local": "2026-11-06T14:00",
+      "items": [
+        {
+          "id": "old",
+          "title": "Renew passport",
+          "done": false,
+          "due_local": "2026-11-02"
+        },
+        {
+          "id": "noon",
+          "title": "Lunch call",
+          "done": false,
+          "due_local": "2026-11-06T12:00"
+        },
+        {
+          "id": "eve",
+          "title": "Dinner",
+          "done": false,
+          "due_local": "2026-11-06T19:30"
+        },
+        {
+          "id": "day",
+          "title": "Water plants",
+          "done": false,
+          "due_local": "2026-11-06"
+        },
+        {
+          "id": "tom",
+          "title": "Bin day",
+          "done": false,
+          "due_local": "2026-11-07"
+        },
+        {
+          "id": "wk2",
+          "title": "Dentist",
+          "done": false,
+          "due_local": "2026-11-08"
+        },
+        {
+          "id": "wk7",
+          "title": "Invoice",
+          "done": false,
+          "due_local": "2026-11-13T09:00"
+        },
+        {
+          "id": "far",
+          "title": "Holiday",
+          "done": false,
+          "due_local": "2026-11-14"
+        },
+        {
+          "id": "bad",
+          "title": "Garbled",
+          "done": false,
+          "due_local": "soon"
+        },
+        {
+          "id": "u1",
+          "title": "beta",
+          "done": false
+        },
+        {
+          "id": "u2",
+          "title": "Álpha",
+          "done": false
+        },
+        {
+          "id": "u3",
+          "title": "Fix bike",
+          "done": false,
+          "priority": 2
+        }
+      ],
+      "agenda": {
+        "overdue": [
+          "old",
+          "noon"
+        ],
+        "today": [
+          "day",
+          "eve"
+        ],
+        "tomorrow": [
+          "tom"
+        ],
+        "week": [
+          "wk2",
+          "wk7"
+        ],
+        "later": [
+          "far"
+        ],
+        "undated": [
+          "u3",
+          "u2",
+          "u1",
+          "bad"
+        ],
+        "done_today": []
+      }
+    },
+    {
+      "case": "only tasks completed on the local day are done today, newest first",
+      "now_local": "2026-11-06T14:00",
+      "items": [
+        {
+          "id": "d1",
+          "title": "Morning run",
+          "done": true,
+          "completed_local": "2026-11-06T07:15"
+        },
+        {
+          "id": "d2",
+          "title": "Post letter",
+          "done": true,
+          "completed_local": "2026-11-06T11:40"
+        },
+        {
+          "id": "d3",
+          "title": "Yesterday's",
+          "done": true,
+          "completed_local": "2026-11-05T23:59"
+        },
+        {
+          "id": "d4",
+          "title": "No stamp",
+          "done": true
+        }
+      ],
+      "agenda": {
+        "overdue": [],
+        "today": [],
+        "tomorrow": [],
+        "week": [],
+        "later": [],
+        "undated": [],
+        "done_today": [
+          "d2",
+          "d1"
+        ]
+      }
+    },
+    {
+      "case": "the week runs across a month end",
+      "now_local": "2026-11-28T08:00",
+      "items": [
+        {
+          "id": "a",
+          "title": "Rent",
+          "done": false,
+          "due_local": "2026-12-01"
+        },
+        {
+          "id": "b",
+          "title": "Advent",
+          "done": false,
+          "due_local": "2026-12-05"
+        },
+        {
+          "id": "c",
+          "title": "Party",
+          "done": false,
+          "due_local": "2026-12-06"
+        }
+      ],
+      "agenda": {
+        "overdue": [],
+        "today": [],
+        "tomorrow": [],
+        "week": [
+          "a",
+          "b"
+        ],
+        "later": [
+          "c"
+        ],
+        "undated": [],
+        "done_today": []
+      }
+    }
+  ],
   "imports": [
     {
       "case": "an export reads back parents first",
