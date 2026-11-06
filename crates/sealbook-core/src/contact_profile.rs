@@ -176,21 +176,11 @@ impl CoreContactProfile {
     }
 }
 
-/// Trimmed, then cut to [`MAX_PROFILE_TEXT_CHARS`] UTF-16 code units without
-/// splitting a surrogate pair. `None` where nothing is left.
+/// Trimmed, never cut: [`MAX_PROFILE_TEXT_CHARS`] limits what an editor takes,
+/// and text already stored past it is read and written back whole.
 fn clean(text: &str) -> Option<String> {
-    let mut units = 0;
-    let mut out = String::new();
-    for c in text.trim().chars() {
-        units += c.len_utf16();
-        if units > MAX_PROFILE_TEXT_CHARS {
-            break;
-        }
-        out.push(c);
-    }
-    // Cutting can leave trailing space the trim above never saw.
-    let out = out.trim_end().to_string();
-    (!out.is_empty()).then_some(out)
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_string())
 }
 
 fn clean_opt(text: &Option<String>) -> Option<String> {
@@ -550,10 +540,16 @@ mod tests {
     }
 
     #[test]
-    fn text_is_cut_at_the_limit_in_utf16_units_without_splitting_a_pair() {
-        let long = format!("{}{}", "a".repeat(MAX_PROFILE_TEXT_CHARS - 1), "\u{1F600}");
-        let cut = clean(&long).unwrap();
-        assert_eq!(cut.encode_utf16().count(), MAX_PROFILE_TEXT_CHARS - 1);
+    fn text_past_the_editor_limit_is_read_and_written_whole() {
+        let long = "a".repeat(MAX_PROFILE_TEXT_CHARS * 3);
+        let profile =
+            parsed(json!({ "timeline": [{ "title": "Moved", "description": long }] })).unwrap();
+        assert_eq!(
+            profile.timeline[0].description.as_deref(),
+            Some(long.as_str())
+        );
+        let written = profile_json(&profile).unwrap();
+        assert_eq!(written["timeline"][0]["description"], long);
     }
 
     #[test]
