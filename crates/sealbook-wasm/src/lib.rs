@@ -3063,6 +3063,49 @@ impl CoreContactIndex {
     }
 }
 
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct CoreSearchSourceList(pub Vec<sealbook_core::CoreSearchSource>);
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct CoreSearchContainerList(pub Vec<sealbook_core::CoreSearchContainer>);
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct CoreSearchHitList(pub Vec<sealbook_core::CoreSearchHit>);
+
+/// The whole vault, searchable. Built when a search opens, then asked per keystroke.
+#[wasm_bindgen]
+pub struct CoreVaultIndex {
+    inner: sealbook_core::VaultIndex,
+}
+
+#[wasm_bindgen]
+impl CoreVaultIndex {
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        contacts: Ts<CoreContactSourceList>,
+        books: Ts<CoreBookNameList>,
+        sources: Ts<CoreSearchSourceList>,
+        containers: Ts<CoreSearchContainerList>,
+    ) -> Result<CoreVaultIndex, JsError> {
+        Ok(CoreVaultIndex {
+            inner: sealbook_core::VaultIndex::new(
+                &contacts.to_rust()?.0,
+                &books.to_rust()?.0,
+                &sources.to_rust()?.0,
+                &containers.to_rust()?.0,
+            ),
+        })
+    }
+
+    /// The best `per_kind` matches of each kind, grouped in tab order; none for an empty query.
+    pub fn search(&self, query: &str, per_kind: u32) -> Result<Ts<CoreSearchHitList>, JsError> {
+        Ok(CoreSearchHitList(self.inner.search(query, per_kind)).into_ts()?)
+    }
+}
+
 // ── Core: offline vault, outbox and flush ──
 
 #[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]

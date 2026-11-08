@@ -54,6 +54,7 @@ mod sync;
 mod task_rules;
 mod tasks;
 mod tree;
+mod vault_search;
 mod vcard;
 
 // uniffi's scaffolding and custom types have to sit in the crate root.
@@ -234,6 +235,9 @@ pub use offline::{
 };
 pub use order::{name_key, order_by_name, order_by_recency, order_containers, CoreOrderItem};
 pub use sealbook_protocol::{PAYLOAD_SCHEMA_VERSION, PROTOCOL_VERSION};
+pub use vault_search::{
+    CoreSearchContainer, CoreSearchHit, CoreSearchKind, CoreSearchSource, VaultIndex,
+};
 pub use vcard::{vcard_import, vcard_parse, vcard_write, CoreContactImport, CoreContactSkipped};
 
 /// This core build, for the pinning check each client's build runs.

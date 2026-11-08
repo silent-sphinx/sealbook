@@ -1,0 +1,220 @@
+{
+  "about": "Unified search. Build one index from contacts, books (none here), sources and containers, then each query's hits are exact, in order. Regenerate with REGENERATE_VAULT_SEARCH_FIXTURE=1 cargo test -p sealbook-core --test vault_search -- --ignored regenerate",
+  "contacts": [
+    {
+      "id": "c-ada",
+      "raw": "{\"@type\":\"Card\",\"version\":\"1.0\",\"name\":{\"full\":\"Ada Lovelace\"},\"organizations\":{\"o\":{\"name\":\"Analytical Engines\"}}}"
+    },
+    {
+      "id": "c-renee",
+      "raw": "{\"@type\":\"Card\",\"version\":\"1.0\",\"name\":{\"full\":\"Renée Dupont\"}}"
+    }
+  ],
+  "sources": [
+    {
+      "kind": "note",
+      "id": "n-pesto",
+      "raw": "{\"title\":\"Basil pesto\",\"body\":\"Blend basil, garlic and pine nuts.\",\"notebookId\":\"nb-kitchen\",\"updatedAt\":\"2026-11-01T10:00:00Z\"}"
+    },
+    {
+      "kind": "note",
+      "id": "n-shop",
+      "raw": "{\"title\":\"Shopping\",\"body\":\"Buy tomatoes and basil from the market on Saturday morning before the stalls sell out of the good ones.\",\"notebookId\":\"nb-kitchen\",\"updatedAt\":\"2026-11-05T10:00:00Z\"}"
+    },
+    {
+      "kind": "note",
+      "id": "n-old",
+      "raw": "{\"title\":\"Basil notes\",\"body\":\"\",\"updatedAt\":\"2026-01-01T10:00:00Z\"}"
+    },
+    {
+      "kind": "task",
+      "id": "t-cafe",
+      "raw": "{\"title\":\"Book the café\",\"tags\":[\"birthday\"],\"taskListId\":\"tl-home\"}"
+    },
+    {
+      "kind": "task",
+      "id": "t-gift",
+      "raw": "{\"title\":\"Buy a gift\",\"tags\":[\"birthday\"],\"notes\":\"Something for Renée\",\"taskListId\":\"tl-home\"}"
+    },
+    {
+      "kind": "bookmark",
+      "id": "b-recipes",
+      "raw": "{\"url\":\"https://example.com/basil\",\"title\":\"Recipes\",\"collectionId\":\"bc-food\"}"
+    },
+    {
+      "kind": "event",
+      "id": "e-lunch",
+      "raw": "{\"title\":\"Lunch\",\"start\":\"2026-11-10T12:00:00Z\",\"location\":\"Café Rouge\",\"participants\":[\"Ada Lovelace\"],\"calendarId\":\"cal-personal\"}"
+    }
+  ],
+  "containers": [
+    {
+      "kind": "note",
+      "id": "nb-kitchen",
+      "name": "Kitchen"
+    },
+    {
+      "kind": "task",
+      "id": "tl-home",
+      "name": "Home"
+    },
+    {
+      "kind": "bookmark",
+      "id": "bc-food",
+      "name": "Food"
+    },
+    {
+      "kind": "event",
+      "id": "cal-personal",
+      "name": "Personal"
+    }
+  ],
+  "queries": [
+    {
+      "case": "a title ranks before a field, a field before a body, recency breaks ties",
+      "query": "basil",
+      "per_kind": 5,
+      "hits": [
+        {
+          "kind": "note",
+          "id": "n-pesto",
+          "title": "Basil pesto",
+          "context": "Kitchen"
+        },
+        {
+          "kind": "note",
+          "id": "n-old",
+          "title": "Basil notes"
+        },
+        {
+          "kind": "note",
+          "id": "n-shop",
+          "title": "Shopping",
+          "context": "Kitchen",
+          "snippet": "Buy tomatoes and basil from the market on Saturday morning before the stalls sell out of…"
+        },
+        {
+          "kind": "bookmark",
+          "id": "b-recipes",
+          "title": "Recipes",
+          "context": "Food"
+        }
+      ]
+    },
+    {
+      "case": "accents fold in both directions, across kinds",
+      "query": "CAFE",
+      "per_kind": 5,
+      "hits": [
+        {
+          "kind": "event",
+          "id": "e-lunch",
+          "title": "Lunch",
+          "context": "Personal"
+        },
+        {
+          "kind": "task",
+          "id": "t-cafe",
+          "title": "Book the café",
+          "context": "Home"
+        }
+      ]
+    },
+    {
+      "case": "a contact name folds, and ranks first",
+      "query": "renee",
+      "per_kind": 5,
+      "hits": [
+        {
+          "kind": "contact",
+          "id": "c-renee",
+          "title": "Renée Dupont"
+        },
+        {
+          "kind": "task",
+          "id": "t-gift",
+          "title": "Buy a gift",
+          "context": "Home",
+          "snippet": "Something for Renée"
+        }
+      ]
+    },
+    {
+      "case": "every word must be found, in any field",
+      "query": "birthday renee",
+      "per_kind": 5,
+      "hits": [
+        {
+          "kind": "task",
+          "id": "t-gift",
+          "title": "Buy a gift",
+          "context": "Home",
+          "snippet": "Something for Renée"
+        }
+      ]
+    },
+    {
+      "case": "a contact's employer is its context",
+      "query": "ada",
+      "per_kind": 5,
+      "hits": [
+        {
+          "kind": "contact",
+          "id": "c-ada",
+          "title": "Ada Lovelace",
+          "context": "Analytical Engines"
+        },
+        {
+          "kind": "event",
+          "id": "e-lunch",
+          "title": "Lunch",
+          "context": "Personal"
+        }
+      ]
+    },
+    {
+      "case": "the cap applies to each kind separately",
+      "query": "basil",
+      "per_kind": 1,
+      "hits": [
+        {
+          "kind": "note",
+          "id": "n-pesto",
+          "title": "Basil pesto",
+          "context": "Kitchen"
+        },
+        {
+          "kind": "bookmark",
+          "id": "b-recipes",
+          "title": "Recipes",
+          "context": "Food"
+        }
+      ]
+    },
+    {
+      "case": "a container name is searched",
+      "query": "kitchen",
+      "per_kind": 5,
+      "hits": [
+        {
+          "kind": "note",
+          "id": "n-shop",
+          "title": "Shopping",
+          "context": "Kitchen"
+        },
+        {
+          "kind": "note",
+          "id": "n-pesto",
+          "title": "Basil pesto",
+          "context": "Kitchen"
+        }
+      ]
+    },
+    {
+      "case": "an empty query finds nothing",
+      "query": "   ",
+      "per_kind": 5,
+      "hits": []
+    }
+  ]
+}
