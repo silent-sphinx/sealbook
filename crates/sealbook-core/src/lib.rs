@@ -22,6 +22,7 @@ mod account_export;
 mod attachments;
 mod auth;
 mod batch;
+mod bookmark_file;
 mod bookmarks;
 mod calendars;
 mod contact_json;
@@ -98,6 +99,10 @@ pub use auth::{
     PasswordChangeStarted, RecoverStarted, Recovering, RegisterIdentity, Registering,
 };
 pub use batch::write_batches;
+pub use bookmark_file::{
+    bookmark_export, bookmark_export_html, bookmark_import, CoreBookmarkImport,
+    CoreImportedBookmark, BOOKMARK_EXPORT_TYPE, BOOKMARK_NOT_JSON, BOOKMARK_UNRECOGNISED,
+};
 pub use bookmarks::{
     bookmark_collection_name_by_id, bookmark_collection_parse, bookmark_collection_tone,
     bookmark_collection_write, bookmark_parse, bookmark_write, default_bookmark_collection_id,

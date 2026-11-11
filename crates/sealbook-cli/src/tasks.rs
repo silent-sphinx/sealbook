@@ -1111,7 +1111,7 @@ pub async fn run_tasks(client: &mut SealbookClient, command: TasksCommand) -> Re
         } => {
             let text = std::fs::read_to_string(&file)
                 .with_context(|| format!("read {}", file.display()))?;
-            let read = task_import(&text)?;
+            let read = task_import(&text).map_err(crate::bookmark_io::file_refusal)?;
             if read.tasks.is_empty() {
                 if read.skipped > 0 {
                     bail!("every entry in {} was missing a title", file.display());

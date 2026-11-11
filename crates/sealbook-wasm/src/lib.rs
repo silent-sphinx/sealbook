@@ -2124,6 +2124,45 @@ pub fn core_notebook_tone(id: &str, color: Option<String>) -> String {
 #[serde(transparent)]
 pub struct CoreBookmarkCollectionList(pub Vec<CoreBookmarkCollection>);
 
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct CoreBookmarkList(pub Vec<CoreBookmark>);
+
+/// The Sealbook JSON bookmark export. `now` is the caller's clock.
+#[wasm_bindgen]
+pub fn core_bookmark_export(
+    bookmarks: Ts<CoreBookmarkList>,
+    collections: Ts<CoreBookmarkCollectionList>,
+    now: &str,
+) -> Result<String, JsError> {
+    Ok(sealbook_core::bookmark_export(
+        &bookmarks.to_rust()?.0,
+        &collections.to_rust()?.0,
+        now,
+    ))
+}
+
+/// The Netscape HTML bookmark file every browser imports.
+#[wasm_bindgen]
+pub fn core_bookmark_export_html(
+    bookmarks: Ts<CoreBookmarkList>,
+    collections: Ts<CoreBookmarkCollectionList>,
+) -> Result<String, JsError> {
+    Ok(sealbook_core::bookmark_export_html(
+        &bookmarks.to_rust()?.0,
+        &collections.to_rust()?.0,
+    ))
+}
+
+/// Reads a Sealbook export, a JSON array of bookmarks, or a browser's HTML
+/// bookmarks file. Throws with a sentence to show.
+#[wasm_bindgen]
+pub fn core_bookmark_import(text: &str) -> Result<Ts<sealbook_core::CoreBookmarkImport>, JsError> {
+    Ok(sealbook_core::bookmark_import(text)
+        .map_err(core_err)?
+        .into_ts()?)
+}
+
 /// Every key a bookmark writer owns, which is the union across all four clients.
 #[wasm_bindgen]
 pub fn core_bookmark_keys() -> Vec<String> {

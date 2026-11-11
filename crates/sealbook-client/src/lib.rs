@@ -29,6 +29,7 @@ pub use pairing::{format_confirmation, normalize_confirmation};
 pub use state::LocalState;
 pub use tls::{certificate_from_pem, pq_tls_config, TrustAnchors};
 
+pub use sealbook_core::CoreError;
 /// The content-payload decisions, straight from core: every client writes a
 /// note through these, so the CLI has no key list of its own.
 pub use sealbook_core::{
@@ -51,9 +52,10 @@ pub use sealbook_core::{
     MIN_ALERT_MINUTES_BEFORE, PAIR_POLL_INTERVAL_MS,
 };
 pub use sealbook_core::{
-    attachment_limits, can_disable_feature, default_account_settings, resolve_address_book_id,
-    resolve_collection_id, settings_parse, settings_with_feature, settings_write, sweep_orphans,
-    AttachmentRow, CoreAccountSettings, CoreAccountSettingsDraft, CoreSearchContainer,
+    attachment_limits, bookmark_export, bookmark_export_html, bookmark_import, can_disable_feature,
+    default_account_settings, resolve_address_book_id, resolve_collection_id, settings_parse,
+    settings_with_feature, settings_write, sweep_orphans, AttachmentRow, CoreAccountSettings,
+    CoreAccountSettingsDraft, CoreBookmarkImport, CoreImportedBookmark, CoreSearchContainer,
     CoreSearchHit, CoreSearchKind, CoreSearchSource, VaultIndex, FEATURES,
 };
 pub use sealbook_core::{

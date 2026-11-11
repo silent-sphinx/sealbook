@@ -1,4 +1,5 @@
 mod attach;
+mod bookmark_io;
 mod search;
 mod settings;
 mod tasks;
@@ -587,6 +588,8 @@ enum BookmarksCommand {
         #[arg(long)]
         id: Uuid,
     },
+    #[command(flatten)]
+    File(bookmark_io::BookmarkFileCommand),
 }
 
 #[derive(Subcommand)]
@@ -1452,6 +1455,9 @@ async fn main() -> Result<()> {
                 BookmarksCommand::Show { id } => {
                     let bookmark = find_bookmark(&mut client, id).await?;
                     println!("{}", bookmark_url(&bookmark));
+                }
+                BookmarksCommand::File(command) => {
+                    bookmark_io::run(&mut client, command, &now_rfc3339()).await?;
                 }
                 BookmarksCommand::Delete { id } => {
                     let revision = client
