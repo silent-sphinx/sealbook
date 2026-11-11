@@ -152,7 +152,7 @@ fn import_json(text: &str) -> Result<CoreBookmarkImport, CoreError> {
                 .unwrap_or_default()
         };
         let (url, title) = (string("url"), string("title"));
-        if url.is_empty() && title.is_empty() {
+        if (url.is_empty() && title.is_empty()) || (!url.is_empty() && !is_page(url)) {
             skipped += 1;
             continue;
         }
@@ -352,18 +352,7 @@ fn decode(text: &str) -> String {
 }
 
 fn is_page(url: &str) -> bool {
-    let lower = url.trim().to_ascii_lowercase();
-    !lower.is_empty()
-        && ![
-            "place:",
-            "javascript:",
-            "data:",
-            "about:",
-            "chrome:",
-            "file:",
-        ]
-        .iter()
-        .any(|scheme| lower.starts_with(scheme))
+    crate::bookmarks::is_web_url(url)
 }
 
 fn import_html(html: &str) -> CoreBookmarkImport {
@@ -688,6 +677,14 @@ mod tests {
             payload["parentId"] = json!(parent);
         }
         bookmark_collection_parse(id, &payload.to_string())
+    }
+
+    #[test]
+    fn json_import_skips_non_web_addresses() {
+        let text = r#"[{"url":"javascript:alert(1)","title":"x"},{"url":"data:text/html,x","title":"y"},{"url":"https://ok.example","title":"z"}]"#;
+        let read = bookmark_import(text).unwrap();
+        assert_eq!(read.bookmarks.len(), 1);
+        assert_eq!(read.skipped, 2);
     }
 
     #[test]

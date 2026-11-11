@@ -106,6 +106,20 @@ pub fn normalize_url(url: &str) -> String {
     format!("https://{trimmed}")
 }
 
+pub const BOOKMARK_URL_SCHEME: &str = "Only http and https addresses can be saved.";
+
+/// Whether `url`, once normalised, is an `http` or `https` address.
+///
+/// Anything else (`javascript:`, `data:`, `file:`) would be synced to every
+/// device and rendered as a link by hosts that cannot all be trusted to filter it.
+pub fn is_web_url(url: &str) -> bool {
+    let normalized = normalize_url(url);
+    let lower = normalized.to_ascii_lowercase();
+    ["http://", "https://"]
+        .iter()
+        .any(|scheme| lower.starts_with(scheme) && lower.len() > scheme.len())
+}
+
 fn has_scheme(url: &str) -> bool {
     let mut chars = url.chars();
     if !chars
@@ -324,6 +338,9 @@ fn string_entries(value: Option<&Value>) -> Vec<String> {
 pub fn bookmark_write(draft: &CoreBookmarkDraft, now: &str) -> Result<String, CoreError> {
     refuse_newer_major(draft.raw.as_deref())?;
 
+    if !draft.url.trim().is_empty() && !is_web_url(&draft.url) {
+        return Err(CoreError::misuse(BOOKMARK_URL_SCHEME));
+    }
     let notes = draft.notes.trim();
     let tags = normalize_tags(&draft.tags);
     let mut fields = Map::new();
@@ -595,6 +612,27 @@ mod tests {
         assert_eq!(normalize_url("mailto:a@b.c"), "mailto:a@b.c");
         assert_eq!(normalize_url("1abc:x"), "https://1abc:x");
         assert_eq!(normalize_url("   "), "");
+    }
+
+    #[test]
+    fn only_http_and_https_addresses_can_be_written() {
+        for ok in ["example.com", "HTTP://example.com", "https://a.b/c?d=e"] {
+            let mut d = draft();
+            d.url = ok.into();
+            assert!(bookmark_write(&d, NOW).is_ok(), "{ok}");
+        }
+        for bad in [
+            "javascript:alert(1)",
+            " JavaScript:alert(1)",
+            "data:text/html,x",
+            "file:///etc/passwd",
+            "mailto:a@b.c",
+            "https://",
+        ] {
+            let mut d = draft();
+            d.url = bad.into();
+            assert!(bookmark_write(&d, NOW).is_err(), "{bad}");
+        }
     }
 
     #[test]
