@@ -1,3 +1,5 @@
+mod tasks;
+
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::{
@@ -137,6 +139,16 @@ enum Command {
     Collection {
         #[command(subcommand)]
         command: CollectionCommand,
+    },
+    /// Tasks and subtasks.
+    Tasks {
+        #[command(subcommand)]
+        command: tasks::TasksCommand,
+    },
+    /// Task lists.
+    Tasklist {
+        #[command(subcommand)]
+        command: tasks::TasklistCommand,
     },
     Devices {
         #[command(subcommand)]
@@ -1422,6 +1434,34 @@ async fn main() -> Result<()> {
                     println!("deleted encrypted bookmark {id} at revision {revision}");
                 }
             }
+            save_state(&cli.state, client.state.as_ref().unwrap())?;
+        }
+        Command::Tasks { command } => {
+            let state = load_state(&cli.state)?;
+            let password = std::env::var("SEALBOOK_PASSWORD")
+                .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+            let mut client =
+                SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
+            sign_in(&mut client, &password).await?;
+            client
+                .ensure_default_task_list()
+                .await
+                .context("default task list")?;
+            tasks::run_tasks(&mut client, command).await?;
+            save_state(&cli.state, client.state.as_ref().unwrap())?;
+        }
+        Command::Tasklist { command } => {
+            let state = load_state(&cli.state)?;
+            let password = std::env::var("SEALBOOK_PASSWORD")
+                .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+            let mut client =
+                SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
+            sign_in(&mut client, &password).await?;
+            client
+                .ensure_default_task_list()
+                .await
+                .context("default task list")?;
+            tasks::run_lists(&mut client, command).await?;
             save_state(&cli.state, client.state.as_ref().unwrap())?;
         }
         Command::Devices { command } => {

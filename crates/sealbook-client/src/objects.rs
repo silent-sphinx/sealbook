@@ -14,8 +14,9 @@ use sealbook_protocol::{
     CALENDAR_CONTENT_TYPE, CALENDAR_EVENT_CONTENT_TYPE, DEFAULT_ADDRESS_BOOK_ID,
     DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_BOOKMARK_COLLECTION_ID, DEFAULT_BOOKMARK_COLLECTION_NAME,
     DEFAULT_CALENDAR_COLOR, DEFAULT_CALENDAR_ID, DEFAULT_CALENDAR_NAME, DEFAULT_NOTEBOOK_ID,
-    DEFAULT_NOTEBOOK_NAME, DEVICE_LABEL_CONTENT_TYPE, JSCONTACT_CONTENT_TYPE,
-    NOTEBOOK_CONTENT_TYPE, NOTE_CONTENT_TYPE, SEALED_CONTENT_TYPE,
+    DEFAULT_NOTEBOOK_NAME, DEFAULT_TASK_LIST_ID, DEFAULT_TASK_LIST_NAME, DEVICE_LABEL_CONTENT_TYPE,
+    JSCONTACT_CONTENT_TYPE, NOTEBOOK_CONTENT_TYPE, NOTE_CONTENT_TYPE, SEALED_CONTENT_TYPE,
+    TASK_CONTENT_TYPE, TASK_LIST_CONTENT_TYPE,
 };
 
 use crate::{ClientError, SealbookClient};
@@ -387,10 +388,71 @@ impl SealbookClient {
         Ok(out)
     }
 
-    // Tasks and task lists are written only by sealbook-web, and there is no
-    // writer for them here. A CLI task command must go through `merge_payload`
-    // with a short owned-key set, as `jscontact` does, and must not rebuild the
-    // payload as `note_json` does: that drops every field it does not name.
+    /// Writes a task payload from `sealbook_core::task_write`, which keeps the
+    /// keys a draft's `raw` carries.
+    pub async fn put_task(&mut self, object_id: Uuid, task: &str) -> Result<u64, ClientError> {
+        self.put_sealed(object_id, task.as_bytes(), TASK_CONTENT_TYPE)
+            .await
+    }
+
+    /// Writes up to `MAX_BATCH_OBJECTS` tasks in one request.
+    pub async fn put_tasks(&mut self, tasks: &[(Uuid, &str)]) -> Result<u64, ClientError> {
+        self.put_sealed_batch(tasks, TASK_CONTENT_TYPE).await
+    }
+
+    pub async fn delete_task(&mut self, object_id: Uuid) -> Result<u64, ClientError> {
+        self.write_object(object_id, Vec::new(), Vec::new(), 0, true)
+            .await
+    }
+
+    /// Every task's stored payload.
+    pub async fn list_tasks(&mut self) -> Result<Vec<(Uuid, String)>, ClientError> {
+        let mut out = Vec::new();
+        for obj in self.listed_objects().await? {
+            if obj.content_type == TASK_CONTENT_TYPE {
+                out.push((obj.id, obj.plaintext));
+            }
+        }
+        Ok(out)
+    }
+
+    /// Writes a task list from `sealbook_core::task_list_write`.
+    pub async fn put_task_list(&mut self, object_id: Uuid, list: &str) -> Result<u64, ClientError> {
+        self.put_sealed(object_id, list.as_bytes(), TASK_LIST_CONTENT_TYPE)
+            .await
+    }
+
+    pub async fn delete_task_list(&mut self, object_id: Uuid) -> Result<u64, ClientError> {
+        self.write_object(object_id, Vec::new(), Vec::new(), 0, true)
+            .await
+    }
+
+    /// Every task list's stored payload.
+    pub async fn list_task_list_payloads(&mut self) -> Result<Vec<(Uuid, String)>, ClientError> {
+        let mut out = Vec::new();
+        for obj in self.listed_objects().await? {
+            if obj.content_type == TASK_LIST_CONTENT_TYPE {
+                out.push((obj.id, obj.plaintext));
+            }
+        }
+        Ok(out)
+    }
+
+    /// Writes the default list if the account has none, as every other kind's
+    /// `ensure_default_*` does.
+    pub async fn ensure_default_task_list(&mut self) -> Result<Uuid, ClientError> {
+        let lists = self.list_task_list_payloads().await?;
+        if lists.iter().any(|(id, _)| *id == DEFAULT_TASK_LIST_ID) {
+            return Ok(DEFAULT_TASK_LIST_ID);
+        }
+        let plaintext = sealbook_core::task_list_write(&sealbook_core::CoreTaskListDraft {
+            name: DEFAULT_TASK_LIST_NAME.to_string(),
+            ..Default::default()
+        })?;
+        self.put_task_list(DEFAULT_TASK_LIST_ID, &plaintext).await?;
+        Ok(DEFAULT_TASK_LIST_ID)
+    }
+
     pub async fn put_bookmark(
         &mut self,
         object_id: Uuid,

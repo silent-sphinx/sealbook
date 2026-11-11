@@ -47,11 +47,21 @@ pub use sealbook_core::{
     CoreContactDraft, CoreContactFile, CoreContactImport, CoreContactSource, CoreContactWork,
     CoreEventAlert, CoreExportAccount, CoreExportObject, CoreIcsEvent, CoreIcsExportEvent,
     CoreNote, CoreNoteAttachment, CoreNoteDraft, CoreNoteFileEntry, CoreNotebook, CoreOrderItem,
-    CoreRecurrence, PairPoll, MAX_ALERT_MINUTES_BEFORE, MIN_ALERT_MINUTES_BEFORE,
-    PAIR_POLL_INTERVAL_MS,
+    CoreRecurrence, CoreRecurrenceFrequency, PairPoll, MAX_ALERT_MINUTES_BEFORE,
+    MIN_ALERT_MINUTES_BEFORE, PAIR_POLL_INTERVAL_MS,
 };
 pub use sealbook_core::{
-    device_default_name, os_display_name, CoreDeviceEntry, CoreDeviceKind, UNREPORTED_DEVICE_DETAIL,
+    default_task_list_id, normalize_due_date, order_tasks, resolve_task_list_id, task_agenda,
+    task_complete, task_export, task_import, task_list_move_plan, task_list_name_by_id,
+    task_list_parse, task_list_remove_plan, task_list_write, task_move_plan, task_parse,
+    task_relist_plan, task_remove_plan, task_reopen, task_subtree, task_write, CoreImportedTask,
+    CoreTask, CoreTaskAgenda, CoreTaskAgendaItem, CoreTaskClock, CoreTaskCompletion, CoreTaskDraft,
+    CoreTaskImport, CoreTaskList, CoreTaskListDraft, CoreTaskListWrite, CoreTaskOrderItem,
+    CoreTaskPlan, CoreTaskWrite,
+};
+pub use sealbook_core::{
+    device_default_name, os_display_name, write_batches, CoreDeviceEntry, CoreDeviceKind,
+    UNREPORTED_DEVICE_DETAIL,
 };
 
 pub use sealbook_protocol::{
