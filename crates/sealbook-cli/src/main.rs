@@ -21,11 +21,12 @@ use sealbook_client::{
     contact_write, event_parse, ics_parse, ics_write, note_parse, note_write, notes_import,
     notes_write_json, notes_write_markdown, recurrence_days, CoreAddressBookDraft,
     CoreCalendarDraft, CoreCalendarEventDraft, CoreChannelKind, CoreContactAddress,
-    CoreContactChannel, CoreContactDraft, CoreDeviceKind, CoreEventAlert, CoreIcsEvent,
-    CoreIcsExportEvent, CoreNoteDraft, CoreNoteFileEntry, CoreOrderItem, ExportedObject,
-    LocalState, SealbookClient, DEFAULT_ADDRESS_BOOK_ID, DEFAULT_ADDRESS_BOOK_NAME,
-    DEFAULT_BOOKMARK_COLLECTION_ID, DEFAULT_BOOKMARK_COLLECTION_NAME, DEFAULT_CALENDAR_COLOR,
-    DEFAULT_CALENDAR_ID, DEFAULT_CALENDAR_NAME, DEFAULT_NOTEBOOK_NAME,
+    CoreContactChannel, CoreContactDate, CoreContactDateKind, CoreContactDraft, CoreContactWork,
+    CoreDeviceKind, CoreEventAlert, CoreIcsEvent, CoreIcsExportEvent, CoreNoteDraft,
+    CoreNoteFileEntry, CoreOrderItem, ExportedObject, LocalState, SealbookClient,
+    DEFAULT_ADDRESS_BOOK_ID, DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_BOOKMARK_COLLECTION_ID,
+    DEFAULT_BOOKMARK_COLLECTION_NAME, DEFAULT_CALENDAR_COLOR, DEFAULT_CALENDAR_ID,
+    DEFAULT_CALENDAR_NAME, DEFAULT_NOTEBOOK_NAME,
 };
 use sha2::{Digest, Sha256};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
@@ -223,6 +224,55 @@ enum BookCommand {
     },
 }
 
+/// The card fields beyond name, email and addresses. A flag replaces its field
+/// when given and leaves it alone when left out; each has a `--clear-` form.
+#[derive(clap::Args, Debug, Default)]
+struct ContactMore {
+    /// A phone number: a bare number, or `value=+44 20 7946 0000;kind=mobile`
+    /// (kind: home, work, mobile, or any other word as a label). Repeat for
+    /// more than one; given at least once, replaces the card's numbers.
+    #[arg(long = "phone", value_parser = parse_phone_spec)]
+    phones: Vec<CoreContactChannel>,
+    #[arg(long, conflicts_with = "phones")]
+    clear_phones: bool,
+    /// Organisation: sets the card's first job entry.
+    #[arg(long)]
+    org: Option<String>,
+    /// Job title: sets the title on the card's first job entry.
+    #[arg(long)]
+    title: Option<String>,
+    /// Removes the card's job entries.
+    #[arg(long, conflicts_with_all = ["org", "title"])]
+    clear_work: bool,
+    #[arg(long)]
+    nickname: Option<String>,
+    #[arg(long, conflicts_with = "nickname")]
+    clear_nickname: bool,
+    /// Anniversary, as `YYYY`, `YYYY-MM` or `YYYY-MM-DD`.
+    #[arg(long, value_parser = parse_partial_date)]
+    anniversary: Option<String>,
+    #[arg(long, conflicts_with = "anniversary")]
+    clear_anniversary: bool,
+}
+
+#[derive(Subcommand, Debug)]
+enum ProfileCommand {
+    /// Print the profile as JSON.
+    Show {
+        #[arg(long)]
+        id: Uuid,
+    },
+    /// Set one profile field. Fields: `howWeMet` (text), `interests` and
+    /// `music` (comma-separated lists). An empty value clears the field.
+    Set {
+        #[arg(long)]
+        id: Uuid,
+        /// `name=value`.
+        #[arg(long = "field", value_parser = parse_profile_field, required = true)]
+        fields: Vec<(String, String)>,
+    },
+}
+
 #[derive(Subcommand)]
 enum ContactsCommand {
     Put {
@@ -237,6 +287,8 @@ enum ContactsCommand {
         /// region, postcode, country. Repeat for more than one.
         #[arg(long = "address", value_parser = parse_address_spec)]
         addresses: Vec<CoreContactAddress>,
+        #[command(flatten)]
+        more: ContactMore,
     },
     /// Find contacts with the search every client uses: names, numbers,
     /// emails and the rest of the card, best match first.
@@ -261,6 +313,18 @@ enum ContactsCommand {
         /// Removes every address the card has.
         #[arg(long, conflicts_with = "addresses")]
         clear_addresses: bool,
+        #[command(flatten)]
+        more: ContactMore,
+    },
+    /// Print one card readably: every field, and the profile if it has one.
+    Show {
+        #[arg(long)]
+        id: Uuid,
+    },
+    /// Read or set the card's profile (how we met, interests, music).
+    Profile {
+        #[command(subcommand)]
+        command: ProfileCommand,
     },
     Delete {
         #[arg(long)]
@@ -805,6 +869,7 @@ async fn main() -> Result<()> {
                 email,
                 book,
                 addresses,
+                more,
             } => {
                 let state = load_state(&cli.state)?;
                 let password = std::env::var("SEALBOOK_PASSWORD")
@@ -819,7 +884,14 @@ async fn main() -> Result<()> {
                 let books = client.list_address_books().await.context("books")?;
                 let book_id =
                     resolve_book(&books, book.as_deref())?.unwrap_or(DEFAULT_ADDRESS_BOOK_ID);
-                let contact = jscontact(&name, email.as_deref(), Some(addresses), book_id, None)?;
+                let contact = jscontact(
+                    &name,
+                    email.as_deref(),
+                    Some(addresses),
+                    &more,
+                    book_id,
+                    None,
+                )?;
                 let id = Uuid::new_v4();
                 let revision = client.put_contact(id, &contact).await.context("put")?;
                 println!("stored encrypted contact {id} at revision {revision}");
@@ -832,6 +904,7 @@ async fn main() -> Result<()> {
                 book,
                 addresses,
                 clear_addresses,
+                more,
             } => {
                 let state = load_state(&cli.state)?;
                 let password = std::env::var("SEALBOOK_PASSWORD")
@@ -844,17 +917,62 @@ async fn main() -> Result<()> {
                     .await
                     .context("default address book")?;
                 let books = client.list_address_books().await.context("books")?;
-                let book_id =
-                    resolve_book(&books, book.as_deref())?.unwrap_or(DEFAULT_ADDRESS_BOOK_ID);
                 // Merged onto the stored card, so the fields this command does
                 // not take are kept. Rebuilding from the three it does took a
                 // card with a job, an address and a photo down to a name.
                 let existing = find_contact(&mut client, id).await?;
+                // Left out, `--book` keeps the card where it is; it used to
+                // send the card to the default book.
+                let book_id = resolve_book(&books, book.as_deref())?
+                    .unwrap_or_else(|| contact_book_id(&existing));
                 let addresses = (clear_addresses || !addresses.is_empty()).then_some(addresses);
-                let contact =
-                    jscontact(&name, email.as_deref(), addresses, book_id, Some(&existing))?;
+                let contact = jscontact(
+                    &name,
+                    email.as_deref(),
+                    addresses,
+                    &more,
+                    book_id,
+                    Some(&existing),
+                )?;
                 let revision = client.put_contact(id, &contact).await.context("update")?;
                 println!("updated encrypted contact {id} at revision {revision}");
+                save_state(&cli.state, client.state.as_ref().unwrap())?;
+            }
+            ContactsCommand::Show { id } => {
+                let state = load_state(&cli.state)?;
+                let password = std::env::var("SEALBOOK_PASSWORD")
+                    .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+                let mut client =
+                    SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
+                sign_in(&mut client, &password).await?;
+                let books = client.list_address_books().await.context("books")?;
+                let json = find_contact(&mut client, id).await?;
+                print!("{}", contact_card(&id.to_string(), &json, &books));
+                save_state(&cli.state, client.state.as_ref().unwrap())?;
+            }
+            ContactsCommand::Profile { command } => {
+                let state = load_state(&cli.state)?;
+                let password = std::env::var("SEALBOOK_PASSWORD")
+                    .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+                let mut client =
+                    SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
+                sign_in(&mut client, &password).await?;
+                match command {
+                    ProfileCommand::Show { id } => {
+                        let json = find_contact(&mut client, id).await?;
+                        let profile = contact_parse(&id.to_string(), &json).profile;
+                        match profile.as_ref().and_then(sealbook_client::profile_write) {
+                            Some(text) => println!("{text}"),
+                            None => println!("(no profile)"),
+                        }
+                    }
+                    ProfileCommand::Set { id, fields } => {
+                        let json = find_contact(&mut client, id).await?;
+                        let card = contact_with_profile(&json, &fields)?;
+                        let revision = client.put_contact(id, &card).await.context("update")?;
+                        println!("updated encrypted contact {id} at revision {revision}");
+                    }
+                }
                 save_state(&cli.state, client.state.as_ref().unwrap())?;
             }
             ContactsCommand::Search { query, book } => {
@@ -2577,6 +2695,7 @@ fn jscontact(
     name: &str,
     email: Option<&str>,
     addresses: Option<Vec<CoreContactAddress>>,
+    more: &ContactMore,
     book_id: Uuid,
     previous: Option<&str>,
 ) -> Result<String> {
@@ -2600,7 +2719,250 @@ fn jscontact(
             }),
         }
     }
+    apply_more(&mut draft, more);
     Ok(contact_write(&draft, &now_rfc3339())?)
+}
+
+/// Applies the optional card fields: a field not given is left as stored.
+fn apply_more(draft: &mut CoreContactDraft, more: &ContactMore) {
+    if more.clear_phones {
+        draft.phones.clear();
+    } else if !more.phones.is_empty() {
+        draft.phones = more.phones.clone();
+    }
+    if more.clear_work {
+        draft.work.clear();
+    }
+    if more.org.is_some() || more.title.is_some() {
+        if draft.work.is_empty() {
+            draft.work.push(CoreContactWork {
+                organization: String::new(),
+                title: None,
+                start: None,
+                end: None,
+                current: true,
+                note: None,
+                extra: None,
+            });
+        }
+        let job = &mut draft.work[0];
+        if let Some(org) = &more.org {
+            job.organization = org.clone();
+        }
+        if let Some(title) = &more.title {
+            job.title = Some(title.clone()).filter(|title| !title.trim().is_empty());
+        }
+    }
+    if more.clear_nickname {
+        draft.nickname = None;
+    } else if let Some(nickname) = &more.nickname {
+        draft.nickname = Some(nickname.clone()).filter(|nick| !nick.trim().is_empty());
+    }
+    if more.clear_anniversary {
+        draft
+            .dates
+            .retain(|date| date.kind != CoreContactDateKind::Anniversary);
+    } else if let Some(day) = &more.anniversary {
+        match draft
+            .dates
+            .iter_mut()
+            .find(|date| date.kind == CoreContactDateKind::Anniversary)
+        {
+            Some(date) => date.date = day.clone(),
+            None => draft.dates.push(CoreContactDate {
+                kind: CoreContactDateKind::Anniversary,
+                label: None,
+                date: day.clone(),
+                extra: None,
+            }),
+        }
+    }
+}
+
+/// One `--phone` value: a bare number, or `value=…;kind=mobile`.
+fn parse_phone_spec(spec: &str) -> Result<CoreContactChannel, String> {
+    let mut phone = CoreContactChannel {
+        kind: CoreChannelKind::Mobile,
+        label: None,
+        value: String::new(),
+        extra: None,
+    };
+    if !spec.contains('=') {
+        phone.value = spec.trim().to_string();
+    } else {
+        for pair in spec.split(';').map(str::trim).filter(|p| !p.is_empty()) {
+            let (key, value) = pair
+                .split_once('=')
+                .ok_or_else(|| format!("expected key=value, found {pair:?}"))?;
+            let value = value.trim();
+            match key.trim().to_ascii_lowercase().as_str() {
+                "value" | "number" => phone.value = value.to_string(),
+                "kind" | "type" => match value.to_ascii_lowercase().as_str() {
+                    "home" => phone.kind = CoreChannelKind::Home,
+                    "work" => phone.kind = CoreChannelKind::Work,
+                    "mobile" | "cell" => phone.kind = CoreChannelKind::Mobile,
+                    _ => {
+                        phone.kind = CoreChannelKind::Custom;
+                        phone.label = Some(value.to_string());
+                    }
+                },
+                other => return Err(format!("unknown phone key {other:?}")),
+            }
+        }
+    }
+    if phone.value.is_empty() {
+        return Err("a phone needs a number".into());
+    }
+    Ok(phone)
+}
+
+/// `YYYY`, `YYYY-MM` or `YYYY-MM-DD`.
+fn parse_partial_date(text: &str) -> Result<String, String> {
+    let parts: Vec<&str> = text.trim().split('-').collect();
+    let numeric =
+        |part: &str, len: usize| part.len() == len && part.bytes().all(|b| b.is_ascii_digit());
+    let ok = match parts.as_slice() {
+        [y] => numeric(y, 4),
+        [y, m] => numeric(y, 4) && numeric(m, 2),
+        [y, m, d] => numeric(y, 4) && numeric(m, 2) && numeric(d, 2),
+        _ => false,
+    };
+    if ok {
+        Ok(text.trim().to_string())
+    } else {
+        Err(format!("{text:?} is not YYYY, YYYY-MM or YYYY-MM-DD"))
+    }
+}
+
+/// One `--field name=value` for the profile.
+fn parse_profile_field(spec: &str) -> Result<(String, String), String> {
+    let (name, value) = spec
+        .split_once('=')
+        .ok_or_else(|| format!("expected name=value, found {spec:?}"))?;
+    let name = name.trim();
+    match name {
+        "howWeMet" | "interests" | "music" => Ok((name.to_string(), value.to_string())),
+        other => Err(format!(
+            "unknown profile field {other:?}: use howWeMet, interests or music"
+        )),
+    }
+}
+
+/// The stored card with profile fields set, everything else kept. Text is
+/// stored whole, never cut at the editor limit.
+fn contact_with_profile(raw: &str, fields: &[(String, String)]) -> Result<String> {
+    let mut draft = contact_parse(&Uuid::nil().to_string(), raw).draft();
+    let mut profile = draft.profile.take().unwrap_or_default();
+    for (name, value) in fields {
+        let list = || {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        };
+        match name.as_str() {
+            "howWeMet" => profile.how_we_met = Some(value.clone()).filter(|v| !v.trim().is_empty()),
+            "interests" => profile.interests = list(),
+            "music" => profile.music = list(),
+            _ => unreachable!("checked by parse_profile_field"),
+        }
+    }
+    draft.profile = Some(profile);
+    Ok(contact_write(&draft, &now_rfc3339())?)
+}
+
+/// A card as readable text.
+fn contact_card(id: &str, raw: &str, books: &[(Uuid, String)]) -> String {
+    use std::fmt::Write as _;
+    let contact = contact_parse(id, raw);
+    let mut out = String::new();
+    let _ = writeln!(out, "{}", contact.display_name);
+    let _ = writeln!(out, "id: {id}");
+    let book = Uuid::parse_str(&contact.address_book_id).unwrap_or(DEFAULT_ADDRESS_BOOK_ID);
+    let _ = writeln!(out, "book: {}", book_name_for(books, book));
+    let label = |kind: CoreChannelKind, label: &Option<String>| match kind {
+        CoreChannelKind::Work => "work".to_string(),
+        CoreChannelKind::Home => "home".to_string(),
+        CoreChannelKind::Mobile => "mobile".to_string(),
+        CoreChannelKind::Custom => label.clone().unwrap_or_else(|| "other".into()),
+    };
+    if let Some(nick) = &contact.nickname {
+        let _ = writeln!(out, "nickname: {nick}");
+    }
+    if let Some(pronouns) = &contact.pronouns {
+        let _ = writeln!(out, "pronouns: {pronouns}");
+    }
+    for job in &contact.work {
+        let title = job
+            .title
+            .as_deref()
+            .map(|t| format!(", {t}"))
+            .unwrap_or_default();
+        let _ = writeln!(out, "work: {}{title}", job.organization);
+    }
+    for email in &contact.emails {
+        let _ = writeln!(
+            out,
+            "email ({}): {}",
+            label(email.kind, &email.label),
+            email.value
+        );
+    }
+    for phone in &contact.phones {
+        let _ = writeln!(
+            out,
+            "phone ({}): {}",
+            label(phone.kind, &phone.label),
+            phone.value
+        );
+    }
+    for address in &contact.addresses {
+        let lines: Vec<&str> = [
+            &address.street1,
+            &address.street2,
+            &address.locality,
+            &address.region,
+            &address.postcode,
+            &address.country,
+        ]
+        .into_iter()
+        .filter_map(|line| line.as_deref())
+        .collect();
+        let _ = writeln!(
+            out,
+            "address ({}): {}",
+            label(address.kind, &address.label),
+            lines.join(", ")
+        );
+    }
+    for date in &contact.dates {
+        let kind = match date.kind {
+            CoreContactDateKind::Birthday => "birthday".to_string(),
+            CoreContactDateKind::Anniversary => "anniversary".to_string(),
+            CoreContactDateKind::Custom => date.label.clone().unwrap_or_else(|| "date".into()),
+        };
+        let _ = writeln!(out, "{kind}: {}", date.date);
+    }
+    for social in &contact.socials {
+        let _ = writeln!(out, "{}: {}", social.platform, social.handle);
+    }
+    if let Some(notes) = &contact.notes {
+        let _ = writeln!(out, "notes: {notes}");
+    }
+    if let Some(profile) = &contact.profile {
+        if let Some(met) = &profile.how_we_met {
+            let _ = writeln!(out, "how we met: {met}");
+        }
+        if !profile.interests.is_empty() {
+            let _ = writeln!(out, "interests: {}", profile.interests.join(", "));
+        }
+        if !profile.music.is_empty() {
+            let _ = writeln!(out, "music: {}", profile.music.join(", "));
+        }
+    }
+    out
 }
 
 /// One `--address` value: `kind=work;street1=1 Main St;city=Leeds`.
@@ -3259,6 +3621,7 @@ mod tests {
             "Ada Lovelace",
             Some("ada@example.com"),
             None,
+            &ContactMore::default(),
             Uuid::from_u128(2),
             None,
         )
@@ -3275,8 +3638,24 @@ mod tests {
     #[test]
     fn contact_search_finds_by_email_and_name() {
         let book = Uuid::from_u128(2);
-        let ada = jscontact("Ada Lovelace", Some("ada@example.com"), None, book, None).unwrap();
-        let bob = jscontact("Bob Stone", Some("bob@example.org"), None, book, None).unwrap();
+        let ada = jscontact(
+            "Ada Lovelace",
+            Some("ada@example.com"),
+            None,
+            &ContactMore::default(),
+            book,
+            None,
+        )
+        .unwrap();
+        let bob = jscontact(
+            "Bob Stone",
+            Some("bob@example.org"),
+            None,
+            &ContactMore::default(),
+            book,
+            None,
+        )
+        .unwrap();
         let (a, b) = (Uuid::from_u128(10), Uuid::from_u128(11));
         let contacts = vec![(a, ada), (b, bob)];
         let books = vec![(book, "Work".to_string())];
@@ -3582,6 +3961,7 @@ mod tests {
             "Ada King",
             Some("ada@example.com"),
             None,
+            &ContactMore::default(),
             DEFAULT_ADDRESS_BOOK_ID,
             Some(&stored),
         )
@@ -3619,6 +3999,68 @@ mod tests {
     }
 
     #[test]
+    fn more_fields_replace_when_given_and_keep_when_left_out() {
+        let stored = r#"{"@type":"Card","name":{"full":"Ada"},"nickNames":{"n1":{"name":"A"}},"organizations":{"o1":{"name":"Old Co","titles":{"t1":{"name":"Eng"}}}}}"#;
+        let none = ContactMore::default();
+        let kept = jscontact("Ada", None, None, &none, Uuid::nil(), Some(stored)).unwrap();
+        let card = contact_parse("c", &kept);
+        assert_eq!(card.nickname.as_deref(), Some("A"));
+        assert_eq!(card.work[0].organization, "Old Co");
+        let more = ContactMore {
+            phones: vec![parse_phone_spec("value=+44 20 7946 0000;kind=work").unwrap()],
+            org: Some("New Co".into()),
+            title: Some("CTO".into()),
+            anniversary: Some("2020-05".into()),
+            ..Default::default()
+        };
+        let set = jscontact("Ada", None, None, &more, Uuid::nil(), Some(stored)).unwrap();
+        let card = contact_parse("c", &set);
+        assert_eq!(card.phones[0].value, "+44 20 7946 0000");
+        assert_eq!(card.work[0].organization, "New Co");
+        assert_eq!(card.work[0].title.as_deref(), Some("CTO"));
+        assert_eq!(card.dates[0].date, "2020-05");
+        let clear = ContactMore {
+            clear_nickname: true,
+            clear_work: true,
+            clear_anniversary: true,
+            ..Default::default()
+        };
+        let gone = jscontact("Ada", None, None, &clear, Uuid::nil(), Some(&set)).unwrap();
+        let card = contact_parse("c", &gone);
+        assert!(card.nickname.is_none() && card.work.is_empty() && card.dates.is_empty());
+        assert_eq!(card.phones.len(), 1);
+    }
+
+    #[test]
+    fn partial_dates_and_phones_are_checked() {
+        assert!(parse_partial_date("2020").is_ok());
+        assert!(parse_partial_date("2020-5").is_err());
+        assert!(parse_phone_spec("kind=work").is_err());
+        assert_eq!(parse_phone_spec("0123").unwrap().value, "0123");
+        assert!(parse_profile_field("hobby=x").is_err());
+    }
+
+    #[test]
+    fn profile_fields_set_whole_and_keep_the_rest_of_the_card() {
+        let stored = r#"{"@type":"Card","name":{"full":"Ada"},"nickNames":{"n1":{"name":"A"}}}"#;
+        let long = "x".repeat(5000);
+        let out = contact_with_profile(
+            stored,
+            &[
+                ("howWeMet".into(), long.clone()),
+                ("interests".into(), "chess, maths ,".into()),
+            ],
+        )
+        .unwrap();
+        let card = contact_parse("c", &out);
+        let profile = card.profile.unwrap();
+        assert_eq!(profile.how_we_met.as_deref(), Some(long.as_str()));
+        assert_eq!(profile.interests, vec!["chess", "maths"]);
+        assert_eq!(card.nickname.as_deref(), Some("A"));
+        assert!(contact_card("c", &out, &[]).contains("interests: chess, maths"));
+    }
+
+    #[test]
     fn addresses_given_to_an_update_replace_the_list_and_none_keep_it() {
         let stored = r#"{"@type":"Card","name":{"full":"Ada"},"addresses":{"a1":{"locality":"London"},"a2":{"locality":"Paris"}}}"#;
         let given = vec![
@@ -3629,6 +4071,7 @@ mod tests {
             "Ada",
             None,
             Some(given),
+            &ContactMore::default(),
             DEFAULT_ADDRESS_BOOK_ID,
             Some(stored),
         )
@@ -3641,13 +4084,22 @@ mod tests {
             .collect();
         assert_eq!(cities, ["Leeds", "York"]);
 
-        let kept = jscontact("Ada", None, None, DEFAULT_ADDRESS_BOOK_ID, Some(stored)).unwrap();
+        let kept = jscontact(
+            "Ada",
+            None,
+            None,
+            &ContactMore::default(),
+            DEFAULT_ADDRESS_BOOK_ID,
+            Some(stored),
+        )
+        .unwrap();
         assert_eq!(contact_parse("c", &kept).addresses.len(), 2);
 
         let cleared = jscontact(
             "Ada",
             None,
             Some(Vec::new()),
+            &ContactMore::default(),
             DEFAULT_ADDRESS_BOOK_ID,
             Some(stored),
         )
