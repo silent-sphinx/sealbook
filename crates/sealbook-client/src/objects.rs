@@ -10,13 +10,14 @@ use sealbook_protocol::{
     MAX_BATCH_OBJECTS,
 };
 use sealbook_protocol::{
-    ADDRESS_BOOK_CONTENT_TYPE, BOOKMARK_COLLECTION_CONTENT_TYPE, BOOKMARK_CONTENT_TYPE,
-    CALENDAR_CONTENT_TYPE, CALENDAR_EVENT_CONTENT_TYPE, DEFAULT_ADDRESS_BOOK_ID,
-    DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_BOOKMARK_COLLECTION_ID, DEFAULT_BOOKMARK_COLLECTION_NAME,
-    DEFAULT_CALENDAR_COLOR, DEFAULT_CALENDAR_ID, DEFAULT_CALENDAR_NAME, DEFAULT_NOTEBOOK_ID,
-    DEFAULT_NOTEBOOK_NAME, DEFAULT_TASK_LIST_ID, DEFAULT_TASK_LIST_NAME, DEVICE_LABEL_CONTENT_TYPE,
-    JSCONTACT_CONTENT_TYPE, NOTEBOOK_CONTENT_TYPE, NOTE_CONTENT_TYPE, SEALED_CONTENT_TYPE,
-    TASK_CONTENT_TYPE, TASK_LIST_CONTENT_TYPE,
+    ACCOUNT_SETTINGS_ID, ADDRESS_BOOK_CONTENT_TYPE, BOOKMARK_COLLECTION_CONTENT_TYPE,
+    BOOKMARK_CONTENT_TYPE, CALENDAR_CONTENT_TYPE, CALENDAR_EVENT_CONTENT_TYPE,
+    DEFAULT_ADDRESS_BOOK_ID, DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_BOOKMARK_COLLECTION_ID,
+    DEFAULT_BOOKMARK_COLLECTION_NAME, DEFAULT_CALENDAR_COLOR, DEFAULT_CALENDAR_ID,
+    DEFAULT_CALENDAR_NAME, DEFAULT_NOTEBOOK_ID, DEFAULT_NOTEBOOK_NAME, DEFAULT_TASK_LIST_ID,
+    DEFAULT_TASK_LIST_NAME, DEVICE_LABEL_CONTENT_TYPE, JSCONTACT_CONTENT_TYPE,
+    NOTEBOOK_CONTENT_TYPE, NOTE_CONTENT_TYPE, SEALED_CONTENT_TYPE, TASK_CONTENT_TYPE,
+    TASK_LIST_CONTENT_TYPE,
 };
 
 use crate::{ClientError, SealbookClient};
@@ -451,6 +452,31 @@ impl SealbookClient {
         })?;
         self.put_task_list(DEFAULT_TASK_LIST_ID, &plaintext).await?;
         Ok(DEFAULT_TASK_LIST_ID)
+    }
+
+    /// The account settings as stored, or the defaults when none were ever
+    /// written. The object keeps its own id, so there is at most one.
+    pub async fn account_settings(
+        &mut self,
+    ) -> Result<sealbook_core::CoreAccountSettings, ClientError> {
+        for obj in self.listed_objects().await? {
+            if obj.id == ACCOUNT_SETTINGS_ID
+                && obj.content_type == sealbook_core::ACCOUNT_SETTINGS_CONTENT_TYPE
+            {
+                return Ok(sealbook_core::settings_parse(&obj.plaintext));
+            }
+        }
+        Ok(sealbook_core::default_account_settings())
+    }
+
+    /// Writes settings from `sealbook_core::settings_write`.
+    pub async fn put_account_settings(&mut self, settings: &str) -> Result<u64, ClientError> {
+        self.put_sealed(
+            ACCOUNT_SETTINGS_ID,
+            settings.as_bytes(),
+            sealbook_core::ACCOUNT_SETTINGS_CONTENT_TYPE,
+        )
+        .await
     }
 
     pub async fn put_bookmark(

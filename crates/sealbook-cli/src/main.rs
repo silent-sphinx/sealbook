@@ -1,3 +1,6 @@
+mod attach;
+mod search;
+mod settings;
 mod tasks;
 
 use std::path::{Path, PathBuf};
@@ -149,6 +152,29 @@ enum Command {
     Tasklist {
         #[command(subcommand)]
         command: tasks::TasklistCommand,
+    },
+    /// Search notes, tasks, bookmarks, events and contacts at once.
+    ///
+    /// Finished tasks, archived items, bookmarks kept out of "All" and any
+    /// feature switched off are left out, as in the web's search.
+    Search {
+        query: String,
+        /// Only these kinds; repeat for more than one.
+        #[arg(long, value_enum)]
+        kind: Vec<search::Kind>,
+        /// Most hits to show of each kind.
+        #[arg(long, default_value_t = 5)]
+        limit: u32,
+    },
+    /// Files attached to notes (photos) and contacts.
+    Attach {
+        #[command(subcommand)]
+        command: attach::AttachCommand,
+    },
+    /// Which features the account shows.
+    Settings {
+        #[command(subcommand)]
+        command: settings::SettingsCommand,
     },
     Devices {
         #[command(subcommand)]
@@ -681,6 +707,7 @@ enum CalendarCommand {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     let pinned = load_ca(&cli.tls_ca)?;
+    let _ = WARN_IF_OFF.set(feature_of(&cli.command));
     match cli.command {
         Command::Register { username } => {
             let password = read_secret("Password: ", "SEALBOOK_PASSWORD")?;
@@ -1464,6 +1491,21 @@ async fn main() -> Result<()> {
             tasks::run_lists(&mut client, command).await?;
             save_state(&cli.state, client.state.as_ref().unwrap())?;
         }
+        Command::Search { query, kind, limit } => {
+            let mut client = connect(&cli.state, pinned).await?;
+            search::run(&mut client, &query, &kind, limit).await?;
+            save_state(&cli.state, client.state.as_ref().unwrap())?;
+        }
+        Command::Attach { command } => {
+            let mut client = connect(&cli.state, pinned).await?;
+            attach::run(&mut client, command, &now_rfc3339()).await?;
+            save_state(&cli.state, client.state.as_ref().unwrap())?;
+        }
+        Command::Settings { command } => {
+            let mut client = connect(&cli.state, pinned).await?;
+            settings::run(&mut client, command).await?;
+            save_state(&cli.state, client.state.as_ref().unwrap())?;
+        }
         Command::Devices { command } => {
             let state = load_state(&cli.state)?;
             let password = read_secret("Password: ", "SEALBOOK_PASSWORD")?;
@@ -2178,7 +2220,54 @@ async fn label_this_device(client: &mut SealbookClient) {
     }
 }
 
+/// The feature the running command belongs to, which `sign_in` checks is still
+/// switched on. Set once, before any command runs.
+static WARN_IF_OFF: std::sync::OnceLock<Option<&'static str>> = std::sync::OnceLock::new();
+
+fn feature_of(command: &Command) -> Option<&'static str> {
+    match command {
+        Command::Contacts { .. } | Command::Book { .. } => Some("contacts"),
+        Command::Calendar { .. } => Some("calendar"),
+        Command::Notes { .. } | Command::Notebook { .. } => Some("notes"),
+        Command::Bookmarks { .. } | Command::Collection { .. } => Some("bookmarks"),
+        Command::Tasks { .. } | Command::Tasklist { .. } => Some("tasks"),
+        _ => None,
+    }
+}
+
+/// Reads the settings and says so when the command's feature is off. The
+/// command still runs: the data is the user's, and only the apps hide it.
+async fn warn_if_feature_off(client: &mut SealbookClient) {
+    let Some(Some(feature)) = WARN_IF_OFF.get() else {
+        return;
+    };
+    if let Ok(settings) = client.account_settings().await {
+        if let Some(note) = settings::disabled_note(&settings, feature) {
+            eprintln!("{note}");
+        }
+    }
+}
+
+/// Opens the saved state and signs in with `SEALBOOK_PASSWORD`.
+async fn connect(
+    state_path: &Path,
+    pinned: Option<CertificateDer<'static>>,
+) -> Result<SealbookClient> {
+    let state = load_state(state_path)?;
+    let password = std::env::var("SEALBOOK_PASSWORD")
+        .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+    let mut client = SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
+    sign_in(&mut client, &password).await?;
+    Ok(client)
+}
+
 async fn sign_in(client: &mut SealbookClient, password: &str) -> Result<()> {
+    sign_in_quietly(client, password).await?;
+    warn_if_feature_off(client).await;
+    Ok(())
+}
+
+async fn sign_in_quietly(client: &mut SealbookClient, password: &str) -> Result<()> {
     match client.login(password).await {
         Ok(()) => Ok(()),
         Err(sealbook_client::ClientError::RecoveryRotationPending) => {

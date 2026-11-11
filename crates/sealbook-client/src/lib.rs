@@ -51,6 +51,12 @@ pub use sealbook_core::{
     MIN_ALERT_MINUTES_BEFORE, PAIR_POLL_INTERVAL_MS,
 };
 pub use sealbook_core::{
+    attachment_limits, can_disable_feature, default_account_settings, resolve_address_book_id,
+    resolve_collection_id, settings_parse, settings_with_feature, settings_write, sweep_orphans,
+    AttachmentRow, CoreAccountSettings, CoreAccountSettingsDraft, CoreSearchContainer,
+    CoreSearchHit, CoreSearchKind, CoreSearchSource, VaultIndex, FEATURES,
+};
+pub use sealbook_core::{
     default_task_list_id, normalize_due_date, order_tasks, resolve_task_list_id, task_agenda,
     task_complete, task_export, task_import, task_list_move_plan, task_list_name_by_id,
     task_list_parse, task_list_remove_plan, task_list_write, task_move_plan, task_parse,
