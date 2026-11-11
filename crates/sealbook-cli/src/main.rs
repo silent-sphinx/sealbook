@@ -17,12 +17,14 @@ use rand::RngCore;
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::CertificateDer;
 use sealbook_client::{
-    account_export_parse, account_export_write, alert_label, contact_parse, contact_write,
-    event_parse, ics_parse, note_parse, note_write, notes_import, CoreAddressBookDraft,
+    account_export_parse, account_export_write, alert_label, calendar_parse, contact_parse,
+    contact_write, event_parse, ics_parse, ics_write, note_parse, note_write, notes_import,
+    notes_write_json, notes_write_markdown, recurrence_days, CoreAddressBookDraft,
     CoreCalendarDraft, CoreCalendarEventDraft, CoreChannelKind, CoreContactAddress,
     CoreContactChannel, CoreContactDraft, CoreDeviceKind, CoreEventAlert, CoreIcsEvent,
-    CoreNoteDraft, ExportedObject, LocalState, SealbookClient, DEFAULT_ADDRESS_BOOK_ID,
-    DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_BOOKMARK_COLLECTION_NAME, DEFAULT_CALENDAR_COLOR,
+    CoreIcsExportEvent, CoreNoteDraft, CoreNoteFileEntry, CoreOrderItem, ExportedObject,
+    LocalState, SealbookClient, DEFAULT_ADDRESS_BOOK_ID, DEFAULT_ADDRESS_BOOK_NAME,
+    DEFAULT_BOOKMARK_COLLECTION_ID, DEFAULT_BOOKMARK_COLLECTION_NAME, DEFAULT_CALENDAR_COLOR,
     DEFAULT_CALENDAR_ID, DEFAULT_CALENDAR_NAME, DEFAULT_NOTEBOOK_NAME,
 };
 use sha2::{Digest, Sha256};
@@ -139,6 +141,31 @@ enum Command {
         #[command(subcommand)]
         command: DevicesCommand,
     },
+    Account {
+        #[command(subcommand)]
+        command: AccountCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum AccountCommand {
+    /// Change the account password.
+    ///
+    /// The current password comes from SEALBOOK_PASSWORD or a prompt, and the
+    /// new one from SEALBOOK_NEW_PASSWORD or a prompt asked twice. Other devices
+    /// are signed out and sign in again with the new password.
+    Password {},
+    /// Rename the account. The password is asked for, since it is registered
+    /// again under the new name.
+    Rename {
+        #[arg(long)]
+        username: String,
+    },
+    /// Delete the account and everything in it, on every device.
+    ///
+    /// Asks for the account name typed back and then the password. There is no
+    /// flag to skip either: this cannot be undone.
+    Delete {},
 }
 
 #[derive(Subcommand)]
@@ -162,6 +189,8 @@ enum DevicesCommand {
         #[arg(long)]
         name: String,
     },
+    /// Remove the names left behind by revoked devices.
+    Prune {},
 }
 
 #[derive(Subcommand)]
@@ -170,6 +199,27 @@ enum BookCommand {
     Create {
         #[arg(long)]
         name: String,
+    },
+    /// Rename an address book or change its colour, keeping the rest of it.
+    Rename {
+        #[arg(long)]
+        id: Uuid,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        color: Option<String>,
+    },
+    /// Delete an address book. Its contacts are moved to another book or
+    /// deleted with it, as web asks. The default book cannot be deleted.
+    Delete {
+        #[arg(long)]
+        id: Uuid,
+        /// Move its contacts to this book (a name or an id).
+        #[arg(long)]
+        move_to: Option<String>,
+        /// Delete its contacts along with it.
+        #[arg(long, conflicts_with = "move_to")]
+        delete_contacts: bool,
     },
 }
 
@@ -187,6 +237,13 @@ enum ContactsCommand {
         /// region, postcode, country. Repeat for more than one.
         #[arg(long = "address", value_parser = parse_address_spec)]
         addresses: Vec<CoreContactAddress>,
+    },
+    /// Find contacts with the search every client uses: names, numbers,
+    /// emails and the rest of the card, best match first.
+    Search {
+        query: String,
+        #[arg(long)]
+        book: Option<String>,
     },
     Update {
         #[arg(long)]
@@ -244,6 +301,15 @@ enum NotebookCommand {
         #[arg(long)]
         name: String,
     },
+    /// Rename a notebook or change its colour, keeping the rest of it.
+    Rename {
+        #[arg(long)]
+        id: Uuid,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        color: Option<String>,
+    },
     Delete {
         #[arg(long)]
         id: Uuid,
@@ -263,6 +329,12 @@ enum NotesCommand {
         file: Option<PathBuf>,
         #[arg(long)]
         notebook: Option<Uuid>,
+        /// Put the note under another note.
+        #[arg(long)]
+        parent: Option<Uuid>,
+        /// Pin the note.
+        #[arg(long)]
+        pin: bool,
     },
     /// Replace a note's title and body, keeping its original creation time.
     Update {
@@ -276,6 +348,16 @@ enum NotesCommand {
         file: Option<PathBuf>,
         #[arg(long)]
         notebook: Option<Uuid>,
+        /// Move the note under another note.
+        #[arg(long)]
+        parent: Option<Uuid>,
+        /// Move the note to its notebook's top level.
+        #[arg(long, conflicts_with = "parent")]
+        clear_parent: bool,
+        #[arg(long)]
+        pin: bool,
+        #[arg(long, conflicts_with = "pin")]
+        unpin: bool,
     },
     /// Titles only. A body can be megabytes, so use `show` for one.
     List {
@@ -295,10 +377,26 @@ enum NotesCommand {
         #[arg(long)]
         notebook: Option<Uuid>,
     },
+    /// Write notes as one markdown file, or a JSON backup.
+    Export {
+        #[arg(long)]
+        notebook: Option<Uuid>,
+        #[arg(long, value_enum, default_value = "md")]
+        format: NotesFormat,
+        /// File to write. Omit to print to stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
     Delete {
         #[arg(long)]
         id: Uuid,
     },
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum NotesFormat {
+    Md,
+    Json,
 }
 
 #[derive(Subcommand)]
@@ -307,13 +405,27 @@ enum CollectionCommand {
     Create {
         #[arg(long)]
         name: String,
+        /// Nest it under another collection.
+        #[arg(long)]
+        parent: Option<Uuid>,
+        /// Hex colour. Only a top-level collection carries one.
+        #[arg(long)]
+        color: Option<String>,
     },
-    /// Rename a collection, leaving its place in the tree alone.
+    /// Change a collection. A flag left out keeps the stored value.
     Rename {
         #[arg(long)]
         id: Uuid,
         #[arg(long)]
-        name: String,
+        name: Option<String>,
+        /// Move it under another collection.
+        #[arg(long)]
+        parent: Option<Uuid>,
+        /// Move it to the top level.
+        #[arg(long, conflicts_with = "parent")]
+        clear_parent: bool,
+        #[arg(long)]
+        color: Option<String>,
     },
     Delete {
         #[arg(long)]
@@ -331,11 +443,16 @@ enum BookmarksCommand {
         title: Option<String>,
         #[arg(long)]
         collection: Option<Uuid>,
+        /// A note on why it was saved.
+        #[arg(long)]
+        note: Option<String>,
+        /// A tag. Repeat for more than one.
+        #[arg(long = "tag")]
+        tags: Vec<String>,
     },
     /// Replace a bookmark's URL and title, keeping its original creation time.
     ///
-    /// The notes and tags a bookmark carries are not written from here, so an
-    /// update made with this command leaves them as they were.
+    /// A note or tags left out are kept as they were.
     Update {
         #[arg(long)]
         id: Uuid,
@@ -345,6 +462,15 @@ enum BookmarksCommand {
         title: Option<String>,
         #[arg(long)]
         collection: Option<Uuid>,
+        #[arg(long)]
+        note: Option<String>,
+        #[arg(long, conflicts_with = "note")]
+        clear_note: bool,
+        /// Replaces the bookmark's tags. Repeat for more than one.
+        #[arg(long = "tag")]
+        tags: Vec<String>,
+        #[arg(long, conflicts_with = "tags")]
+        clear_tags: bool,
     },
     List {
         #[arg(long)]
@@ -387,7 +513,71 @@ enum CalendarCommand {
         #[arg(long = "alert", allow_hyphen_values = true)]
         alerts: Vec<String>,
     },
-    List,
+    /// List events. With `--from` and `--to`, repeating events are expanded
+    /// into one line per occurrence inside the window.
+    List {
+        #[arg(long)]
+        calendar: Option<Uuid>,
+        /// First day, YYYY-MM-DD.
+        #[arg(long)]
+        from: Option<String>,
+        /// Last day, YYYY-MM-DD, inclusive.
+        #[arg(long)]
+        to: Option<String>,
+    },
+    /// Change an event. A flag left out keeps the stored value.
+    Update {
+        #[arg(long)]
+        id: Uuid,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        start: Option<String>,
+        #[arg(long)]
+        end: Option<String>,
+        #[arg(long, conflicts_with = "end")]
+        clear_end: bool,
+        #[arg(long)]
+        notes: Option<String>,
+        #[arg(long, conflicts_with = "notes")]
+        clear_notes: bool,
+        #[arg(long)]
+        calendar: Option<Uuid>,
+        /// As for `add`. Replaces every reminder the event has.
+        #[arg(long = "alert", allow_hyphen_values = true)]
+        alerts: Vec<String>,
+    },
+    /// Delete one event.
+    Delete {
+        #[arg(long)]
+        id: Uuid,
+    },
+    /// Rename a calendar, or change its colour.
+    Rename {
+        #[arg(long)]
+        id: Uuid,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        color: Option<String>,
+    },
+    /// Delete a calendar and every event in it, as web does.
+    Remove {
+        #[arg(long)]
+        id: Uuid,
+        /// Confirm that the calendar's events go with it.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Write events as an `.ics` file.
+    Export {
+        /// Only this calendar. Omit for every event.
+        #[arg(long)]
+        calendar: Option<Uuid>,
+        /// File to write. Omit to print to stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
     /// Show an event's reminders, or replace them.
     Alerts {
         event: Uuid,
@@ -488,7 +678,7 @@ async fn main() -> Result<()> {
         }
         Command::Recover { username } => {
             let phrase = read_secret("Recovery phrase: ", "SEALBOOK_PHRASE")?;
-            let password = read_new_password()?;
+            let password = read_new_password("SEALBOOK_PASSWORD")?;
             let mut client = SealbookClient::https(pinned.clone()).context("tls client")?;
             let new_phrase = client
                 .recover(&cli.server, &username, &phrase, &password)
@@ -667,6 +857,39 @@ async fn main() -> Result<()> {
                 println!("updated encrypted contact {id} at revision {revision}");
                 save_state(&cli.state, client.state.as_ref().unwrap())?;
             }
+            ContactsCommand::Search { query, book } => {
+                let state = load_state(&cli.state)?;
+                let password = std::env::var("SEALBOOK_PASSWORD")
+                    .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+                let mut client =
+                    SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
+                sign_in(&mut client, &password).await?;
+                client
+                    .ensure_default_address_book()
+                    .await
+                    .context("default address book")?;
+                let books = client.list_address_books().await.context("books")?;
+                let book_id = resolve_book(&books, book.as_deref())?;
+                let contacts: Vec<(Uuid, String)> = client
+                    .list_contacts()
+                    .await
+                    .context("list")?
+                    .into_iter()
+                    .filter(|(_, json)| book_id.is_none_or(|id| contact_book_id(json) == id))
+                    .collect();
+                let hits = contact_search(&contacts, &books, &query);
+                if hits.is_empty() {
+                    println!("(no matches)");
+                }
+                for id in hits {
+                    if let Some((_, json)) = contacts.iter().find(|(c, _)| c.to_string() == id) {
+                        let name = contact_parse(&id, json).name;
+                        let book_name = book_name_for(&books, contact_book_id(json));
+                        println!("{id} [{book_name}] {name}");
+                    }
+                }
+                save_state(&cli.state, client.state.as_ref().unwrap())?;
+            }
             ContactsCommand::Delete { id } => {
                 let state = load_state(&cli.state)?;
                 let password = std::env::var("SEALBOOK_PASSWORD")
@@ -691,7 +914,15 @@ async fn main() -> Result<()> {
                     .context("default address book")?;
                 let books = client.list_address_books().await.context("books")?;
                 let book_id = resolve_book(&books, book.as_deref())?;
-                let contacts = client.list_contacts().await.context("list")?;
+                let contacts = in_core_order(
+                    client.list_contacts().await.context("list")?,
+                    |id, json| CoreOrderItem {
+                        id: id.to_string(),
+                        name: contact_parse(&id.to_string(), json).name,
+                        ..Default::default()
+                    },
+                    sealbook_client::order_by_name,
+                );
                 let visible: Vec<_> = contacts
                     .into_iter()
                     .filter(|(_, json)| match book_id {
@@ -802,6 +1033,80 @@ async fn main() -> Result<()> {
                         .context("create address book")?;
                     println!("created address book {id} {name}");
                 }
+                BookCommand::Rename { id, name, color } => {
+                    let stored = client
+                        .list_address_book_payloads()
+                        .await?
+                        .into_iter()
+                        .find(|(candidate, _)| *candidate == id)
+                        .map(|(_, json)| json)
+                        .with_context(|| format!("no address book {id}: see `book list`"))?;
+                    let parsed = sealbook_client::address_book_parse(&id.to_string(), &stored);
+                    let revision = client
+                        .put_address_book(
+                            id,
+                            &CoreAddressBookDraft {
+                                name: name.unwrap_or(parsed.name),
+                                archived: parsed.archived,
+                                color: color.or(parsed.color),
+                                raw: Some(stored),
+                            },
+                        )
+                        .await
+                        .context("rename address book")?;
+                    println!("stored encrypted address book {id} at revision {revision}");
+                }
+                BookCommand::Delete {
+                    id,
+                    move_to,
+                    delete_contacts,
+                } => {
+                    if id == DEFAULT_ADDRESS_BOOK_ID {
+                        anyhow::bail!("the default address book cannot be deleted");
+                    }
+                    let books = client.list_address_books().await.context("books")?;
+                    if !books.iter().any(|(book, _)| *book == id) {
+                        anyhow::bail!("no address book {id}: see `book list`");
+                    }
+                    let destination = resolve_book(&books, move_to.as_deref())?;
+                    if destination == Some(id) {
+                        anyhow::bail!("cannot move the contacts into the book being deleted");
+                    }
+                    let contained: Vec<(Uuid, String)> = client
+                        .list_contacts()
+                        .await?
+                        .into_iter()
+                        .filter(|(_, json)| contact_book_id(json) == id)
+                        .collect();
+                    if !contained.is_empty() && destination.is_none() && !delete_contacts {
+                        anyhow::bail!(
+                            "{} contact(s) are in this book: pass --move-to <book> to keep \
+                             them or --delete-contacts to delete them with it",
+                            contained.len()
+                        );
+                    }
+                    for (contact, json) in &contained {
+                        match destination {
+                            Some(destination) => {
+                                let moved = contact_moved(json, destination)?;
+                                client.put_contact(*contact, &moved).await?;
+                            }
+                            None => {
+                                client.delete_contact(*contact).await?;
+                            }
+                        }
+                    }
+                    client.delete_address_book(id).await?;
+                    let verb = if destination.is_some() {
+                        "moved"
+                    } else {
+                        "deleted"
+                    };
+                    println!(
+                        "deleted address book {id}, {verb} {} contact(s)",
+                        contained.len()
+                    );
+                }
             }
             save_state(&cli.state, client.state.as_ref().unwrap())?;
         }
@@ -826,23 +1131,43 @@ async fn main() -> Result<()> {
                         println!("{id} {name}");
                     }
                 }
-                CollectionCommand::Create { name } => {
+                CollectionCommand::Create {
+                    name,
+                    parent,
+                    color,
+                } => {
                     let id = Uuid::new_v4();
+                    let draft =
+                        collection_change(None, id, Some(name.clone()), parent.map(Some), color)?;
+                    check_collection_parent(&mut client, id, &draft).await?;
                     client
-                        .put_bookmark_collection(id, &name, None)
+                        .put_bookmark_collection_draft(id, &draft)
                         .await
                         .context("create collection")?;
                     println!("created collection {id} {name}");
                 }
-                CollectionCommand::Rename { id, name } => {
-                    // Merged onto the stored payload so `parentId`, which the web
-                    // client owns, survives a rename made from here.
+                CollectionCommand::Rename {
+                    id,
+                    name,
+                    parent,
+                    clear_parent,
+                    color,
+                } => {
+                    // Merged onto the stored payload so keys this build does not
+                    // know, such as `hideFromAll`, survive.
                     let existing = find_bookmark_collection(&mut client, id).await?;
+                    let parent = if clear_parent {
+                        Some(None)
+                    } else {
+                        parent.map(Some)
+                    };
+                    let draft = collection_change(Some(&existing), id, name, parent, color)?;
+                    check_collection_parent(&mut client, id, &draft).await?;
                     client
-                        .put_bookmark_collection(id, &name, Some(&existing))
+                        .put_bookmark_collection_draft(id, &draft)
                         .await
-                        .context("rename collection")?;
-                    println!("renamed collection {id} {name}");
+                        .context("change collection")?;
+                    println!("stored collection {id} {}", draft.name);
                 }
                 CollectionCommand::Delete { id } => {
                     let revision = client
@@ -870,6 +1195,8 @@ async fn main() -> Result<()> {
                     url,
                     title,
                     collection,
+                    note,
+                    tags,
                 } => {
                     let id = Uuid::new_v4();
                     let bookmark = bookmark_json(
@@ -877,6 +1204,10 @@ async fn main() -> Result<()> {
                         title.as_deref(),
                         collection.unwrap_or(default_collection),
                         None,
+                        &BookmarkExtras {
+                            notes: note,
+                            tags: (!tags.is_empty()).then_some(tags),
+                        },
                     )?;
                     let revision = client
                         .put_bookmark(id, &bookmark)
@@ -889,6 +1220,10 @@ async fn main() -> Result<()> {
                     url,
                     title,
                     collection,
+                    note,
+                    clear_note,
+                    tags,
+                    clear_tags,
                 } => {
                     let existing = find_bookmark(&mut client, id).await?;
                     let bookmark = bookmark_json(
@@ -898,6 +1233,18 @@ async fn main() -> Result<()> {
                             bookmark_collection_id(&existing, default_collection)
                         }),
                         Some(&existing),
+                        &BookmarkExtras {
+                            notes: if clear_note {
+                                Some(String::new())
+                            } else {
+                                note
+                            },
+                            tags: if clear_tags {
+                                Some(Vec::new())
+                            } else {
+                                (!tags.is_empty()).then_some(tags)
+                            },
+                        },
                     )?;
                     let revision = client
                         .put_bookmark(id, &bookmark)
@@ -910,7 +1257,19 @@ async fn main() -> Result<()> {
                         .list_bookmark_collections()
                         .await
                         .context("collections")?;
-                    let bookmarks = client.list_bookmarks().await.context("bookmarks")?;
+                    let bookmarks = in_core_order(
+                        client.list_bookmarks().await.context("bookmarks")?,
+                        |id, json| {
+                            let bookmark = sealbook_client::bookmark_parse(&id.to_string(), json);
+                            CoreOrderItem {
+                                id: id.to_string(),
+                                name: bookmark.title,
+                                pinned: false,
+                                stamp: bookmark.updated_at.unwrap_or_default(),
+                            }
+                        },
+                        |items| sealbook_client::order_by_recency(items, false),
+                    );
                     let mut shown = 0;
                     for (id, json) in bookmarks {
                         let holder = bookmark_collection_id(&json, default_collection);
@@ -1005,9 +1364,78 @@ async fn main() -> Result<()> {
                     );
                     println!("{phrase}");
                 }
+                DevicesCommand::Prune {} => {
+                    let removed = client.remove_stale_device_labels().await?;
+                    println!(
+                        "removed {removed} stale device name{}",
+                        if removed == 1 { "" } else { "s" }
+                    );
+                }
             }
             save_state(&cli.state, client.state.as_ref().unwrap())?;
         }
+        Command::Account { command } => match command {
+            AccountCommand::Password {} => {
+                let state = load_state(&cli.state)?;
+                let current = read_secret("Current password: ", "SEALBOOK_PASSWORD")?;
+                let new = read_new_password("SEALBOOK_NEW_PASSWORD")?;
+                let mut client =
+                    SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
+                // `change_password` signs in with the current password itself,
+                // which is what proves it, so signing in here too would spend
+                // a third of the server's per-minute login allowance for nothing.
+                client
+                    .change_password(&current, &new)
+                    .await
+                    .context("change password")?;
+                // The state file's key lives in the keyring, not in the
+                // password, so only the new KDF salt needs saving.
+                save_state(&cli.state, client.state.as_ref().unwrap())?;
+                println!(
+                    "password changed. Other devices are signed out and sign in with the new one."
+                );
+            }
+            AccountCommand::Rename { username } => {
+                let state = load_state(&cli.state)?;
+                let password = read_secret("Password: ", "SEALBOOK_PASSWORD")?;
+                let mut client =
+                    SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
+                // `change_username` signs in itself; see `account password`.
+                client
+                    .change_username(&username, &password)
+                    .await
+                    .context("rename account")?;
+                save_state(&cli.state, client.state.as_ref().unwrap())?;
+                println!(
+                    "account renamed to {}",
+                    client.state.as_ref().unwrap().username
+                );
+            }
+            AccountCommand::Delete {} => {
+                let state = load_state(&cli.state)?;
+                let username = state.username.clone();
+                eprintln!(
+                    "This deletes the account {username} and everything in it, on every \
+                     device. It cannot be undone."
+                );
+                eprint!("Type the account name to confirm: ");
+                std::io::stderr().flush()?;
+                let mut typed = String::new();
+                std::io::stdin().read_line(&mut typed)?;
+                if !delete_confirmed(&typed, &username) {
+                    anyhow::bail!("the name typed does not match {username}; nothing was deleted");
+                }
+                let password = read_secret("Password: ", "SEALBOOK_PASSWORD")?;
+                let mut client =
+                    SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
+                // Signing in proves the password, as web and Android do before
+                // they send the delete.
+                sign_in(&mut client, &password).await?;
+                client.delete_account().await.context("delete account")?;
+                forget_state(&cli.state);
+                println!("account {username} deleted");
+            }
+        },
         Command::Calendar { command } => {
             let state = load_state(&cli.state)?;
             let password = std::env::var("SEALBOOK_PASSWORD")
@@ -1072,10 +1500,16 @@ async fn main() -> Result<()> {
                         .await?;
                     println!("stored encrypted calendar event {id} at revision {revision}");
                 }
-                CalendarCommand::List => {
+                CalendarCommand::List { calendar, from, to } => {
                     let calendars = client.list_calendars().await?;
+                    let window = calendar_window(from.as_deref(), to.as_deref())?;
                     for (id, json) in client.list_calendar_events().await? {
                         let event = event_parse(&id.to_string(), &json);
+                        if calendar.is_some_and(|wanted| {
+                            event.calendar_id.as_deref() != Some(&wanted.to_string())
+                        }) {
+                            continue;
+                        }
                         let name = event
                             .calendar_id
                             .as_deref()
@@ -1087,10 +1521,125 @@ async fn main() -> Result<()> {
                                     .unwrap_or(DEFAULT_CALENDAR_NAME)
                             })
                             .unwrap_or("no calendar");
-                        println!("{id} [{name}] {} {}", event.start, event.title);
-                        for line in alert_lines(&event) {
-                            println!("    {line}");
+                        for start in occurrence_starts(&event, window.as_ref()) {
+                            println!("{id} [{name}] {start} {}", event.title);
+                            for line in alert_lines(&event) {
+                                println!("    {line}");
+                            }
                         }
+                    }
+                }
+                CalendarCommand::Update {
+                    id,
+                    title,
+                    start,
+                    end,
+                    clear_end,
+                    notes,
+                    clear_notes,
+                    calendar,
+                    alerts,
+                } => {
+                    let stored = stored_event(&mut client, id).await?;
+                    let alerts = parse_alerts(&alerts)?;
+                    let mut draft = event_draft(event_parse(&id.to_string(), &stored));
+                    if let Some(title) = title {
+                        draft.title = title;
+                    }
+                    if let Some(start) = start {
+                        draft.start = start;
+                    }
+                    if let Some(end) = end {
+                        draft.end = Some(end);
+                    }
+                    if clear_end {
+                        draft.end = None;
+                    }
+                    if let Some(notes) = notes {
+                        draft.notes = Some(notes);
+                    }
+                    if clear_notes {
+                        draft.notes = None;
+                    }
+                    if let Some(calendar) = calendar {
+                        draft.calendar_id = Some(calendar.to_string());
+                    }
+                    if !alerts.is_empty() {
+                        draft.alerts = alerts;
+                    }
+                    let revision = client.put_calendar_event(id, &draft).await?;
+                    println!("stored encrypted calendar event {id} at revision {revision}");
+                }
+                CalendarCommand::Delete { id } => {
+                    stored_event(&mut client, id).await?;
+                    let revision = client.delete_calendar_event(id).await?;
+                    println!("deleted calendar event {id} at revision {revision}");
+                }
+                CalendarCommand::Rename { id, name, color } => {
+                    let calendar = stored_calendar(&mut client, id).await?;
+                    let parsed = calendar_parse(&id.to_string(), &calendar);
+                    let revision = client
+                        .put_calendar(id, &calendar_rename_draft(parsed, name, color))
+                        .await?;
+                    println!("stored encrypted calendar {id} at revision {revision}");
+                }
+                CalendarCommand::Remove { id, yes } => {
+                    stored_calendar(&mut client, id).await?;
+                    let events: Vec<Uuid> = client
+                        .list_calendar_events()
+                        .await?
+                        .into_iter()
+                        .filter(|(_, json)| {
+                            event_parse("", json).calendar_id.as_deref() == Some(&id.to_string())
+                        })
+                        .map(|(event, _)| event)
+                        .collect();
+                    if !yes {
+                        anyhow::bail!(
+                            "this deletes the calendar and its {} event(s) from every device; \
+                             run again with --yes to confirm",
+                            events.len()
+                        );
+                    }
+                    for event in &events {
+                        client.delete_calendar_event(*event).await?;
+                    }
+                    client.delete_calendar(id).await?;
+                    println!("deleted calendar {id} and {} event(s)", events.len());
+                }
+                CalendarCommand::Export { calendar, out } => {
+                    let calendars = client.list_calendars().await?;
+                    let name = match calendar {
+                        Some(wanted) => calendars
+                            .iter()
+                            .find(|(id, _)| *id == wanted)
+                            .map(|(_, name)| name.clone())
+                            .with_context(|| format!("no calendar {wanted}"))?,
+                        None => "Sealbook".to_string(),
+                    };
+                    let events: Vec<CoreIcsExportEvent> = client
+                        .list_calendar_events()
+                        .await?
+                        .into_iter()
+                        .map(|(id, json)| (id, event_parse(&id.to_string(), &json)))
+                        .filter(|(_, event)| {
+                            calendar.is_none_or(|wanted| {
+                                event.calendar_id.as_deref() == Some(&wanted.to_string())
+                            })
+                        })
+                        .map(|(id, event)| CoreIcsExportEvent {
+                            id: id.to_string(),
+                            event: event_draft(event),
+                        })
+                        .collect();
+                    let now = OffsetDateTime::now_utc().format(&Rfc3339)?;
+                    let text = ics_write(&events, &name, &now);
+                    match out {
+                        Some(path) => {
+                            write_private(&path, text.as_bytes())?;
+                            println!("wrote {} event(s) to {}", events.len(), path.display());
+                        }
+                        None => print!("{text}"),
                     }
                 }
                 CalendarCommand::Alerts {
@@ -1189,6 +1738,26 @@ async fn main() -> Result<()> {
                         .context("create notebook")?;
                     println!("created notebook {id} {name}");
                 }
+                NotebookCommand::Rename { id, name, color } => {
+                    let stored = client
+                        .list_notebook_payloads()
+                        .await?
+                        .into_iter()
+                        .find(|(candidate, _)| *candidate == id)
+                        .map(|(_, json)| json)
+                        .with_context(|| format!("no notebook {id}: see `notebook list`"))?;
+                    let parsed = sealbook_client::notebook_parse(&id.to_string(), &stored);
+                    let revision = client
+                        .put_notebook_colored(
+                            id,
+                            &name.unwrap_or(parsed.name),
+                            color.as_deref().or(parsed.color.as_deref()),
+                            Some(&stored),
+                        )
+                        .await
+                        .context("rename notebook")?;
+                    println!("stored encrypted notebook {id} at revision {revision}");
+                }
                 NotebookCommand::Delete { id } => {
                     let revision = client
                         .delete_notebook(id)
@@ -1216,14 +1785,21 @@ async fn main() -> Result<()> {
                     body,
                     file,
                     notebook,
+                    parent,
+                    pin,
                 } => {
                     let body = read_note_body(body, file)?;
                     let id = Uuid::new_v4();
+                    if let Some(parent) = parent {
+                        check_note_parent(&mut client, id, parent).await?;
+                    }
                     let note = note_write(
                         &CoreNoteDraft {
                             title,
                             body,
                             notebook_id: notebook.unwrap_or(default_notebook).to_string(),
+                            parent_id: parent.map(|parent| parent.to_string()),
+                            pinned: pin.then_some(true),
                             ..Default::default()
                         },
                         &now_rfc3339(),
@@ -1279,11 +1855,30 @@ async fn main() -> Result<()> {
                     body,
                     file,
                     notebook,
+                    parent,
+                    clear_parent,
+                    pin,
+                    unpin,
                 } => {
                     let body = read_note_body(body, file)?;
                     let existing = find_note(&mut client, id).await?;
+                    if let Some(parent) = parent {
+                        check_note_parent(&mut client, id, parent).await?;
+                    }
+                    let parent = if clear_parent {
+                        Some(None)
+                    } else {
+                        parent.map(Some)
+                    };
+                    let pinned = if pin {
+                        Some(true)
+                    } else if unpin {
+                        Some(false)
+                    } else {
+                        None
+                    };
                     let note = note_write(
-                        &note_update_draft(&existing, id, title, body, notebook),
+                        &note_update_draft(&existing, id, title, body, notebook, parent, pinned),
                         &now_rfc3339(),
                     )?;
                     let revision = client.put_note(id, &note).await.context("update note")?;
@@ -1291,7 +1886,19 @@ async fn main() -> Result<()> {
                 }
                 NotesCommand::List { notebook } => {
                     let notebooks = client.list_notebooks().await.context("notebooks")?;
-                    let notes = client.list_notes().await.context("notes")?;
+                    let notes = in_core_order(
+                        client.list_notes().await.context("notes")?,
+                        |id, json| {
+                            let note = note_parse(&id.to_string(), json);
+                            CoreOrderItem {
+                                id: id.to_string(),
+                                name: note.title,
+                                pinned: note.pinned.unwrap_or(false),
+                                stamp: note.updated_at.unwrap_or_default(),
+                            }
+                        },
+                        |items| sealbook_client::order_by_recency(items, true),
+                    );
                     let mut shown = 0;
                     for (id, json) in notes {
                         let note = note_parse(&id.to_string(), &json);
@@ -1313,6 +1920,47 @@ async fn main() -> Result<()> {
                 NotesCommand::Show { id } => {
                     let note = find_note(&mut client, id).await?;
                     print!("{}", note_parse(&id.to_string(), &note).body);
+                }
+                NotesCommand::Export {
+                    notebook,
+                    format,
+                    out,
+                } => {
+                    let notebooks: Vec<sealbook_client::CoreNotebook> = client
+                        .list_notebook_payloads()
+                        .await?
+                        .into_iter()
+                        .map(|(id, json)| sealbook_client::notebook_parse(&id.to_string(), &json))
+                        .collect();
+                    let entries: Vec<CoreNoteFileEntry> = client
+                        .list_notes()
+                        .await
+                        .context("notes")?
+                        .into_iter()
+                        .map(|(id, json)| note_parse(&id.to_string(), &json))
+                        .filter(|note| {
+                            notebook.is_none_or(|want| want.to_string() == note.notebook_id)
+                        })
+                        .map(|note| CoreNoteFileEntry {
+                            title: note.title,
+                            body: note.body,
+                            notebook_id: note.notebook_id,
+                            created_at: note.created_at,
+                            updated_at: note.updated_at,
+                            pinned: note.pinned,
+                        })
+                        .collect();
+                    let text = match format {
+                        NotesFormat::Md => notes_write_markdown(&entries, &notebooks),
+                        NotesFormat::Json => notes_write_json(&entries, &notebooks, &now_rfc3339()),
+                    };
+                    match out {
+                        Some(path) => {
+                            write_private(&path, text.as_bytes())?;
+                            println!("wrote {} note(s) to {}", entries.len(), path.display());
+                        }
+                        None => print!("{text}"),
+                    }
                 }
                 NotesCommand::Delete { id } => {
                     let revision = client.delete_note(id).await.context("delete note")?;
@@ -1418,6 +2066,27 @@ async fn find_note(client: &mut SealbookClient, id: Uuid) -> Result<String> {
         .with_context(|| format!("no note with id {id}"))
 }
 
+/// Refuses a parent that would put a note under itself or one of its own
+/// descendants, or that does not exist, by the rule tasks already use.
+async fn check_note_parent(client: &mut SealbookClient, id: Uuid, parent: Uuid) -> Result<()> {
+    let items: Vec<(String, Option<String>)> = client
+        .list_notes()
+        .await
+        .context("notes")?
+        .into_iter()
+        .map(|(note, json)| {
+            let note = note_parse(&note.to_string(), &json);
+            (note.id, note.parent_id)
+        })
+        .collect();
+    if !sealbook_client::may_reparent(&items, &id.to_string(), Some(&parent.to_string())) {
+        anyhow::bail!(
+            "note {parent} cannot be the parent of {id}: it does not exist, or sits under it"
+        );
+    }
+    Ok(())
+}
+
 async fn find_bookmark(client: &mut SealbookClient, id: Uuid) -> Result<String> {
     client
         .list_bookmarks()
@@ -1427,6 +2096,67 @@ async fn find_bookmark(client: &mut SealbookClient, id: Uuid) -> Result<String> 
         .find(|(candidate, _)| *candidate == id)
         .map(|(_, json)| json)
         .with_context(|| format!("no bookmark with id {id}"))
+}
+
+/// A collection as it will be written: the stored one with only the flags
+/// given changed. `parent` is `Some(None)` to move to the top level.
+fn collection_change(
+    stored: Option<&str>,
+    id: Uuid,
+    name: Option<String>,
+    parent: Option<Option<Uuid>>,
+    color: Option<String>,
+) -> Result<sealbook_client::CoreBookmarkCollectionDraft> {
+    let mut draft = stored
+        .map(|raw| sealbook_client::bookmark_collection_parse(&id.to_string(), raw).draft())
+        .unwrap_or_default();
+    if let Some(name) = name {
+        draft.name = name;
+    }
+    if let Some(parent) = parent {
+        draft.parent_id = parent.map(|parent| parent.to_string());
+    }
+    if let Some(color) = color {
+        draft.color = Some(color);
+    }
+    if id == DEFAULT_BOOKMARK_COLLECTION_ID && draft.parent_id.is_some() {
+        // The fallback every bookmark without a collection resolves to; web
+        // keeps it at the top so it cannot be buried.
+        anyhow::bail!("the default collection stays at the top level");
+    }
+    if draft.parent_id.is_some() && draft.color.is_some() {
+        anyhow::bail!("only a top-level collection carries a colour: drop --color or --parent");
+    }
+    Ok(draft)
+}
+
+/// Refuses a parent that does not exist or would put a collection under itself
+/// or one of its own descendants.
+async fn check_collection_parent(
+    client: &mut SealbookClient,
+    id: Uuid,
+    draft: &sealbook_client::CoreBookmarkCollectionDraft,
+) -> Result<()> {
+    let Some(parent) = &draft.parent_id else {
+        return Ok(());
+    };
+    let items: Vec<(String, Option<String>)> = client
+        .list_bookmark_collection_payloads()
+        .await
+        .context("collections")?
+        .into_iter()
+        .map(|(collection, json)| {
+            let collection =
+                sealbook_client::bookmark_collection_parse(&collection.to_string(), &json);
+            (collection.id, collection.parent_id)
+        })
+        .collect();
+    if !sealbook_client::may_reparent(&items, &id.to_string(), Some(parent)) {
+        anyhow::bail!(
+            "collection {parent} cannot be the parent of {id}: it does not exist, or sits under it"
+        );
+    }
+    Ok(())
 }
 
 async fn find_bookmark_collection(client: &mut SealbookClient, id: Uuid) -> Result<String> {
@@ -1456,11 +2186,20 @@ async fn find_bookmark_collection(client: &mut SealbookClient, id: Uuid) -> Resu
 /// `notes`, `tags` and anything a newer client added travel through the edit.
 /// A title left out keeps the stored one, and on a new bookmark is left empty:
 /// the address is what a reader lists it by, and is not written as a title.
+/// What a bookmark write may change beyond its address and place. `None` keeps
+/// the stored value; an empty note or tag list clears it.
+#[derive(Default)]
+struct BookmarkExtras {
+    notes: Option<String>,
+    tags: Option<Vec<String>>,
+}
+
 fn bookmark_json(
     url: &str,
     title: Option<&str>,
     collection_id: Uuid,
     previous: Option<&str>,
+    extras: &BookmarkExtras,
 ) -> Result<String> {
     let now = OffsetDateTime::now_utc().format(&Rfc3339)?;
     let mut draft = previous
@@ -1471,6 +2210,12 @@ fn bookmark_json(
         draft.title = title.to_string();
     }
     draft.collection_id = collection_id.to_string();
+    if let Some(notes) = &extras.notes {
+        draft.notes = notes.clone();
+    }
+    if let Some(tags) = &extras.tags {
+        draft.tags = sealbook_client::normalize_tags(tags);
+    }
     Ok(sealbook_client::bookmark_write(&draft, &now)?)
 }
 
@@ -1505,6 +2250,8 @@ fn note_update_draft(
     title: String,
     body: String,
     notebook: Option<Uuid>,
+    parent: Option<Option<Uuid>>,
+    pinned: Option<bool>,
 ) -> CoreNoteDraft {
     let note = note_parse(&id.to_string(), stored);
     CoreNoteDraft {
@@ -1513,19 +2260,22 @@ fn note_update_draft(
         notebook_id: notebook
             .map(|notebook| notebook.to_string())
             .unwrap_or(note.notebook_id),
-        parent_id: note.parent_id,
+        // `Some(None)` is "move to the top level"; `None` keeps the stored parent.
+        parent_id: match parent {
+            Some(parent) => parent.map(|parent| parent.to_string()),
+            None => note.parent_id,
+        },
         attachments: note.attachments,
         created_at: note.created_at,
-        pinned: None,
+        pinned,
         raw: Some(stored.to_string()),
     }
 }
 
-/// Every field the event was read with, so replacing its reminders keeps the rest.
-fn event_alerts_draft(
-    event: sealbook_client::CoreCalendarEvent,
-    alerts: Vec<CoreEventAlert>,
-) -> CoreCalendarEventDraft {
+/// Every field the event was read with, so a change to one keeps the rest, and
+/// the stored payload rides along in `raw` so keys this build does not know
+/// survive the write.
+fn event_draft(event: sealbook_client::CoreCalendarEvent) -> CoreCalendarEventDraft {
     CoreCalendarEventDraft {
         title: event.title,
         start: event.start,
@@ -1537,9 +2287,103 @@ fn event_alerts_draft(
         calendar_id: event.calendar_id,
         recurrence: event.recurrence,
         unreadable_recurrence: event.unreadable_recurrence,
-        alerts,
+        alerts: event.alerts,
         unreadable_alerts: event.unreadable_alerts,
         raw: Some(event.raw),
+    }
+}
+
+/// Replaces an event's reminders and nothing else.
+fn event_alerts_draft(
+    event: sealbook_client::CoreCalendarEvent,
+    alerts: Vec<CoreEventAlert>,
+) -> CoreCalendarEventDraft {
+    CoreCalendarEventDraft {
+        alerts,
+        ..event_draft(event)
+    }
+}
+
+/// A calendar with a new name and/or colour, favourite and archived flags and
+/// unknown keys kept.
+fn calendar_rename_draft(
+    calendar: sealbook_client::CoreCalendar,
+    name: Option<String>,
+    color: Option<String>,
+) -> CoreCalendarDraft {
+    CoreCalendarDraft {
+        name: name.unwrap_or(calendar.name),
+        color: color.unwrap_or(calendar.color),
+        favorite: calendar.favorite,
+        archived: calendar.archived,
+        raw: Some(calendar.raw),
+    }
+}
+
+async fn stored_event(client: &mut SealbookClient, id: Uuid) -> Result<String> {
+    client
+        .list_calendar_events()
+        .await?
+        .into_iter()
+        .find(|(candidate, _)| *candidate == id)
+        .map(|(_, json)| json)
+        .with_context(|| format!("no event {id}"))
+}
+
+async fn stored_calendar(client: &mut SealbookClient, id: Uuid) -> Result<String> {
+    // list_calendars returns names only; the draft needs the stored payload.
+    client
+        .list_calendar_payloads()
+        .await?
+        .into_iter()
+        .find(|(candidate, _)| *candidate == id)
+        .map(|(_, json)| json)
+        .with_context(|| format!("no calendar {id}: see `calendar list-calendars`"))
+}
+
+fn calendar_window(from: Option<&str>, to: Option<&str>) -> Result<Option<(String, String)>> {
+    match (from, to) {
+        (None, None) => Ok(None),
+        (Some(from), Some(to)) => {
+            for day in [from, to] {
+                if !sealbook_client::is_calendar_day(day) {
+                    anyhow::bail!("{day} is not a date: use YYYY-MM-DD");
+                }
+            }
+            if from > to {
+                anyhow::bail!("--from is after --to");
+            }
+            Ok(Some((from.to_string(), to.to_string())))
+        }
+        _ => anyhow::bail!("give both --from and --to, or neither"),
+    }
+}
+
+/// The start of each occurrence to list. Without a window an event is its one
+/// stored start. With one, a repeating event contributes each day of its series
+/// inside it, keeping the stored time of day, and a single event only if it
+/// starts inside.
+fn occurrence_starts(
+    event: &sealbook_client::CoreCalendarEvent,
+    window: Option<&(String, String)>,
+) -> Vec<String> {
+    let Some((from, to)) = window else {
+        return vec![event.start.clone()];
+    };
+    let time = event.start.get(10..).unwrap_or("");
+    match &event.recurrence {
+        Some(rule) => recurrence_days(&event.start, rule, from, to)
+            .into_iter()
+            .map(|day| format!("{day}{time}"))
+            .collect(),
+        None => {
+            let day = event.start.get(..10).unwrap_or("");
+            if day >= from.as_str() && day <= to.as_str() {
+                vec![event.start.clone()]
+            } else {
+                Vec::new()
+            }
+        }
     }
 }
 
@@ -1870,6 +2714,55 @@ fn parse_account_export(document: &str) -> Result<AccountImport> {
     })
 }
 
+/// The same card in another address book, every other field kept.
+/// Rows in the order core gives every client: the same vault lists the same way
+/// everywhere. `describe` says what core needs to place a row.
+fn in_core_order(
+    rows: Vec<(Uuid, String)>,
+    describe: impl Fn(&Uuid, &str) -> CoreOrderItem,
+    order: impl Fn(&[CoreOrderItem]) -> Vec<String>,
+) -> Vec<(Uuid, String)> {
+    let items: Vec<CoreOrderItem> = rows.iter().map(|(id, json)| describe(id, json)).collect();
+    let mut rows = rows;
+    let ranked = order(&items);
+    rows.sort_by_key(|(id, _)| {
+        ranked
+            .iter()
+            .position(|ranked| *ranked == id.to_string())
+            .unwrap_or(usize::MAX)
+    });
+    rows
+}
+
+fn contact_moved(raw: &str, book_id: Uuid) -> Result<String> {
+    let mut draft = contact_parse(&Uuid::nil().to_string(), raw).draft();
+    draft.address_book_id = book_id.to_string();
+    Ok(contact_write(&draft, &now_rfc3339())?)
+}
+
+/// Contact ids matching `query`, in the order the shared search ranks them.
+fn contact_search(
+    contacts: &[(Uuid, String)],
+    books: &[(Uuid, String)],
+    query: &str,
+) -> Vec<String> {
+    let sources: Vec<sealbook_client::CoreContactSource> = contacts
+        .iter()
+        .map(|(id, raw)| sealbook_client::CoreContactSource {
+            id: id.to_string(),
+            raw: raw.clone(),
+        })
+        .collect();
+    let names: Vec<sealbook_client::CoreBookName> = books
+        .iter()
+        .map(|(id, name)| sealbook_client::CoreBookName {
+            id: id.to_string(),
+            name: name.clone(),
+        })
+        .collect();
+    sealbook_client::ContactIndex::new(&sources, &names).search(query)
+}
+
 fn contact_book_id(json: &str) -> Uuid {
     Uuid::parse_str(&contact_parse("", json).address_book_id).unwrap_or(DEFAULT_ADDRESS_BOOK_ID)
 }
@@ -1960,8 +2853,8 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
 ///
 /// A typo in a recovery would otherwise lock the account to a password nobody
 /// knows, with the phrase already spent.
-fn read_new_password() -> Result<String> {
-    if let Ok(value) = std::env::var("SEALBOOK_PASSWORD") {
+fn read_new_password(environment: &str) -> Result<String> {
+    if let Ok(value) = std::env::var(environment) {
         return Ok(value);
     }
     let password = rpassword::prompt_password("New password: ")?;
@@ -1973,6 +2866,32 @@ fn read_new_password() -> Result<String> {
         anyhow::bail!("the password cannot be empty");
     }
     Ok(password)
+}
+
+/// The same check web makes: the stored name, typed back exactly. Surrounding
+/// whitespace is the newline the terminal adds, not part of what was typed.
+fn delete_confirmed(typed: &str, username: &str) -> bool {
+    !username.is_empty() && typed.trim() == username
+}
+
+/// Removes the state file and its keyring key once the account is gone.
+///
+/// Both belong to an account that no longer exists, and the file holds that
+/// device's signing seeds. Best effort: the account is already deleted, so a
+/// failure here is reported and not raised.
+fn forget_state(path: &Path) {
+    if let Ok(len) = std::fs::metadata(path).map(|meta| meta.len()) {
+        if let Ok(mut file) = OpenOptions::new().write(true).open(path) {
+            let _ = overwrite(&mut file, len);
+        }
+    }
+    if let Err(err) = std::fs::remove_file(path) {
+        eprintln!("warning: could not remove {}: {err}", path.display());
+    }
+    let account = hex::encode(Sha256::digest(path.to_string_lossy().as_bytes()));
+    if let Ok(entry) = Entry::new(STATE_KEY_SERVICE, &account) {
+        let _ = entry.delete_credential();
+    }
 }
 
 fn read_secret(prompt: &str, environment: &str) -> Result<String> {
@@ -2090,6 +3009,17 @@ fn validate_state_permissions(path: &Path) -> Result<()> {
 mod tests {
 
     #[test]
+    fn account_delete_needs_the_exact_name_typed_back() {
+        assert!(delete_confirmed("alice\n", "alice"));
+        assert!(delete_confirmed("  alice  \r\n", "alice"));
+        assert!(!delete_confirmed("Alice\n", "alice"));
+        assert!(!delete_confirmed("alic\n", "alice"));
+        assert!(!delete_confirmed("\n", "alice"));
+        assert!(!delete_confirmed("y\n", "alice"));
+        assert!(!delete_confirmed("\n", ""));
+    }
+
+    #[test]
     fn a_reminder_reads_in_every_spelling_the_help_names() {
         assert_eq!(parse_alert("15m"), Some(15));
         assert_eq!(parse_alert("15"), Some(15));
@@ -2101,6 +3031,63 @@ mod tests {
         assert_eq!(parse_alert("90m@09:00"), None);
         assert_eq!(parse_alert("5w"), None);
         assert_eq!(parse_alert("soon"), None);
+    }
+
+    #[test]
+    fn changing_an_event_keeps_the_keys_this_build_does_not_know() {
+        let stored = r#"{"@type":"CalendarEvent","version":"1.0","title":"Standup","start":"2026-10-01T09:00:00Z","location":"Room 3","x":{"y":1}}"#;
+        let mut draft = event_draft(event_parse("e1", stored));
+        draft.title = "Retro".to_string();
+        draft.end = None;
+        let written: serde_json::Value =
+            serde_json::from_str(&sealbook_client::event_write(&draft).unwrap()).unwrap();
+        assert_eq!(written["title"], "Retro");
+        assert_eq!(written["location"], "Room 3");
+        assert_eq!(written["x"]["y"], 1);
+    }
+
+    #[test]
+    fn renaming_a_calendar_keeps_its_flags_and_unknown_keys() {
+        let stored = r##"{"@type":"Calendar","version":"1.0","name":"Work","color":"#112233","favorite":true,"archived":true,"x":7}"##;
+        let draft = calendar_rename_draft(
+            sealbook_client::calendar_parse("c1", stored),
+            Some("Job".to_string()),
+            None,
+        );
+        let written: serde_json::Value =
+            serde_json::from_str(&sealbook_client::calendar_write(&draft).unwrap()).unwrap();
+        assert_eq!(written["name"], "Job");
+        assert_eq!(written["color"], "#112233");
+        assert_eq!(written["favorite"], true);
+        assert_eq!(written["archived"], true);
+        assert_eq!(written["x"], 7);
+    }
+
+    #[test]
+    fn a_window_expands_repeats_and_filters_single_events() {
+        let repeating = event_parse(
+            "e1",
+            r#"{"@type":"CalendarEvent","version":"1.0","title":"Standup","start":"2026-10-01T09:00:00Z","recurrence":{"frequency":"daily"}}"#,
+        );
+        let single = event_parse(
+            "e2",
+            r#"{"@type":"CalendarEvent","version":"1.0","title":"Once","start":"2026-10-02T09:00:00Z"}"#,
+        );
+        let window = calendar_window(Some("2026-10-02"), Some("2026-10-04")).unwrap();
+        assert_eq!(
+            occurrence_starts(&repeating, window.as_ref()),
+            vec![
+                "2026-10-02T09:00:00Z",
+                "2026-10-03T09:00:00Z",
+                "2026-10-04T09:00:00Z"
+            ]
+        );
+        assert_eq!(occurrence_starts(&single, window.as_ref()).len(), 1);
+        let later = calendar_window(Some("2026-11-01"), Some("2026-11-02")).unwrap();
+        assert!(occurrence_starts(&single, later.as_ref()).is_empty());
+        assert_eq!(occurrence_starts(&repeating, None).len(), 1);
+        assert!(calendar_window(Some("2026-10-02"), None).is_err());
+        assert!(calendar_window(Some("2026-10-05"), Some("2026-10-02")).is_err());
     }
 
     #[test]
@@ -2197,6 +3184,8 @@ mod tests {
             "new".into(),
             "new body".into(),
             None,
+            None,
+            None,
         );
         let json = note_write(&draft, "2026-10-28T12:00:00Z").expect("writes");
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -2230,14 +3219,223 @@ mod tests {
             "t".into(),
             "b".into(),
             Some(moved),
+            None,
+            None,
         );
         assert_eq!(draft.notebook_id, moved.to_string());
     }
 
     #[test]
+    fn an_update_sets_clears_or_keeps_the_parent_and_pin() {
+        let stored = serde_json::json!({
+            "@type": "Note",
+            "parentId": Uuid::from_u128(9).to_string(),
+            "pinned": true,
+        })
+        .to_string();
+        let id = Uuid::from_u128(7);
+        let keep = note_update_draft(&stored, id, "t".into(), "b".into(), None, None, None);
+        assert_eq!(keep.parent_id, Some(Uuid::from_u128(9).to_string()));
+        let top = note_update_draft(&stored, id, "t".into(), "b".into(), None, Some(None), None);
+        assert_eq!(top.parent_id, None);
+        let moved = note_update_draft(
+            &stored,
+            id,
+            "t".into(),
+            "b".into(),
+            None,
+            Some(Some(Uuid::from_u128(3))),
+            Some(false),
+        );
+        assert_eq!(moved.parent_id, Some(Uuid::from_u128(3).to_string()));
+        let json = note_write(&moved, "2026-10-28T12:00:00Z").unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["pinned"], false);
+    }
+
+    #[test]
+    fn moving_a_contact_changes_only_its_book() {
+        let stored = jscontact(
+            "Ada Lovelace",
+            Some("ada@example.com"),
+            None,
+            Uuid::from_u128(2),
+            None,
+        )
+        .unwrap();
+        let mut value: serde_json::Value = serde_json::from_str(&stored).unwrap();
+        value["x-newer"] = serde_json::json!({"keep": true});
+        let moved = contact_moved(&value.to_string(), Uuid::from_u128(5)).unwrap();
+        assert_eq!(contact_book_id(&moved), Uuid::from_u128(5));
+        let after: serde_json::Value = serde_json::from_str(&moved).unwrap();
+        assert_eq!(after["x-newer"]["keep"], true);
+        assert_eq!(contact_parse("", &moved).name, "Ada Lovelace");
+    }
+
+    #[test]
+    fn contact_search_finds_by_email_and_name() {
+        let book = Uuid::from_u128(2);
+        let ada = jscontact("Ada Lovelace", Some("ada@example.com"), None, book, None).unwrap();
+        let bob = jscontact("Bob Stone", Some("bob@example.org"), None, book, None).unwrap();
+        let (a, b) = (Uuid::from_u128(10), Uuid::from_u128(11));
+        let contacts = vec![(a, ada), (b, bob)];
+        let books = vec![(book, "Work".to_string())];
+        assert_eq!(
+            contact_search(&contacts, &books, "lovelace"),
+            vec![a.to_string()]
+        );
+        assert_eq!(
+            contact_search(&contacts, &books, "example.org"),
+            vec![b.to_string()]
+        );
+        assert!(contact_search(&contacts, &books, "zzzz").is_empty());
+    }
+
+    #[test]
+    fn a_bookmark_write_sets_normalized_tags_and_note_or_keeps_them() {
+        let stored = serde_json::json!({
+            "@type": "Bookmark",
+            "url": "https://example.com/a",
+            "notes": "old note",
+            "tags": ["rust"],
+        })
+        .to_string();
+        let kept = bookmark_json(
+            "https://example.com/a",
+            None,
+            Uuid::from_u128(5),
+            Some(&stored),
+            &BookmarkExtras::default(),
+        )
+        .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&kept).unwrap();
+        assert_eq!(value["notes"], "old note");
+        assert_eq!(value["tags"], serde_json::json!(["rust"]));
+        let changed = bookmark_json(
+            "https://example.com/a",
+            None,
+            Uuid::from_u128(5),
+            Some(&stored),
+            &BookmarkExtras {
+                notes: Some("new".into()),
+                tags: Some(vec![" Go ".into(), "go".into(), "".into(), "Web".into()]),
+            },
+        )
+        .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&changed).unwrap();
+        assert_eq!(value["notes"], "new");
+        assert_eq!(value["tags"], serde_json::json!(["Go", "Web"]));
+        let cleared = bookmark_json(
+            "https://example.com/a",
+            None,
+            Uuid::from_u128(5),
+            Some(&stored),
+            &BookmarkExtras {
+                notes: Some(String::new()),
+                tags: Some(Vec::new()),
+            },
+        )
+        .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&cleared).unwrap();
+        assert!(value.get("notes").is_none());
+        assert!(value.get("tags").is_none());
+    }
+
+    #[test]
+    fn a_collection_change_keeps_what_it_was_not_asked_to_touch() {
+        let id = Uuid::from_u128(8);
+        let stored = serde_json::json!({
+            "@type": "BookmarkCollection",
+            "name": "Reading",
+            "parentId": Uuid::from_u128(3).to_string(),
+            "hideFromAll": true,
+            "x": 1,
+        })
+        .to_string();
+        let renamed =
+            collection_change(Some(&stored), id, Some("Read".into()), None, None).unwrap();
+        assert_eq!(renamed.parent_id, Some(Uuid::from_u128(3).to_string()));
+        assert!(renamed.hide_from_all);
+        let json = sealbook_client::bookmark_collection_write(&renamed).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["name"], "Read");
+        assert_eq!(value["x"], 1);
+        let top = collection_change(Some(&stored), id, None, Some(None), None).unwrap();
+        assert_eq!(top.parent_id, None);
+        // A colour belongs to the top level only.
+        assert!(collection_change(Some(&stored), id, None, None, Some("#fff".into())).is_err());
+        assert!(collection_change(None, id, Some("A".into()), None, Some("#fff".into())).is_ok());
+        // The default collection is never buried.
+        assert!(collection_change(
+            None,
+            DEFAULT_BOOKMARK_COLLECTION_ID,
+            Some("A".into()),
+            Some(Some(Uuid::from_u128(3))),
+            None
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn notes_list_pinned_first_then_most_recently_edited() {
+        let note = |title: &str, pinned: bool, updated: &str| {
+            serde_json::json!({"@type": "Note", "title": title, "pinned": pinned, "updatedAt": updated})
+                .to_string()
+        };
+        let rows = vec![
+            (
+                Uuid::from_u128(1),
+                note("old", false, "2026-01-01T00:00:00Z"),
+            ),
+            (
+                Uuid::from_u128(2),
+                note("new", false, "2026-06-01T00:00:00Z"),
+            ),
+            (
+                Uuid::from_u128(3),
+                note("pin", true, "2025-01-01T00:00:00Z"),
+            ),
+        ];
+        let ordered = in_core_order(
+            rows,
+            |id, json| {
+                let note = note_parse(&id.to_string(), json);
+                CoreOrderItem {
+                    id: id.to_string(),
+                    name: note.title,
+                    pinned: note.pinned.unwrap_or(false),
+                    stamp: note.updated_at.unwrap_or_default(),
+                }
+            },
+            |items| sealbook_client::order_by_recency(items, true),
+        );
+        let titles: Vec<_> = ordered.iter().map(|(id, _)| id.as_u128()).collect();
+        assert_eq!(titles, vec![3, 2, 1]);
+    }
+
+    #[test]
+    fn a_note_may_not_become_its_own_ancestor() {
+        let items = vec![
+            ("a".to_string(), None),
+            ("b".to_string(), Some("a".to_string())),
+        ];
+        assert!(sealbook_client::may_reparent(&items, "b", None));
+        assert!(!sealbook_client::may_reparent(&items, "a", Some("b")));
+        assert!(!sealbook_client::may_reparent(&items, "a", Some("a")));
+        assert!(!sealbook_client::may_reparent(&items, "a", Some("gone")));
+    }
+
+    #[test]
     fn a_bookmark_carries_its_url_title_and_collection() {
         let collection = Uuid::from_u128(5);
-        let json = bookmark_json("example.com/a", Some("Example"), collection, None).unwrap();
+        let json = bookmark_json(
+            "example.com/a",
+            Some("Example"),
+            collection,
+            None,
+            &BookmarkExtras::default(),
+        )
+        .unwrap();
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(value["@type"], "Bookmark");
         assert_eq!(value["version"], PAYLOAD_SCHEMA_VERSION);
@@ -2256,8 +3454,14 @@ mod tests {
     #[test]
     fn a_bookmark_without_a_title_is_not_titled_with_its_url() {
         for title in [None, Some(""), Some("   ")] {
-            let json =
-                bookmark_json("https://example.com/b", title, Uuid::from_u128(5), None).unwrap();
+            let json = bookmark_json(
+                "https://example.com/b",
+                title,
+                Uuid::from_u128(5),
+                None,
+                &BookmarkExtras::default(),
+            )
+            .unwrap();
             let value: serde_json::Value = serde_json::from_str(&json).unwrap();
             assert_eq!(value["title"], "");
         }
@@ -2277,6 +3481,7 @@ mod tests {
             None,
             Uuid::from_u128(5),
             Some(&stored),
+            &BookmarkExtras::default(),
         )
         .unwrap();
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -2306,6 +3511,7 @@ mod tests {
             Some("new"),
             Uuid::from_u128(5),
             Some(&stored),
+            &BookmarkExtras::default(),
         )
         .unwrap();
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();

@@ -70,6 +70,19 @@ pub(crate) fn can_reparent(items: &[TreeRef], id: &str, parent_id: Option<&str>)
         && !subtree(items, id).iter().any(|entry| entry == parent)
 }
 
+/// [`can_reparent`] for hosts that hold items as `(id, parent id)` pairs, so
+/// notes and bookmark collections follow the same rule tasks do.
+pub fn may_reparent(items: &[(String, Option<String>)], id: &str, parent_id: Option<&str>) -> bool {
+    let refs: Vec<TreeRef> = items
+        .iter()
+        .map(|(id, parent)| TreeRef {
+            id,
+            parent_id: parent.as_deref(),
+        })
+        .collect();
+    can_reparent(&refs, id, parent_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

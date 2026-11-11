@@ -154,6 +154,22 @@ impl SealbookClient {
         Ok(DEFAULT_ADDRESS_BOOK_ID)
     }
 
+    /// Every address book's stored payload, for a change that merges onto it.
+    pub async fn list_address_book_payloads(&mut self) -> Result<Vec<(Uuid, String)>, ClientError> {
+        let mut out = Vec::new();
+        for obj in self.listed_objects().await? {
+            if obj.content_type == ADDRESS_BOOK_CONTENT_TYPE {
+                out.push((obj.id, obj.plaintext));
+            }
+        }
+        Ok(out)
+    }
+
+    pub async fn delete_address_book(&mut self, object_id: Uuid) -> Result<u64, ClientError> {
+        self.write_object(object_id, Vec::new(), Vec::new(), 0, true)
+            .await
+    }
+
     pub async fn list_address_books(&mut self) -> Result<Vec<(Uuid, String)>, ClientError> {
         let mut out = Vec::new();
         for obj in self.listed_objects().await? {
@@ -244,6 +260,17 @@ impl SealbookClient {
         Ok(out)
     }
 
+    /// Every calendar's stored payload, for a change that merges onto it.
+    pub async fn list_calendar_payloads(&mut self) -> Result<Vec<(Uuid, String)>, ClientError> {
+        let mut out = Vec::new();
+        for obj in self.listed_objects().await? {
+            if obj.content_type == CALENDAR_CONTENT_TYPE {
+                out.push((obj.id, obj.plaintext));
+            }
+        }
+        Ok(out)
+    }
+
     pub async fn list_calendar_events(&mut self) -> Result<Vec<(Uuid, String)>, ClientError> {
         let mut out = Vec::new();
         for obj in self.listed_objects().await? {
@@ -292,7 +319,19 @@ impl SealbookClient {
         previous: Option<&str>,
     ) -> Result<u64, ClientError> {
         let color = previous.and_then(|raw| sealbook_core::notebook_parse("", raw).color);
-        let plaintext = sealbook_core::notebook_write(name, color.as_deref(), previous)?;
+        self.put_notebook_colored(object_id, name, color.as_deref(), previous)
+            .await
+    }
+
+    /// As [`Self::put_notebook`], with the colour given rather than carried over.
+    pub async fn put_notebook_colored(
+        &mut self,
+        object_id: Uuid,
+        name: &str,
+        color: Option<&str>,
+        previous: Option<&str>,
+    ) -> Result<u64, ClientError> {
+        let plaintext = sealbook_core::notebook_write(name, color, previous)?;
         self.put_sealed(object_id, plaintext.as_bytes(), NOTEBOOK_CONTENT_TYPE)
             .await
     }
@@ -324,6 +363,17 @@ impl SealbookClient {
             ));
         }
         out = ordered_containers(&DEFAULT_NOTEBOOK_ID.to_string(), out);
+        Ok(out)
+    }
+
+    /// Every notebook's stored payload, for a change that merges onto it.
+    pub async fn list_notebook_payloads(&mut self) -> Result<Vec<(Uuid, String)>, ClientError> {
+        let mut out = Vec::new();
+        for obj in self.listed_objects().await? {
+            if obj.content_type == NOTEBOOK_CONTENT_TYPE {
+                out.push((obj.id, obj.plaintext));
+            }
+        }
         Ok(out)
     }
 
@@ -394,6 +444,35 @@ impl SealbookClient {
             BOOKMARK_COLLECTION_CONTENT_TYPE,
         )
         .await
+    }
+
+    /// Writes a collection from a whole draft, for a caller that sets its place
+    /// in the tree or its colour as well as its name.
+    pub async fn put_bookmark_collection_draft(
+        &mut self,
+        object_id: Uuid,
+        draft: &sealbook_core::CoreBookmarkCollectionDraft,
+    ) -> Result<u64, ClientError> {
+        let plaintext = sealbook_core::bookmark_collection_write(draft)?;
+        self.put_sealed(
+            object_id,
+            plaintext.as_bytes(),
+            BOOKMARK_COLLECTION_CONTENT_TYPE,
+        )
+        .await
+    }
+
+    /// Every collection's stored payload.
+    pub async fn list_bookmark_collection_payloads(
+        &mut self,
+    ) -> Result<Vec<(Uuid, String)>, ClientError> {
+        let mut out = Vec::new();
+        for obj in self.listed_objects().await? {
+            if obj.content_type == BOOKMARK_COLLECTION_CONTENT_TYPE {
+                out.push((obj.id, obj.plaintext));
+            }
+        }
+        Ok(out)
     }
 
     pub async fn delete_bookmark_collection(
