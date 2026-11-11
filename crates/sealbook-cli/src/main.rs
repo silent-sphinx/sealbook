@@ -52,14 +52,36 @@ struct EncryptedState {
 #[derive(Parser)]
 #[command(
     name = "sealbook",
-    about = "E2EE vault client: contacts, calendars, notes and bookmarks"
+    version,
+    about = "E2EE vault client: contacts, calendars, notes, tasks and bookmarks",
+    long_about = "E2EE vault client: contacts, calendars, notes, tasks and bookmarks.\n\n\
+Everything is encrypted on this machine before it reaches the server, which \
+cannot read your data.",
+    after_help = "\
+Getting started:
+  sealbook register --username alice      Create an account (shows recovery words once)
+  sealbook login                          Sign in again on this device
+  sealbook pair-join --username alice     Add this device to an existing account
+  sealbook notes add --body \"hello\"       Store a note
+  sealbook search hello                   Search everything at once
+
+Environment:
+  SEALBOOK_PASSWORD       Account password, instead of the prompt (for scripts)
+  SEALBOOK_NEW_PASSWORD   New password for `account password`
+  SEALBOOK_PHRASE         Recovery words for `recover`
+
+Run `sealbook <command> --help` for the details of any command.",
+    arg_required_else_help = true
 )]
 struct Cli {
-    #[arg(long, default_value = "https://127.0.0.1:8443")]
+    /// Address of the Sealbook server.
+    #[arg(long, default_value = "https://127.0.0.1:8443", value_name = "URL")]
     server: String,
-    #[arg(long, default_value = ".sealbook-state.json")]
+    /// File holding this device's sign-in state (encrypted).
+    #[arg(long, default_value = ".sealbook-state.json", value_name = "FILE")]
     state: PathBuf,
-    #[arg(long, default_value = "cert.pem")]
+    /// Certificate (PEM) the server's TLS certificate must match.
+    #[arg(long, default_value = "cert.pem", value_name = "FILE")]
     tls_ca: PathBuf,
     #[command(subcommand)]
     command: Command,
@@ -67,16 +89,31 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Create an account and sign in on this device.
+    ///
+    /// Prints 24 recovery words once. Write them down: they are the only way
+    /// back in if the password is lost.
     Register {
+        /// Name for the new account.
         #[arg(long)]
         username: String,
     },
+    /// Sign in again on this device, with the account password.
     Login {},
+    /// Add this device to an existing account (run here first).
+    ///
+    /// Prints a code to give to `sealbook pair` on a device already signed in,
+    /// then waits for it to be approved.
     PairJoin {
+        /// The account to join.
         #[arg(long)]
         username: String,
     },
+    /// Approve a new device that ran `pair-join` (run on a signed-in device).
+    ///
+    /// Asks for the confirmation code the joining device shows.
     Pair {
+        /// The code `pair-join` printed on the joining device.
         #[arg(long)]
         code: String,
     },
@@ -85,6 +122,7 @@ enum Command {
     /// The old password is not needed and stops working: the phrase exists for
     /// the case where the password is what was lost.
     Recover {
+        /// The account to recover.
         #[arg(long)]
         username: String,
     },
@@ -116,30 +154,37 @@ enum Command {
         #[arg(long)]
         overwrite: bool,
     },
+    /// Contacts: add, edit, search, import and export.
     Contacts {
         #[command(subcommand)]
         command: ContactsCommand,
     },
+    /// Address books that group contacts.
     Book {
         #[command(subcommand)]
         command: BookCommand,
     },
+    /// Calendars and their events.
     Calendar {
         #[command(subcommand)]
         command: CalendarCommand,
     },
+    /// Notes: add, edit, import and export.
     Notes {
         #[command(subcommand)]
         command: NotesCommand,
     },
+    /// Notebooks that group notes.
     Notebook {
         #[command(subcommand)]
         command: NotebookCommand,
     },
+    /// Saved URLs: add, edit, import and export.
     Bookmarks {
         #[command(subcommand)]
         command: BookmarksCommand,
     },
+    /// Bookmark collections, which can be nested.
     Collection {
         #[command(subcommand)]
         command: CollectionCommand,
@@ -177,10 +222,12 @@ enum Command {
         #[command(subcommand)]
         command: settings::SettingsCommand,
     },
+    /// Devices enrolled on this account.
     Devices {
         #[command(subcommand)]
         command: DevicesCommand,
     },
+    /// Account password, name and deletion.
     Account {
         #[command(subcommand)]
         command: AccountCommand,
@@ -235,12 +282,14 @@ enum DevicesCommand {
 
 #[derive(Subcommand)]
 enum BookCommand {
+    /// List address books.
     List,
+    /// Create an address book.
     Create {
         #[arg(long)]
         name: String,
     },
-    /// Rename an address book or change its colour, keeping the rest of it.
+    /// Rename an address book or change its colour.
     Rename {
         #[arg(long)]
         id: Uuid,
@@ -249,8 +298,10 @@ enum BookCommand {
         #[arg(long)]
         color: Option<String>,
     },
-    /// Delete an address book. Its contacts are moved to another book or
-    /// deleted with it, as web asks. The default book cannot be deleted.
+    /// Delete an address book.
+    ///
+    /// Its contacts are moved to another book or deleted with it, as web asks.
+    /// The default book cannot be deleted.
     Delete {
         #[arg(long)]
         id: Uuid,
@@ -314,6 +365,7 @@ enum ProfileCommand {
 
 #[derive(Subcommand)]
 enum ContactsCommand {
+    /// Add a contact.
     Put {
         #[arg(long)]
         name: String,
@@ -329,13 +381,16 @@ enum ContactsCommand {
         #[command(flatten)]
         more: ContactMore,
     },
-    /// Find contacts with the search every client uses: names, numbers,
-    /// emails and the rest of the card, best match first.
+    /// Find contacts, best match first.
+    ///
+    /// Uses the search every client uses: names, numbers, emails and the rest
+    /// of the card.
     Search {
         query: String,
         #[arg(long)]
         book: Option<String>,
     },
+    /// Replace a contact, keeping fields whose flags are left out.
     Update {
         #[arg(long)]
         id: Uuid,
@@ -365,15 +420,19 @@ enum ContactsCommand {
         #[command(subcommand)]
         command: ProfileCommand,
     },
+    /// Delete a contact.
     Delete {
         #[arg(long)]
         id: Uuid,
     },
+    /// List contacts, optionally from one address book.
     List {
         #[arg(long)]
         book: Option<String>,
     },
-    /// Add the contacts in a vCard or CSV file, read by the same code every client uses.
+    /// Add the contacts in a vCard or CSV file.
+    ///
+    /// Read by the same code every client uses.
     Import {
         /// File to read. Omit to read from stdin.
         #[arg(long)]
@@ -399,12 +458,14 @@ enum ContactsCommand {
 
 #[derive(Subcommand)]
 enum NotebookCommand {
+    /// List notebooks.
     List,
+    /// Create a notebook.
     Create {
         #[arg(long)]
         name: String,
     },
-    /// Rename a notebook or change its colour, keeping the rest of it.
+    /// Rename a notebook or change its colour.
     Rename {
         #[arg(long)]
         id: Uuid,
@@ -413,6 +474,7 @@ enum NotebookCommand {
         #[arg(long)]
         color: Option<String>,
     },
+    /// Delete a notebook.
     Delete {
         #[arg(long)]
         id: Uuid,
@@ -472,7 +534,9 @@ enum NotesCommand {
         #[arg(long)]
         id: Uuid,
     },
-    /// Add the notes in a markdown or JSON file, read by the same code every client uses.
+    /// Add the notes in a markdown or JSON file.
+    ///
+    /// Read by the same code every client uses.
     Import {
         /// File to read. Omit to read from stdin.
         #[arg(long)]
@@ -490,6 +554,7 @@ enum NotesCommand {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// Delete a note.
     Delete {
         #[arg(long)]
         id: Uuid,
@@ -504,7 +569,9 @@ enum NotesFormat {
 
 #[derive(Subcommand)]
 enum CollectionCommand {
+    /// List bookmark collections.
     List,
+    /// Create a bookmark collection.
     Create {
         #[arg(long)]
         name: String,
@@ -515,7 +582,9 @@ enum CollectionCommand {
         #[arg(long)]
         color: Option<String>,
     },
-    /// Change a collection. A flag left out keeps the stored value.
+    /// Rename, move or recolour a collection.
+    ///
+    /// A flag left out keeps the stored value.
     Rename {
         #[arg(long)]
         id: Uuid,
@@ -530,6 +599,7 @@ enum CollectionCommand {
         #[arg(long)]
         color: Option<String>,
     },
+    /// Delete a bookmark collection.
     Delete {
         #[arg(long)]
         id: Uuid,
@@ -553,9 +623,9 @@ enum BookmarksCommand {
         #[arg(long = "tag")]
         tags: Vec<String>,
     },
-    /// Replace a bookmark's URL and title, keeping its original creation time.
+    /// Replace a bookmark's URL and title.
     ///
-    /// A note or tags left out are kept as they were.
+    /// Keeps its original creation time. A note or tags left out are kept as they were.
     Update {
         #[arg(long)]
         id: Uuid,
@@ -575,6 +645,7 @@ enum BookmarksCommand {
         #[arg(long, conflicts_with = "tags")]
         clear_tags: bool,
     },
+    /// List bookmarks, optionally from one collection.
     List {
         #[arg(long)]
         collection: Option<Uuid>,
@@ -584,6 +655,7 @@ enum BookmarksCommand {
         #[arg(long)]
         id: Uuid,
     },
+    /// Delete a bookmark.
     Delete {
         #[arg(long)]
         id: Uuid,
@@ -594,13 +666,16 @@ enum BookmarksCommand {
 
 #[derive(Subcommand)]
 enum CalendarCommand {
+    /// Create a calendar.
     Create {
         #[arg(long)]
         name: String,
         #[arg(long, default_value = DEFAULT_CALENDAR_COLOR)]
         color: String,
     },
+    /// List calendars.
     ListCalendars,
+    /// Add an event.
     Add {
         #[arg(long)]
         title: String,
@@ -618,8 +693,10 @@ enum CalendarCommand {
         #[arg(long = "alert", allow_hyphen_values = true)]
         alerts: Vec<String>,
     },
-    /// List events. With `--from` and `--to`, repeating events are expanded
-    /// into one line per occurrence inside the window.
+    /// List events.
+    ///
+    /// With `--from` and `--to`, repeating events are expanded into one line
+    /// per occurrence inside the window.
     List {
         #[arg(long)]
         calendar: Option<Uuid>,
@@ -630,7 +707,9 @@ enum CalendarCommand {
         #[arg(long)]
         to: Option<String>,
     },
-    /// Change an event. A flag left out keeps the stored value.
+    /// Change an event.
+    ///
+    /// A flag left out keeps the stored value.
     Update {
         #[arg(long)]
         id: Uuid,
@@ -693,7 +772,9 @@ enum CalendarCommand {
         #[arg(long, conflicts_with = "alerts")]
         clear: bool,
     },
-    /// Add the events in an `.ics` file, read by the same code every client uses.
+    /// Add the events in an `.ics` file.
+    ///
+    /// Read by the same code every client uses.
     Import {
         /// File to read. Omit to read from stdin.
         #[arg(long)]

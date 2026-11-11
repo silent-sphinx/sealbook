@@ -39,8 +39,10 @@ pub enum BookmarkFileCommand {
         #[arg(long)]
         out: Option<PathBuf>,
     },
-    /// Read a Sealbook export, a JSON array of bookmarks, or a browser's HTML
-    /// bookmarks file.
+    /// Add bookmarks from a file.
+    ///
+    /// Accepts a Sealbook export, a JSON array of bookmarks, or a browser's
+    /// HTML bookmarks file.
     ///
     /// Every bookmark is new, with a new id. They go into --collection, or the
     /// default collection. With --keep-folders the file's folders become
