@@ -331,12 +331,13 @@ fn parse_moment(property: &Property) -> Result<Moment, String> {
     }
     let day = date_part(body).ok_or_else(unsupported)?;
     let time = &body[9..];
-    let hour = digits(&time[..2]).filter(|h| *h < 24);
-    let minute = digits(&time[2..4]).filter(|m| *m < 60);
+    let part = |range: std::ops::Range<usize>| time.get(range).and_then(digits);
+    let hour = part(0..2).filter(|h| *h < 24);
+    let minute = part(2..4).filter(|m| *m < 60);
     let second = if time.len() == 4 {
         Some(0)
     } else {
-        digits(&time[4..6]).filter(|s| *s < 60)
+        part(4..6).filter(|s| *s < 60)
     };
     match (hour, minute, second) {
         (Some(h), Some(m), Some(s)) => Ok(Moment {
@@ -387,9 +388,12 @@ pub fn ics_rrule(rule: &str, start: &str) -> Option<CoreRecurrence> {
     let frequency = CoreRecurrenceFrequency::from_wire(get("FREQ")?)?;
     let until = get("UNTIL")
         .map(|v| v.strip_suffix('Z').unwrap_or(v))
-        .filter(|v| v.len() >= 8 && v.is_char_boundary(8))
         .and_then(|v| {
-            let (y, m, d) = (digits(&v[..4])?, digits(&v[4..6])?, digits(&v[6..8])?);
+            let (y, m, d) = (
+                digits(v.get(..4)?)?,
+                digits(v.get(4..6)?)?,
+                digits(v.get(6..8)?)?,
+            );
             parse_day(&format!("{y:04}-{m:02}-{d:02}")).map(format_day)
         });
     let start_day = parse_day(start)?;
@@ -628,8 +632,8 @@ fn instant_seconds(value: &str) -> Option<i64> {
             };
             let zone = &zone[1..];
             let (h, m) = match zone.len() {
-                5 if zone.as_bytes()[2] == b':' => (&zone[..2], &zone[3..]),
-                4 => (&zone[..2], &zone[2..]),
+                5 if zone.as_bytes()[2] == b':' => (zone.get(..2)?, zone.get(3..)?),
+                4 => (zone.get(..2)?, zone.get(2..)?),
                 2 => (zone, "00"),
                 _ => return None,
             };
@@ -793,5 +797,26 @@ pub mod ffi {
         now: String,
     ) -> String {
         super::ics_write(&events, &calendar_name, &now)
+    }
+}
+
+#[cfg(test)]
+mod multibyte_tests {
+    use super::*;
+
+    #[test]
+    fn multibyte_time_does_not_panic() {
+        let s = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:a\r\nDTSTART:20240101Taéa\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let _ = ics_parse(s);
+    }
+
+    #[test]
+    fn multibyte_until_does_not_panic() {
+        let _ = ics_rrule("FREQ=DAILY;UNTIL=123é567", "2024-01-01");
+    }
+
+    #[test]
+    fn multibyte_offset_does_not_panic() {
+        assert_eq!(instant_seconds("2024-01-01T00:00:00+é0"), None);
     }
 }
