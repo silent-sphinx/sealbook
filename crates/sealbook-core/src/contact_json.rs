@@ -18,6 +18,18 @@ const MAX_FIELD_CHARS: usize = 100_000;
 /// Largest file an import will read, in bytes.
 pub const MAX_IMPORT_BYTES: usize = 5 * 1024 * 1024;
 
+/// What a direct vCard or CSV import returns for a file over
+/// [`MAX_IMPORT_BYTES`]: no contacts and one reason.
+pub(crate) fn too_large() -> CoreContactImport {
+    CoreContactImport {
+        contacts: Vec::new(),
+        skipped: vec![CoreContactSkipped {
+            label: "File".into(),
+            reason: "the file is too large (maximum 5 MB)".into(),
+        }],
+    }
+}
+
 /// The cards in a contacts file, and which format the file was read as.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]

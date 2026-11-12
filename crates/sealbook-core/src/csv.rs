@@ -185,6 +185,9 @@ pub fn csv_parse(text: &str, address_book_id: &str) -> Vec<CoreContactDraft> {
 
 /// The contacts in a CSV file, and the rows that could not be used.
 pub fn csv_import(text: &str, address_book_id: &str) -> CoreContactImport {
+    if text.len() > crate::contact_json::MAX_IMPORT_BYTES {
+        return crate::contact_json::too_large();
+    }
     let rows = csv_rows(text);
     let mut contacts = Vec::new();
     let mut skipped = Vec::new();

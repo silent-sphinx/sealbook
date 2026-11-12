@@ -457,8 +457,23 @@ pub fn ics_rrule(rule: &str, start: &str) -> Option<CoreRecurrence> {
     })
 }
 
+/// Largest calendar file an import will read, in bytes.
+pub const MAX_ICS_IMPORT_BYTES: usize = 10 * 1024 * 1024;
+/// Most events one calendar import keeps; the rest are reported as skipped.
+pub const MAX_ICS_IMPORT_EVENTS: usize = 5_000;
+
 /// The events in a calendar file.
 pub fn ics_parse(input: &str) -> CoreIcsImport {
+    if input.len() > MAX_ICS_IMPORT_BYTES {
+        return CoreIcsImport {
+            events: Vec::new(),
+            skipped: vec![CoreIcsSkipped {
+                title: "Calendar file".into(),
+                reason: "the file is too large (maximum 10 MB)".into(),
+            }],
+            dropped_rules: 0,
+        };
+    }
     let lines = unfold(input);
     let mut events = Vec::new();
     let mut skipped = Vec::new();
@@ -470,6 +485,13 @@ pub fn ics_parse(input: &str) -> CoreIcsImport {
             continue;
         }
         index += 1;
+        if events.len() + skipped.len() >= MAX_ICS_IMPORT_EVENTS {
+            skipped.push(CoreIcsSkipped {
+                title: "Remaining events".into(),
+                reason: "the file has too many events (maximum 5,000)".into(),
+            });
+            break;
+        }
         let mut body = Vec::new();
         while index < lines.len() && !trim(&lines[index]).eq_ignore_ascii_case("END:VEVENT") {
             body.push(lines[index].clone());
@@ -803,6 +825,18 @@ pub mod ffi {
 #[cfg(test)]
 mod multibyte_tests {
     use super::*;
+
+    #[test]
+    fn import_caps_hold() {
+        let big = " ".repeat(MAX_ICS_IMPORT_BYTES + 1);
+        let read = ics_parse(&big);
+        assert!(read.events.is_empty() && read.skipped.len() == 1);
+
+        let event = "BEGIN:VEVENT\r\nSUMMARY:x\r\nDTSTART:20240101T100000Z\r\nEND:VEVENT\r\n";
+        let read = ics_parse(&event.repeat(MAX_ICS_IMPORT_EVENTS + 10));
+        assert_eq!(read.events.len(), MAX_ICS_IMPORT_EVENTS);
+        assert_eq!(read.skipped.len(), 1);
+    }
 
     #[test]
     fn multibyte_time_does_not_panic() {

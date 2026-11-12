@@ -137,6 +137,9 @@ pub fn vcard_parse(text: &str, address_book_id: &str) -> Vec<CoreContactDraft> {
 
 /// The cards in a vCard file, and the ones that could not be used.
 pub fn vcard_import(text: &str, address_book_id: &str) -> CoreContactImport {
+    if text.len() > crate::contact_json::MAX_IMPORT_BYTES {
+        return crate::contact_json::too_large();
+    }
     let unfolded = text
         .replace("\r\n ", "")
         .replace("\r\n\t", "")

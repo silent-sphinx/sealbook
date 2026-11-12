@@ -113,14 +113,30 @@ pub fn bookmark_export(
     .unwrap_or_default()
 }
 
+/// Largest bookmark file an import will read, in bytes.
+pub const MAX_BOOKMARK_IMPORT_BYTES: usize = 16 * 1024 * 1024;
+/// Most bookmarks one import may carry.
+pub const MAX_IMPORTED_BOOKMARKS: usize = 20_000;
+
 /// Reads a bookmark file: Netscape HTML when it starts with a tag, else a
 /// Sealbook export or a JSON array.
 pub fn bookmark_import(text: &str) -> Result<CoreBookmarkImport, CoreError> {
-    if text.trim_start().starts_with('<') {
-        Ok(import_html(text))
-    } else {
-        import_json(text)
+    if text.len() > MAX_BOOKMARK_IMPORT_BYTES {
+        return Err(CoreError::malformed(
+            "Import file is too large (maximum 16 MB).",
+        ));
     }
+    let read = if text.trim_start().starts_with('<') {
+        import_html(text)
+    } else {
+        import_json(text)?
+    };
+    if read.bookmarks.len() > MAX_IMPORTED_BOOKMARKS {
+        return Err(CoreError::malformed(
+            "Import contains too many bookmarks (maximum 20,000).",
+        ));
+    }
+    Ok(read)
 }
 
 fn import_json(text: &str) -> Result<CoreBookmarkImport, CoreError> {
@@ -666,6 +682,18 @@ pub mod ffi {
 mod tests {
     use super::*;
     use crate::bookmarks::{bookmark_collection_parse, bookmark_parse};
+
+    #[test]
+    fn oversized_imports_are_refused() {
+        let big = format!("[{}]", " ".repeat(MAX_BOOKMARK_IMPORT_BYTES));
+        assert!(bookmark_import(&big).is_err());
+        let entry = r#"{"url":"https://a.example/","title":"a"},"#;
+        let many = format!(
+            "[{}{{\"url\":\"https://b.example/\"}}]",
+            entry.repeat(MAX_IMPORTED_BOOKMARKS)
+        );
+        assert!(bookmark_import(&many).is_err());
+    }
 
     fn bookmark(id: &str, payload: Value) -> CoreBookmark {
         bookmark_parse(id, &payload.to_string())
