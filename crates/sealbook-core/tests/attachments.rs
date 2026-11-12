@@ -113,6 +113,34 @@ struct Row {
     created_at: i64,
 }
 
+const CHALLENGE_ID: &str = "44444444-4444-4444-8444-444444444444";
+
+fn device_state() -> CoreDeviceState {
+    CoreDeviceState {
+        server: "https://example.test".into(),
+        username: "alice".into(),
+        account_id: "55555555-5555-4555-8555-555555555555".parse().unwrap(),
+        collection_id: collection(),
+        device_id: "66666666-6666-4666-8666-666666666666".parse().unwrap(),
+        session_token: None,
+        kdf_salt: vec![4u8; 16],
+        hpke_sk: vec![7u8; 32],
+        mldsa_seed: vec![1u8; 32],
+        ed25519_sk: vec![11u8; 32],
+        manifest_seq: 0,
+        roster_seq: 0,
+        roster_transcript: vec![6u8; 32],
+    }
+}
+
+fn challenge_body() -> String {
+    serde_json::to_string(&sealbook_protocol::AccountChallengeResponse {
+        challenge_id: CHALLENGE_ID.parse().unwrap(),
+        challenge: vec![5u8; 32],
+    })
+    .unwrap()
+}
+
 fn fixture() -> Fixture {
     let text = std::fs::read_to_string(FIXTURE).expect("fixture");
     serde_json::from_str(&text).expect("fixture parses")
@@ -226,7 +254,9 @@ fn the_rounds_use_the_paths_the_fixture_pins() {
     let fixture = fixture();
     let plan = plan_of(1);
     assert_eq!(
-        attachment_create_request(collection(), &plan).path,
+        attachment_create_request(&device_state(), collection(), &plan, &challenge_body())
+            .unwrap()
+            .path,
         fixture.paths.create
     );
     assert_eq!(
@@ -234,7 +264,14 @@ fn the_rounds_use_the_paths_the_fixture_pins() {
         fixture.paths.chunk
     );
     assert_eq!(
-        attachment_commit_request(collection(), attachment()).path,
+        attachment_commit_request(
+            &device_state(),
+            collection(),
+            attachment(),
+            &challenge_body()
+        )
+        .unwrap()
+        .path,
         fixture.paths.commit
     );
     assert_eq!(
@@ -242,7 +279,14 @@ fn the_rounds_use_the_paths_the_fixture_pins() {
         fixture.paths.meta
     );
     assert_eq!(
-        attachment_delete_request(collection(), attachment()).path,
+        attachment_delete_request(
+            &device_state(),
+            collection(),
+            attachment(),
+            &challenge_body()
+        )
+        .unwrap()
+        .path,
         fixture.paths.delete
     );
     assert_eq!(
@@ -262,12 +306,104 @@ fn the_rounds_use_the_paths_the_fixture_pins() {
 #[test]
 fn the_create_body_is_what_the_server_validates_against() {
     let plan = plan_of(attachment_limits().chunk_size as u64 + 1);
-    let request = attachment_create_request(collection(), &plan);
+    let request =
+        attachment_create_request(&device_state(), collection(), &plan, &challenge_body()).unwrap();
     let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
     assert_eq!(body["attachment_id"], ATTACHMENT);
     assert_eq!(body["total_plaintext_size"], plan.total_plaintext_size);
     assert_eq!(body["chunk_size"], plan.chunk_size);
     assert_eq!(body["chunk_count"], 2);
+}
+
+/// What the server checks: the device's signature over the operation, the
+/// collection, the attachment and (for a create) the declared sizes.
+fn signature_verifies(
+    auth: &sealbook_protocol::AttachmentOpAuth,
+    op: &str,
+    payload: &[u8; 32],
+) -> bool {
+    let state = device_state();
+    let (_, public) = sealbook_crypto::signing_from_seeds(&[1u8; 32], &[11u8; 32]);
+    sealbook_crypto::verify(
+        &public,
+        &sealbook_crypto::account_op_transcript(
+            op,
+            CHALLENGE_ID.parse().unwrap(),
+            &auth.challenge,
+            &state.account_id.to_string(),
+            state.device_id,
+            payload,
+        ),
+        &sealbook_crypto::DualSignature {
+            mldsa: auth.signature.mldsa.clone(),
+            ed25519: auth.signature.ed25519.clone(),
+        },
+    )
+    .is_ok()
+}
+
+#[test]
+fn create_commit_and_delete_carry_a_device_signature_bound_to_the_operation() {
+    let plan = plan_of(attachment_limits().chunk_size as u64 + 1);
+    let create =
+        attachment_create_request(&device_state(), collection(), &plan, &challenge_body()).unwrap();
+    let body: sealbook_protocol::CreateAttachmentRequest =
+        serde_json::from_slice(&create.body).unwrap();
+    let create_payload = sealbook_crypto::attachment_op_payload(
+        collection(),
+        plan.attachment_id,
+        plan.total_plaintext_size,
+        plan.chunk_size,
+        plan.chunk_count,
+    );
+    assert!(signature_verifies(
+        &body.auth,
+        "attachment-create",
+        &create_payload
+    ));
+    // Not valid as another operation, or for other sizes.
+    assert!(!signature_verifies(
+        &body.auth,
+        "attachment-commit",
+        &create_payload
+    ));
+    let other_sizes =
+        sealbook_crypto::attachment_op_payload(collection(), plan.attachment_id, 1, 1, 1);
+    assert!(!signature_verifies(
+        &body.auth,
+        "attachment-create",
+        &other_sizes
+    ));
+
+    let zeros = sealbook_crypto::attachment_op_payload(collection(), attachment(), 0, 0, 0);
+    let commit = attachment_commit_request(
+        &device_state(),
+        collection(),
+        attachment(),
+        &challenge_body(),
+    )
+    .unwrap();
+    let auth: sealbook_protocol::AttachmentOpAuth = serde_json::from_slice(&commit.body).unwrap();
+    assert!(signature_verifies(&auth, "attachment-commit", &zeros));
+    assert!(!signature_verifies(&auth, "attachment-delete", &zeros));
+
+    let delete = attachment_delete_request(
+        &device_state(),
+        collection(),
+        attachment(),
+        &challenge_body(),
+    )
+    .unwrap();
+    let auth: sealbook_protocol::AttachmentOpAuth = serde_json::from_slice(&delete.body).unwrap();
+    assert!(signature_verifies(&auth, "attachment-delete", &zeros));
+    let elsewhere = sealbook_crypto::attachment_op_payload(collection(), Uuid::nil(), 0, 0, 0);
+    assert!(!signature_verifies(&auth, "attachment-delete", &elsewhere));
+}
+
+#[test]
+fn a_challenge_request_is_a_post_to_the_challenge_path() {
+    let request = attachment_challenge_request();
+    assert_eq!(request.path, "/v1/attachments/challenge");
 }
 
 #[test]
@@ -715,11 +851,32 @@ fn regenerate() {
         },
         plans,
         paths: Paths {
-            create: attachment_create_request(collection(), &plan).path,
+            create: attachment_create_request(
+                &device_state(),
+                collection(),
+                &plan,
+                &challenge_body(),
+            )
+            .unwrap()
+            .path,
             chunk: attachment_chunk_path(collection(), attachment(), 0),
-            commit: attachment_commit_request(collection(), attachment()).path,
+            commit: attachment_commit_request(
+                &device_state(),
+                collection(),
+                attachment(),
+                &challenge_body(),
+            )
+            .unwrap()
+            .path,
             meta: attachment_meta_request(collection(), attachment()).path,
-            delete: attachment_delete_request(collection(), attachment()).path,
+            delete: attachment_delete_request(
+                &device_state(),
+                collection(),
+                attachment(),
+                &challenge_body(),
+            )
+            .unwrap()
+            .path,
             list: sweep_request(collection(), &sweep_start()).path,
             list_after: sweep_request(
                 collection(),

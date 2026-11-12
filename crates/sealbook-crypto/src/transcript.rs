@@ -173,6 +173,29 @@ pub fn account_op_transcript(
     h.finalize().into()
 }
 
+/// Digest of what a device signs to create, commit or delete an attachment.
+///
+/// Binds the collection and attachment, and for a create the declared size and
+/// chunking, so a signature for one attachment cannot be replayed on another or
+/// with different parameters. Commit and delete pass zeros for the sizes; the
+/// operation name in [`account_op_transcript`] is what tells the three apart.
+pub fn attachment_op_payload(
+    collection_id: Uuid,
+    attachment_id: Uuid,
+    total_plaintext_size: u64,
+    chunk_size: u32,
+    chunk_count: u32,
+) -> [u8; 32] {
+    let mut h = Sha256::new();
+    h.update(b"sealbook-op-attachment-v1");
+    h.update(collection_id.as_bytes());
+    h.update(attachment_id.as_bytes());
+    h.update(total_plaintext_size.to_be_bytes());
+    h.update(chunk_size.to_be_bytes());
+    h.update(chunk_count.to_be_bytes());
+    h.finalize().into()
+}
+
 /// Digest of the payload of a username change.
 pub fn username_change_payload(new_username: &str, upload: &[u8]) -> [u8; 32] {
     let mut h = Sha256::new();

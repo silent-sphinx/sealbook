@@ -2814,6 +2814,7 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "sealbook-client",
+ "sealbook-core",
  "sealbook-crypto",
  "sealbook-protocol",
  "serde",

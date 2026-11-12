@@ -933,6 +933,7 @@ fn router(state: Shared) -> Router<Shared> {
     // change feed. They get the object timeout (a chunk may be slow on a poor
     // uplink) and a chunk-sized body limit.
     let attachments = Router::new()
+        .route("/v1/attachments/challenge", post(attachment_challenge))
         .route(
             "/v1/collections/{id}/attachments",
             post(create_attachment).get(list_attachments),

@@ -7284,31 +7284,39 @@ async fn an_uncommitted_or_incomplete_attachment_is_not_served() {
     };
     let http = reqwest::Client::new();
     let attachment_id = Uuid::new_v4();
+    let plan = sealbook_core::AttachmentPlan {
+        attachment_id,
+        key: String::new(),
+        total_plaintext_size: 3 * sealbook_protocol::ATTACHMENT_CHUNK_SIZE as u64,
+        chunk_size: sealbook_protocol::ATTACHMENT_CHUNK_SIZE as u32,
+        chunk_count: 3,
+    };
 
     // Declare three chunks but upload none, then try to commit: refused as
     // incomplete.
-    http.post(format!(
-        "{server}/v1/collections/{collection_id}/attachments"
-    ))
-    .bearer_auth(&token)
-    .json(&serde_json::json!({
-        "attachment_id": attachment_id,
-        "total_plaintext_size": 3 * sealbook_protocol::ATTACHMENT_CHUNK_SIZE,
-        "chunk_size": sealbook_protocol::ATTACHMENT_CHUNK_SIZE,
-        "chunk_count": 3,
-    }))
-    .send()
-    .await
-    .unwrap()
-    .error_for_status()
-    .expect("create");
-
-    let commit = http
-        .post(format!(
-            "{server}/v1/collections/{collection_id}/attachments/{attachment_id}/commit"
-        ))
+    let state = client.core_state().unwrap();
+    let challenge = attachment_challenge(&http, &server, &token).await;
+    let create =
+        sealbook_core::attachment_create_request(&state, collection_id, &plan, &challenge).unwrap();
+    http.post(format!("{server}{}", create.path))
         .bearer_auth(&token)
-        .json(&serde_json::json!({}))
+        .header("content-type", "application/json")
+        .body(create.body)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .expect("create");
+
+    let challenge = attachment_challenge(&http, &server, &token).await;
+    let commit_request =
+        sealbook_core::attachment_commit_request(&state, collection_id, attachment_id, &challenge)
+            .unwrap();
+    let commit = http
+        .post(format!("{server}{}", commit_request.path))
+        .bearer_auth(&token)
+        .header("content-type", "application/json")
+        .body(commit_request.body)
         .send()
         .await
         .unwrap();
@@ -7324,6 +7332,128 @@ async fn an_uncommitted_or_incomplete_attachment_is_not_served() {
         .await
         .unwrap();
     assert_eq!(chunk.status(), reqwest::StatusCode::NOT_FOUND);
+}
+
+async fn attachment_challenge(http: &reqwest::Client, server: &str, token: &str) -> String {
+    http.post(format!("{server}/v1/attachments/challenge"))
+        .bearer_auth(token)
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .expect("challenge")
+        .text()
+        .await
+        .unwrap()
+}
+
+/// A session token alone cannot create, commit or delete an attachment: each
+/// needs the device's signature over a fresh single-use challenge, bound to the
+/// operation and the attachment.
+#[tokio::test]
+async fn attachment_changes_need_a_device_signature() {
+    let dir = std::env::temp_dir().join(format!("sealbook-att-sig-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "sigalice", "correct horse battery")
+        .await
+        .expect("register");
+    let uploaded = client
+        .upload_attachment(&[9u8; 1000])
+        .await
+        .expect("a signed upload works");
+
+    let (server, collection_id, token) = {
+        let s = client.state.as_ref().unwrap();
+        (
+            s.server.clone(),
+            s.collection_id,
+            s.session_token.clone().unwrap(),
+        )
+    };
+    let http = reqwest::Client::new();
+    let state = client.core_state().unwrap();
+    let attachments = format!("{server}/v1/collections/{collection_id}/attachments");
+    let one = format!("{attachments}/{}", uploaded.attachment_id);
+
+    // A bare token (an empty or unsigned body) cannot delete or commit.
+    for (method, url) in [
+        (reqwest::Method::DELETE, one.clone()),
+        (reqwest::Method::POST, format!("{one}/commit")),
+    ] {
+        let resp = http
+            .request(method, url)
+            .bearer_auth(&token)
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .unwrap();
+        assert!(resp.status().is_client_error(), "{}", resp.status());
+    }
+    // Nor create, with the old body shape.
+    let resp = http
+        .post(&attachments)
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "attachment_id": Uuid::new_v4(),
+            "total_plaintext_size": 10,
+            "chunk_size": 10,
+            "chunk_count": 1,
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_client_error(), "{}", resp.status());
+
+    // A signature made for commit is not accepted for delete.
+    let challenge = attachment_challenge(&http, &server, &token).await;
+    let commit = sealbook_core::attachment_commit_request(
+        &state,
+        collection_id,
+        uploaded.attachment_id,
+        &challenge,
+    )
+    .unwrap();
+    let resp = http
+        .delete(&one)
+        .bearer_auth(&token)
+        .header("content-type", "application/json")
+        .body(commit.body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    // A properly signed delete works once; replaying its challenge does not.
+    let challenge = attachment_challenge(&http, &server, &token).await;
+    let delete = sealbook_core::attachment_delete_request(
+        &state,
+        collection_id,
+        uploaded.attachment_id,
+        &challenge,
+    )
+    .unwrap();
+    let send = |body: Vec<u8>| {
+        http.delete(&one)
+            .bearer_auth(&token)
+            .header("content-type", "application/json")
+            .body(body)
+            .send()
+    };
+    assert!(send(delete.body.clone())
+        .await
+        .unwrap()
+        .status()
+        .is_success());
+    assert_eq!(
+        send(delete.body).await.unwrap().status(),
+        reqwest::StatusCode::UNAUTHORIZED
+    );
 }
 
 /// Storing more attachment bytes than the account's quota allows is refused with

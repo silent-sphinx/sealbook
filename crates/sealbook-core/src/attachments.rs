@@ -21,19 +21,20 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sealbook_crypto::{
-    attachment_chunk_aad, decrypt_chunk, encrypt_chunk, AttachmentHasher, AttachmentKey,
-    EncryptedChunk, ATTACHMENT_KEY_LEN, NONCE_LEN,
+    attachment_chunk_aad, attachment_op_payload, decrypt_chunk, encrypt_chunk, AttachmentHasher,
+    AttachmentKey, EncryptedChunk, ATTACHMENT_KEY_LEN, NONCE_LEN,
 };
 use sealbook_protocol::{
-    AttachmentListEntry, AttachmentMetaResponse, CommitAttachmentResponse, CreateAttachmentRequest,
-    CreateAttachmentResponse, ListAttachmentsResponse, ATTACHMENT_CHUNK_SIZE,
-    ATTACHMENT_STATE_COMMITTED, ATTACHMENT_STATE_PENDING, MAX_ATTACHMENT_SIZE,
+    AttachmentListEntry, AttachmentMetaResponse, AttachmentOpAuth, CommitAttachmentResponse,
+    CreateAttachmentRequest, CreateAttachmentResponse, ListAttachmentsResponse,
+    ATTACHMENT_CHUNK_SIZE, ATTACHMENT_STATE_COMMITTED, ATTACHMENT_STATE_PENDING,
+    MAX_ATTACHMENT_SIZE,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::http::{Header, HttpRequest, Method};
-use crate::CoreError;
+use crate::{CoreDeviceState, CoreError};
 
 /// The header a chunk's nonce travels in, on the way up and on the way back.
 pub const NONCE_HEADER: &str = "x-sealbook-nonce";
@@ -205,9 +206,59 @@ pub fn attachment_ranges(plan: &AttachmentPlan) -> Vec<ChunkRange> {
         .collect()
 }
 
-/// Reserves the attachment, which is what the chunk uploads are checked against.
-pub fn attachment_create_request(collection_id: Uuid, plan: &AttachmentPlan) -> HttpRequest {
+/// The challenge a create, commit or delete is signed over.
+///
+/// These three are authorised by a device signature, not by the session token
+/// alone, so a stolen token cannot delete a user's attachments or fill their
+/// quota. Each operation takes its own challenge; it is single use.
+pub fn attachment_challenge_request() -> HttpRequest {
     json_request(
+        Method::Post,
+        "/v1/attachments/challenge".into(),
+        &serde_json::json!({}),
+    )
+}
+
+/// Signs one attachment operation over the challenge the server issued.
+fn attachment_auth(
+    state: &CoreDeviceState,
+    op: &str,
+    collection_id: Uuid,
+    attachment_id: Uuid,
+    sizes: (u64, u32, u32),
+    challenge_body: &str,
+) -> Result<AttachmentOpAuth, CoreError> {
+    let challenge = crate::auth::account_challenge(challenge_body)?;
+    let signature = crate::auth::account_signature(
+        state,
+        op,
+        challenge.challenge_id,
+        &challenge.challenge,
+        &attachment_op_payload(collection_id, attachment_id, sizes.0, sizes.1, sizes.2),
+    )?;
+    Ok(AttachmentOpAuth {
+        challenge_id: challenge.challenge_id,
+        challenge: challenge.challenge,
+        signature,
+    })
+}
+
+/// Reserves the attachment, which is what the chunk uploads are checked against.
+pub fn attachment_create_request(
+    state: &CoreDeviceState,
+    collection_id: Uuid,
+    plan: &AttachmentPlan,
+    challenge_body: &str,
+) -> Result<HttpRequest, CoreError> {
+    let auth = attachment_auth(
+        state,
+        "attachment-create",
+        collection_id,
+        plan.attachment_id,
+        (plan.total_plaintext_size, plan.chunk_size, plan.chunk_count),
+        challenge_body,
+    )?;
+    Ok(json_request(
         Method::Post,
         attachment_base(collection_id),
         &CreateAttachmentRequest {
@@ -215,8 +266,9 @@ pub fn attachment_create_request(collection_id: Uuid, plan: &AttachmentPlan) -> 
             total_plaintext_size: plan.total_plaintext_size,
             chunk_size: plan.chunk_size,
             chunk_count: plan.chunk_count,
+            auth,
         },
-    )
+    ))
 }
 
 /// Checks the reservation landed, and on the attachment this plan is for.
@@ -299,12 +351,25 @@ pub fn attachment_chunk_nonce(header: Option<String>) -> Result<String, CoreErro
 
 /// Seals the attachment, after which the server serves its chunks and stops
 /// accepting new ones.
-pub fn attachment_commit_request(collection_id: Uuid, attachment_id: Uuid) -> HttpRequest {
-    json_request(
+pub fn attachment_commit_request(
+    state: &CoreDeviceState,
+    collection_id: Uuid,
+    attachment_id: Uuid,
+    challenge_body: &str,
+) -> Result<HttpRequest, CoreError> {
+    let auth = attachment_auth(
+        state,
+        "attachment-commit",
+        collection_id,
+        attachment_id,
+        (0, 0, 0),
+        challenge_body,
+    )?;
+    Ok(json_request(
         Method::Post,
         format!("{}/{attachment_id}/commit", attachment_base(collection_id)),
-        &serde_json::json!({}),
-    )
+        &auth,
+    ))
 }
 
 /// Checks the commit took, so an upload does not report success over an
@@ -345,11 +410,25 @@ pub fn attachment_meta_accept(
     Ok(served)
 }
 
-pub fn attachment_delete_request(collection_id: Uuid, attachment_id: Uuid) -> HttpRequest {
-    empty_request(
+pub fn attachment_delete_request(
+    state: &CoreDeviceState,
+    collection_id: Uuid,
+    attachment_id: Uuid,
+    challenge_body: &str,
+) -> Result<HttpRequest, CoreError> {
+    let auth = attachment_auth(
+        state,
+        "attachment-delete",
+        collection_id,
+        attachment_id,
+        (0, 0, 0),
+        challenge_body,
+    )?;
+    Ok(json_request(
         Method::Delete,
         format!("{}/{attachment_id}", attachment_base(collection_id)),
-    )
+        &auth,
+    ))
 }
 
 /// One chunk's plaintext digest, base64url, to be rolled up by
@@ -532,7 +611,8 @@ fn encode(bytes: &[u8]) -> String {
 #[cfg(feature = "uniffi")]
 pub mod ffi {
     use super::{
-        AttachmentPlan, AttachmentRow, ChunkRange, CoreError, HttpRequest, SweepCursor, SweepPage,
+        AttachmentPlan, AttachmentRow, ChunkRange, CoreDeviceState, CoreError, HttpRequest,
+        SweepCursor, SweepPage,
     };
     use sealbook_protocol::AttachmentMetaResponse;
     use uuid::Uuid;
@@ -548,8 +628,18 @@ pub mod ffi {
     }
 
     #[uniffi::export(name = "attachment_create_request")]
-    pub fn create_request(collection_id: Uuid, plan: AttachmentPlan) -> HttpRequest {
-        super::attachment_create_request(collection_id, &plan)
+    pub fn create_request(
+        state: CoreDeviceState,
+        collection_id: Uuid,
+        plan: AttachmentPlan,
+        challenge_body: String,
+    ) -> Result<HttpRequest, CoreError> {
+        super::attachment_create_request(&state, collection_id, &plan, &challenge_body)
+    }
+
+    #[uniffi::export(name = "attachment_challenge_request")]
+    pub fn challenge_request() -> HttpRequest {
+        super::attachment_challenge_request()
     }
 
     #[uniffi::export(name = "attachment_create_accept")]
@@ -609,8 +699,13 @@ pub mod ffi {
     }
 
     #[uniffi::export(name = "attachment_commit_request")]
-    pub fn commit_request(collection_id: Uuid, attachment_id: Uuid) -> HttpRequest {
-        super::attachment_commit_request(collection_id, attachment_id)
+    pub fn commit_request(
+        state: CoreDeviceState,
+        collection_id: Uuid,
+        attachment_id: Uuid,
+        challenge_body: String,
+    ) -> Result<HttpRequest, CoreError> {
+        super::attachment_commit_request(&state, collection_id, attachment_id, &challenge_body)
     }
 
     #[uniffi::export(name = "attachment_commit_accept")]
@@ -633,8 +728,13 @@ pub mod ffi {
     }
 
     #[uniffi::export(name = "attachment_delete_request")]
-    pub fn delete_request(collection_id: Uuid, attachment_id: Uuid) -> HttpRequest {
-        super::attachment_delete_request(collection_id, attachment_id)
+    pub fn delete_request(
+        state: CoreDeviceState,
+        collection_id: Uuid,
+        attachment_id: Uuid,
+        challenge_body: String,
+    ) -> Result<HttpRequest, CoreError> {
+        super::attachment_delete_request(&state, collection_id, attachment_id, &challenge_body)
     }
 
     #[uniffi::export(name = "attachment_chunk_digest")]

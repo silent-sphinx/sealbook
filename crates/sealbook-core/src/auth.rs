@@ -1096,12 +1096,12 @@ fn open_collection_key(
     Err(refuse(AuthRefusal::NoKeyWrap))
 }
 
-fn account_challenge(body: &str) -> Result<AccountChallengeResponse, CoreError> {
+pub(crate) fn account_challenge(body: &str) -> Result<AccountChallengeResponse, CoreError> {
     serde_json::from_str(body)
         .map_err(|err| CoreError::malformed(format!("the account challenge is unreadable: {err}")))
 }
 
-fn account_signature(
+pub(crate) fn account_signature(
     state: &CoreDeviceState,
     op: &str,
     challenge_id: Uuid,

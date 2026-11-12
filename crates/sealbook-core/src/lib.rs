@@ -78,14 +78,14 @@ pub use account_export::{
     CoreExportAccount, CoreExportObject,
 };
 pub use attachments::{
-    attachment_chunk_digest, attachment_chunk_nonce, attachment_chunk_path,
-    attachment_commit_accept, attachment_commit_request, attachment_content_hash,
-    attachment_create_accept, attachment_create_request, attachment_delete_request,
-    attachment_limits, attachment_meta_accept, attachment_meta_request, attachment_plan,
-    attachment_ranges, attachment_verify, open_attachment_chunk, seal_attachment_chunk,
-    sweep_orphans, sweep_page, sweep_request, sweep_start, AttachmentLimits, AttachmentPlan,
-    AttachmentRefusal, AttachmentRow, ChunkRange, SweepCursor, SweepPage, NONCE_HEADER,
-    ORPHAN_GRACE_SECS,
+    attachment_challenge_request, attachment_chunk_digest, attachment_chunk_nonce,
+    attachment_chunk_path, attachment_commit_accept, attachment_commit_request,
+    attachment_content_hash, attachment_create_accept, attachment_create_request,
+    attachment_delete_request, attachment_limits, attachment_meta_accept, attachment_meta_request,
+    attachment_plan, attachment_ranges, attachment_verify, open_attachment_chunk,
+    seal_attachment_chunk, sweep_orphans, sweep_page, sweep_request, sweep_start, AttachmentLimits,
+    AttachmentPlan, AttachmentRefusal, AttachmentRow, ChunkRange, SweepCursor, SweepPage,
+    NONCE_HEADER, ORPHAN_GRACE_SECS,
 };
 pub use auth::{
     account_challenge_request, change_password_request, change_username_request,

@@ -27,13 +27,15 @@ use serde::Deserialize;
 use sqlx::Row;
 use uuid::Uuid;
 
+use sealbook_crypto::attachment_op_payload;
 use sealbook_protocol::{
-    AttachmentListEntry, AttachmentMetaResponse, CommitAttachmentResponse, CreateAttachmentRequest,
-    CreateAttachmentResponse, ErrorBody, ListAttachmentsResponse, ATTACHMENT_CHUNK_SIZE,
-    ATTACHMENT_CHUNK_TAG_LEN, ATTACHMENT_STATE_COMMITTED, ATTACHMENT_STATE_PENDING,
-    MAX_ATTACHMENT_SIZE,
+    AccountChallengeResponse, AttachmentListEntry, AttachmentMetaResponse, AttachmentOpAuth,
+    CommitAttachmentResponse, CreateAttachmentRequest, CreateAttachmentResponse, ErrorBody,
+    ListAttachmentsResponse, ATTACHMENT_CHUNK_SIZE, ATTACHMENT_CHUNK_TAG_LEN,
+    ATTACHMENT_STATE_COMMITTED, ATTACHMENT_STATE_PENDING, MAX_ATTACHMENT_SIZE,
 };
 
+use crate::account::authorise_account_op;
 use crate::session::require_session;
 use crate::*;
 
@@ -91,6 +93,75 @@ async fn rate_limit(state: &Shared, account_id: &str) -> Result<(), (StatusCode,
     Ok(())
 }
 
+/// Issues a nonce for an attachment create, commit or delete.
+///
+/// These three change what the account stores, so a bearer token alone is not
+/// enough: the device signs the operation over this challenge, as it does for an
+/// account change. Chunk uploads stay on the token, because a chunk can only
+/// land in an attachment the signed create reserved, is sealed under a key the
+/// server never sees, and is checked against the content hash in the note.
+pub(crate) async fn attachment_challenge(
+    State(state): State<Shared>,
+    headers: HeaderMap,
+) -> Result<Json<AccountChallengeResponse>, (StatusCode, Json<ErrorBody>)> {
+    let session = require_session(&state, &headers).await?;
+    // A signed op per attachment, and a sweep deletes one at a time.
+    if !state
+        .limiter
+        .allow_account(
+            "attachment-op",
+            &session.account_id,
+            600,
+            std::time::Duration::from_secs(300),
+        )
+        .await
+    {
+        return Err(err(StatusCode::TOO_MANY_REQUESTS, "rate limited"));
+    }
+    let challenge = sealbook_crypto::generate_login_challenge();
+    let challenge_id = Uuid::new_v4();
+    let mut pending = state.pending_account_ops.lock().await;
+    admit(&mut pending, std::time::Duration::from_secs(120), |entry| {
+        entry.created
+    });
+    pending.insert(
+        challenge_id,
+        PendingAccountOp {
+            account_id: session.account_id,
+            device_id: session.device_id,
+            challenge,
+            created: std::time::Instant::now(),
+        },
+    );
+    Ok(Json(AccountChallengeResponse {
+        challenge_id,
+        challenge: challenge.to_vec(),
+    }))
+}
+
+/// Checks the device signature on a create, commit or delete.
+async fn authorise_attachment_op(
+    state: &AppState,
+    session: &crate::session::Session,
+    op: &str,
+    collection_id: Uuid,
+    attachment_id: Uuid,
+    sizes: (u64, u32, u32),
+    auth: &AttachmentOpAuth,
+) -> Result<(), (StatusCode, Json<ErrorBody>)> {
+    crate::recovery::require_rotation_not_owed(state, &session.account_id).await?;
+    authorise_account_op(
+        state,
+        session,
+        op,
+        auth.challenge_id,
+        &auth.challenge,
+        &attachment_op_payload(collection_id, attachment_id, sizes.0, sizes.1, sizes.2),
+        &auth.signature,
+    )
+    .await
+}
+
 pub(crate) async fn create_attachment(
     State(state): State<Shared>,
     AxumPath(collection_id): AxumPath<Uuid>,
@@ -99,6 +170,16 @@ pub(crate) async fn create_attachment(
 ) -> Result<Json<CreateAttachmentResponse>, (StatusCode, Json<ErrorBody>)> {
     let session = require_session(&state, &headers).await?;
     rate_limit(&state, &session.account_id).await?;
+    authorise_attachment_op(
+        &state,
+        &session,
+        "attachment-create",
+        collection_id,
+        body.attachment_id,
+        (body.total_plaintext_size, body.chunk_size, body.chunk_count),
+        &body.auth,
+    )
+    .await?;
 
     if body.total_plaintext_size == 0 || body.chunk_size == 0 || body.chunk_count == 0 {
         return Err(err(StatusCode::BAD_REQUEST, "empty attachment"));
@@ -309,9 +390,20 @@ pub(crate) async fn commit_attachment(
     State(state): State<Shared>,
     AxumPath((collection_id, attachment_id)): AxumPath<(Uuid, Uuid)>,
     headers: HeaderMap,
+    Json(auth): Json<AttachmentOpAuth>,
 ) -> Result<Json<CommitAttachmentResponse>, (StatusCode, Json<ErrorBody>)> {
     let session = require_session(&state, &headers).await?;
     rate_limit(&state, &session.account_id).await?;
+    authorise_attachment_op(
+        &state,
+        &session,
+        "attachment-commit",
+        collection_id,
+        attachment_id,
+        (0, 0, 0),
+        &auth,
+    )
+    .await?;
 
     let mut tx = state
         .db
@@ -457,9 +549,20 @@ pub(crate) async fn delete_attachment(
     State(state): State<Shared>,
     AxumPath((collection_id, attachment_id)): AxumPath<(Uuid, Uuid)>,
     headers: HeaderMap,
+    Json(auth): Json<AttachmentOpAuth>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorBody>)> {
     let session = require_session(&state, &headers).await?;
     rate_limit(&state, &session.account_id).await?;
+    authorise_attachment_op(
+        &state,
+        &session,
+        "attachment-delete",
+        collection_id,
+        attachment_id,
+        (0, 0, 0),
+        &auth,
+    )
+    .await?;
 
     let mut tx = state
         .db

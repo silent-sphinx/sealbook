@@ -76,6 +76,7 @@ pub fn wire_schema() -> Value {
         ChangePasswordStartRequest,
         ChangePasswordStartResponse,
         CreateAttachmentRequest,
+        AttachmentOpAuth,
         CreateAttachmentResponse,
         AttachmentMetaResponse,
         CommitAttachmentResponse,

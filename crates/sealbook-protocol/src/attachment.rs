@@ -43,6 +43,23 @@ pub struct CreateAttachmentRequest {
     pub total_plaintext_size: u64,
     pub chunk_size: u32,
     pub chunk_count: u32,
+    /// The device's authorisation for this create.
+    pub auth: AttachmentOpAuth,
+}
+
+/// A device's signature over one attachment create, commit or delete.
+///
+/// The challenge comes from `POST /v1/attachments/challenge` and is single use.
+/// A session token alone cannot create, commit or delete an attachment: the
+/// signature is over the operation, the collection and the attachment, made with
+/// the device's own signing keys.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct AttachmentOpAuth {
+    pub challenge_id: Uuid,
+    #[serde(with = "crate::b64")]
+    pub challenge: Vec<u8>,
+    pub signature: crate::DualSignatureBody,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

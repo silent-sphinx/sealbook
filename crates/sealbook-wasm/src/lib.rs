@@ -1831,13 +1831,25 @@ pub fn core_attachment_ranges(plan: Ts<AttachmentPlan>) -> Result<Ts<ChunkRangeL
 
 #[wasm_bindgen]
 pub fn core_attachment_create_request(
+    state: Ts<CoreDeviceState>,
     collection_id: &str,
     plan: Ts<AttachmentPlan>,
+    challenge_body: &str,
 ) -> Result<Ts<HttpRequest>, JsError> {
-    Ok(
-        sealbook_core::attachment_create_request(parse_uuid(collection_id)?, &plan.to_rust()?)
-            .into_ts()?,
+    Ok(sealbook_core::attachment_create_request(
+        &state.to_rust()?,
+        parse_uuid(collection_id)?,
+        &plan.to_rust()?,
+        challenge_body,
     )
+    .map_err(core_err)?
+    .into_ts()?)
+}
+
+/// The challenge an attachment create, commit or delete is signed over.
+#[wasm_bindgen]
+pub fn core_attachment_challenge_request() -> Result<Ts<HttpRequest>, JsError> {
+    Ok(sealbook_core::attachment_challenge_request().into_ts()?)
 }
 
 #[wasm_bindgen]
@@ -1914,13 +1926,18 @@ pub fn core_attachment_chunk_nonce(header: Option<String>) -> Result<String, JsE
 
 #[wasm_bindgen]
 pub fn core_attachment_commit_request(
+    state: Ts<CoreDeviceState>,
     collection_id: &str,
     attachment_id: &str,
+    challenge_body: &str,
 ) -> Result<Ts<HttpRequest>, JsError> {
     Ok(sealbook_core::attachment_commit_request(
+        &state.to_rust()?,
         parse_uuid(collection_id)?,
         parse_uuid(attachment_id)?,
+        challenge_body,
     )
+    .map_err(core_err)?
     .into_ts()?)
 }
 
@@ -1956,13 +1973,18 @@ pub fn core_attachment_meta_accept(
 
 #[wasm_bindgen]
 pub fn core_attachment_delete_request(
+    state: Ts<CoreDeviceState>,
     collection_id: &str,
     attachment_id: &str,
+    challenge_body: &str,
 ) -> Result<Ts<HttpRequest>, JsError> {
     Ok(sealbook_core::attachment_delete_request(
+        &state.to_rust()?,
         parse_uuid(collection_id)?,
         parse_uuid(attachment_id)?,
+        challenge_body,
     )
+    .map_err(core_err)?
     .into_ts()?)
 }
 

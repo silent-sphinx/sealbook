@@ -79,6 +79,27 @@
       ],
       "type": "object"
     },
+    "AttachmentOpAuth": {
+      "description": "A device's signature over one attachment create, commit or delete.\n\nThe challenge comes from `POST /v1/attachments/challenge` and is single use.\nA session token alone cannot create, commit or delete an attachment: the\nsignature is over the operation, the collection and the attachment, made with\nthe device's own signing keys.",
+      "properties": {
+        "challenge": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "challenge_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "signature": {
+          "$ref": "#/$defs/DualSignatureBody"
+        }
+      },
+      "required": [
+        "challenge_id",
+        "challenge",
+        "signature"
+      ],
+      "type": "object"
+    },
     "Base64Url": {
       "contentEncoding": "base64url",
       "description": "Bytes as unpadded base64url (RFC 4648 section 5).",
@@ -354,6 +375,10 @@
           "format": "uuid",
           "type": "string"
         },
+        "auth": {
+          "$ref": "#/$defs/AttachmentOpAuth",
+          "description": "The device's authorisation for this create."
+        },
         "chunk_count": {
           "format": "uint32",
           "minimum": 0,
@@ -374,7 +399,8 @@
         "attachment_id",
         "total_plaintext_size",
         "chunk_size",
-        "chunk_count"
+        "chunk_count",
+        "auth"
       ],
       "type": "object"
     },

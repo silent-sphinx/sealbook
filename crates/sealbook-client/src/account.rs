@@ -113,7 +113,7 @@ impl SealbookClient {
         ))
     }
 
-    fn core_state(&self) -> Result<sealbook_core::CoreDeviceState, ClientError> {
+    pub fn core_state(&self) -> Result<sealbook_core::CoreDeviceState, ClientError> {
         Ok(self.state.as_ref().ok_or(ClientError::NoState)?.to_core())
     }
 }

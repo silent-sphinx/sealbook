@@ -74,7 +74,7 @@ pub(crate) async fn account_challenge(
 ///
 /// Single use: the challenge is removed whether or not verification succeeds, so a
 /// failed attempt cannot be retried against the same nonce.
-async fn authorise_account_op(
+pub(crate) async fn authorise_account_op(
     state: &AppState,
     session: &Session,
     op: &str,

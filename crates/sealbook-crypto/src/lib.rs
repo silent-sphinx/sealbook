@@ -46,9 +46,9 @@ pub use sign::{
     SIGNING_SEED_LEN,
 };
 pub use transcript::{
-    account_op_transcript, content_digest, delete_account_payload, enrollment_transcript,
-    key_rotation_transcript, key_wraps_digest, login_start_transcript, login_transcript,
-    manifest_bucket_digest, manifest_bucket_of, manifest_digest, manifest_root,
+    account_op_transcript, attachment_op_payload, content_digest, delete_account_payload,
+    enrollment_transcript, key_rotation_transcript, key_wraps_digest, login_start_transcript,
+    login_transcript, manifest_bucket_digest, manifest_bucket_of, manifest_digest, manifest_root,
     manifest_transcript, pair_confirmation, pair_grant_transcript, password_change_payload,
     phrase_recovery_transcript, recovery_password_payload, rotated_objects_digest,
     rotation_recovery_payload, username_change_payload, ManifestDigestEntry, ObjectDigestEntry,

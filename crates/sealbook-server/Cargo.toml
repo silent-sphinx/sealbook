@@ -35,3 +35,4 @@ base64.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
 sealbook-client = { path = "../sealbook-client" }
+sealbook-core = { path = "../sealbook-core" }

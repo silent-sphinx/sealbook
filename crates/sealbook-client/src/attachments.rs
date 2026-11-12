@@ -42,6 +42,14 @@ impl SealbookClient {
         ))
     }
 
+    /// A fresh challenge for one signed attachment operation.
+    async fn attachment_challenge(&self, token: &str) -> Result<String, ClientError> {
+        let served = self
+            .send(&sealbook_core::attachment_challenge_request(), Some(token))
+            .await?;
+        Ok(text(&served.body))
+    }
+
     /// Chunks `data`, seals each chunk, uploads them, and commits the
     /// attachment. Returns the reference the record must keep.
     ///
@@ -57,7 +65,13 @@ impl SealbookClient {
     ) -> Result<UploadedAttachment, ClientError> {
         let (server, collection_id, token) = self.attachment_target()?;
         let plan = sealbook_core::attachment_plan(data.len() as u64)?;
-        let create = sealbook_core::attachment_create_request(collection_id, &plan);
+        let challenge = self.attachment_challenge(&token).await?;
+        let create = sealbook_core::attachment_create_request(
+            &self.core_state()?,
+            collection_id,
+            &plan,
+            &challenge,
+        )?;
         let created = self.send(&create, Some(&token)).await?;
         sealbook_core::attachment_create_accept(&plan, &text(&created.body))?;
 
@@ -119,7 +133,13 @@ impl SealbookClient {
             .await?;
         }
 
-        let commit = sealbook_core::attachment_commit_request(collection_id, plan.attachment_id);
+        let challenge = self.attachment_challenge(token).await?;
+        let commit = sealbook_core::attachment_commit_request(
+            &self.core_state()?,
+            collection_id,
+            plan.attachment_id,
+            &challenge,
+        )?;
         let committed = self.send(&commit, Some(token)).await?;
         sealbook_core::attachment_commit_accept(plan.attachment_id, &text(&committed.body))?;
         Ok(sealbook_core::attachment_content_hash(&digests)?)
@@ -187,7 +207,13 @@ impl SealbookClient {
 
     pub async fn delete_attachment(&self, attachment_id: Uuid) -> Result<(), ClientError> {
         let (_, collection_id, token) = self.attachment_target()?;
-        let request = sealbook_core::attachment_delete_request(collection_id, attachment_id);
+        let challenge = self.attachment_challenge(&token).await?;
+        let request = sealbook_core::attachment_delete_request(
+            &self.core_state()?,
+            collection_id,
+            attachment_id,
+            &challenge,
+        )?;
         self.send(&request, Some(&token)).await?;
         Ok(())
     }
