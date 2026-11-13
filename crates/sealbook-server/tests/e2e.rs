@@ -6627,8 +6627,11 @@ async fn a_write_refuses_an_edited_bucket_digest() {
         .await
         .expect_err("a write against edited bucket digests must be refused")
         .to_string();
+    // The new object's bucket is random. When it lands in the edited bucket 0,
+    // the served entries fail their own digest before the root check runs.
     assert!(
-        error.contains("do not match the signed manifest"),
+        error.contains("do not match the signed manifest")
+            || error.contains("do not match its digest"),
         "the refusal should name the mismatch, got: {error}"
     );
 
