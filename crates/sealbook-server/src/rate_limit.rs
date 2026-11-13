@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::Mutex;
 
-/// Most distinct buckets held at once. Reaching it means a flood of unique
-/// keys, so the least recently used bucket is evicted to make room.
+/// Most distinct buckets each table holds at once. Reaching it means a flood of
+/// unique keys, so a bucket is evicted to make room.
 const MAX_KEYS: usize = 10_000;
 /// How often the whole table is pruned of expired buckets. Time-based rather
 /// than call-count based, so a low-traffic server still sheds stale entries and
@@ -15,6 +15,12 @@ const SWEEP_INTERVAL: Duration = Duration::from_secs(30);
 /// Most attempts on one endpoint for one username, from any address, per window.
 const USERNAME_ATTEMPTS_PER_WINDOW: usize = 30;
 const USERNAME_WINDOW: Duration = Duration::from_secs(300);
+
+/// Most attempts on one endpoint from one IPv6 /64, and from one /48, per
+/// minute. A single customer is routinely given a /48, so the /64 limit alone
+/// let one network act as 65,536 separate callers.
+const IP_ATTEMPTS_PER_MINUTE: usize = 20;
+const IPV6_SLASH_48_ATTEMPTS_PER_MINUTE: usize = 200;
 
 /// One key's recent calls, and the window they are counted over.
 ///
@@ -44,12 +50,32 @@ impl Bucket {
     }
 }
 
-struct Buckets {
-    by_key: HashMap<String, Bucket>,
-    last_sweep: Instant,
+/// Which bucket a full table gives up to make room for a new key.
+#[derive(Clone, Copy)]
+enum Eviction {
+    LeastRecentlyUsed,
+    /// The bucket holding the fewest calls, oldest first among equals. Evicting
+    /// a bucket resets its limit, so the one an attacker most wants gone, a
+    /// username they have been guessing against, is the last to go: pushing it
+    /// out takes filling the table with buckets that each hold more calls.
+    FewestCalls,
 }
 
-impl Buckets {
+struct Table {
+    by_key: HashMap<String, Bucket>,
+    last_sweep: Instant,
+    eviction: Eviction,
+}
+
+impl Table {
+    fn new(eviction: Eviction) -> Self {
+        Self {
+            by_key: HashMap::new(),
+            last_sweep: Instant::now(),
+            eviction,
+        }
+    }
+
     /// Prunes every bucket against its own window and drops the empty ones.
     fn prune_all(&mut self, now: Instant) {
         self.by_key.retain(|_, bucket| {
@@ -57,62 +83,39 @@ impl Buckets {
             !bucket.stamps.is_empty()
         });
     }
-}
 
-pub struct RateLimiter {
-    inner: Mutex<Buckets>,
-}
-
-impl RateLimiter {
-    pub fn new() -> Self {
-        Self {
-            inner: Mutex::new(Buckets {
-                by_key: HashMap::new(),
-                last_sweep: Instant::now(),
-            }),
-        }
-    }
-
-    pub async fn allow(&self, key: &str, limit: usize, window: Duration) -> bool {
-        self.allow_cost(key, 1, limit, window).await
-    }
-
-    /// `allow`, for a call that does the work of `cost` of them.
-    ///
-    /// A batch write carries up to `MAX_BATCH_OBJECTS` objects in one request, so
-    /// counting it as a single call would turn the per-minute object limit into a
-    /// per-minute *request* limit and let one token write 256 times as much. The
-    /// cost is the object count, which keeps the ceiling on objects written per
-    /// window the same however they are packed into requests.
-    pub async fn allow_cost(&self, key: &str, cost: usize, limit: usize, window: Duration) -> bool {
-        let mut buckets = self.inner.lock().await;
+    fn admit(&mut self, key: &str, cost: usize, limit: usize, window: Duration) -> bool {
         let now = Instant::now();
 
-        if now.duration_since(buckets.last_sweep) >= SWEEP_INTERVAL {
-            buckets.prune_all(now);
-            buckets.last_sweep = now;
+        if now.duration_since(self.last_sweep) >= SWEEP_INTERVAL {
+            self.prune_all(now);
+            self.last_sweep = now;
         }
 
         // A full table must never turn into a lockout: an attacker cycling
         // through unique keys would otherwise deny service to every caller the
-        // server has not seen before. Drop expired buckets, then the least
-        // recently used one, rather than refusing the newcomer.
-        if buckets.by_key.len() >= MAX_KEYS && !buckets.by_key.contains_key(key) {
-            buckets.prune_all(now);
-            while buckets.by_key.len() >= MAX_KEYS {
-                let Some(stalest) = buckets
-                    .by_key
-                    .iter()
-                    .min_by_key(|(_, bucket)| bucket.newest())
-                    .map(|(key, _)| key.clone())
-                else {
+        // server has not seen before. Drop expired buckets, then evict, rather
+        // than refusing the newcomer.
+        if self.by_key.len() >= MAX_KEYS && !self.by_key.contains_key(key) {
+            self.prune_all(now);
+            while self.by_key.len() >= MAX_KEYS {
+                let candidates = self.by_key.iter();
+                let victim = match self.eviction {
+                    Eviction::LeastRecentlyUsed => {
+                        candidates.min_by_key(|(_, bucket)| bucket.newest())
+                    }
+                    Eviction::FewestCalls => {
+                        candidates.min_by_key(|(_, bucket)| (bucket.stamps.len(), bucket.newest()))
+                    }
+                };
+                let Some(victim) = victim.map(|(key, _)| key.clone()) else {
                     break;
                 };
-                buckets.by_key.remove(&stalest);
+                self.by_key.remove(&victim);
             }
         }
 
-        let bucket = buckets
+        let bucket = self
             .by_key
             .entry(key.to_string())
             .or_insert_with(|| Bucket {
@@ -131,6 +134,61 @@ impl RateLimiter {
         // the window together with it rather than all at once at some later time.
         bucket.stamps.extend(std::iter::repeat_n(now, cost));
         true
+    }
+}
+
+/// Buckets keyed on a caller's address, and buckets keyed on who is being acted
+/// on (a username or an account), in separate tables.
+///
+/// With one shared table, anyone holding enough addresses could mint fresh
+/// address keys until a username's bucket was evicted, resetting the
+/// per-username ceiling on password guesses. Address keys now only ever evict
+/// each other.
+struct Tables {
+    by_address: Table,
+    by_subject: Table,
+}
+
+pub struct RateLimiter {
+    inner: Mutex<Tables>,
+}
+
+impl RateLimiter {
+    pub fn new() -> Self {
+        Self {
+            inner: Mutex::new(Tables {
+                by_address: Table::new(Eviction::LeastRecentlyUsed),
+                by_subject: Table::new(Eviction::FewestCalls),
+            }),
+        }
+    }
+
+    /// Rate limit keyed on the caller's address.
+    pub async fn allow(&self, key: &str, limit: usize, window: Duration) -> bool {
+        self.allow_cost(key, 1, limit, window).await
+    }
+
+    /// `allow`, for a call that does the work of `cost` of them.
+    ///
+    /// A batch write carries up to `MAX_BATCH_OBJECTS` objects in one request, so
+    /// counting it as a single call would turn the per-minute object limit into a
+    /// per-minute *request* limit and let one token write 256 times as much. The
+    /// cost is the object count, which keeps the ceiling on objects written per
+    /// window the same however they are packed into requests.
+    pub async fn allow_cost(&self, key: &str, cost: usize, limit: usize, window: Duration) -> bool {
+        self.inner
+            .lock()
+            .await
+            .by_address
+            .admit(key, cost, limit, window)
+    }
+
+    async fn allow_subject(&self, key: &str, cost: usize, limit: usize, window: Duration) -> bool {
+        self.inner
+            .lock()
+            .await
+            .by_subject
+            .admit(key, cost, limit, window)
     }
 
     /// Rate limit keyed on an authenticated account rather than a username and
@@ -160,7 +218,7 @@ impl RateLimiter {
         limit: usize,
         window: Duration,
     ) -> bool {
-        self.allow_cost(
+        self.allow_subject(
             &format!("account:{endpoint}:{account_id}"),
             cost,
             limit,
@@ -171,19 +229,30 @@ impl RateLimiter {
 
     pub async fn allow_endpoint(&self, endpoint: &str, username: &str, ip: Option<IpAddr>) -> bool {
         let ip_key = ip.map(rate_limit_ip);
-        let ip_ok = match ip {
-            Some(ip) => {
-                self.allow(
-                    &format!("ip:{endpoint}:{}", rate_limit_ip(ip)),
-                    20,
+        if let Some(ip) = ip_key {
+            if !self
+                .allow(
+                    &format!("ip:{endpoint}:{ip}"),
+                    IP_ATTEMPTS_PER_MINUTE,
                     Duration::from_secs(60),
                 )
                 .await
+            {
+                return false;
             }
-            None => true,
-        };
-        if !ip_ok {
-            return false;
+        }
+        if let Some(IpAddr::V6(ip)) = ip {
+            let slash_48 = Ipv6Addr::from(u128::from(ip) & (!0u128 << 80));
+            if !self
+                .allow(
+                    &format!("ip48:{endpoint}:{slash_48}"),
+                    IPV6_SLASH_48_ATTEMPTS_PER_MINUTE,
+                    Duration::from_secs(60),
+                )
+                .await
+            {
+                return false;
+            }
         }
         let user_key = match ip_key {
             Some(ip) => format!("user:{endpoint}:{username}:{ip}"),
@@ -193,10 +262,11 @@ impl RateLimiter {
             return false;
         }
         // Per-username ceiling across all addresses, so guesses spread over many
-        // IPs still hit a wall. Loose enough that an attacker locking out a real
-        // user for a few minutes is the worst case.
-        self.allow(
+        // IPs still hit a wall. An attacker can hold it full for as long as they
+        // keep sending (audit finding 5).
+        self.allow_subject(
             &format!("name:{endpoint}:{username}"),
+            1,
             USERNAME_ATTEMPTS_PER_WINDOW,
             USERNAME_WINDOW,
         )
@@ -234,7 +304,7 @@ mod tests {
         // gets through rather than being refused because the table is full.
         {
             let buckets = limiter.inner.lock().await;
-            assert!(buckets.by_key.len() <= MAX_KEYS);
+            assert!(buckets.by_address.by_key.len() <= MAX_KEYS);
         }
         assert!(
             limiter
@@ -274,13 +344,14 @@ mod tests {
                 .checked_sub(Duration::from_secs(120))
                 .expect("the monotonic clock must be at least two minutes old");
             buckets
+                .by_address
                 .by_key
                 .get_mut("rotate:alice")
                 .expect("the bucket must exist")
                 .stamps
                 .fill(aged);
             // And make the next call due a sweep.
-            buckets.last_sweep = Instant::now()
+            buckets.by_address.last_sweep = Instant::now()
                 .checked_sub(SWEEP_INTERVAL)
                 .expect("the monotonic clock must be older than one sweep interval");
         }
@@ -319,7 +390,7 @@ mod tests {
             let aged = Instant::now()
                 .checked_sub(Duration::from_secs(120))
                 .expect("the monotonic clock must be at least two minutes old");
-            for bucket in buckets.by_key.values_mut() {
+            for bucket in buckets.by_address.by_key.values_mut() {
                 bucket.stamps.fill(aged);
             }
         }
@@ -329,12 +400,16 @@ mod tests {
 
         let buckets = limiter.inner.lock().await;
         assert_eq!(
-            buckets.by_key.get("rotate:alice").map(|b| b.stamps.len()),
+            buckets
+                .by_address
+                .by_key
+                .get("rotate:alice")
+                .map(|b| b.stamps.len()),
             Some(5),
             "the eviction prune shortened or dropped the 300s bucket"
         );
         assert!(
-            !buckets.by_key.contains_key("flood:0"),
+            !buckets.by_address.by_key.contains_key("flood:0"),
             "the 60s buckets have aged out and should have been dropped"
         );
     }
@@ -364,6 +439,71 @@ mod tests {
         assert!(
             !limiter
                 .allow_cost("batch:bob", 11, 10, Duration::from_secs(60))
+                .await
+        );
+    }
+
+    /// Audit finding 3: a caller with many addresses could mint enough fresh keys
+    /// to evict a username's bucket and reset its ceiling on password guesses.
+    #[tokio::test]
+    async fn a_flood_of_fresh_keys_does_not_reset_a_username_ceiling() {
+        let limiter = RateLimiter::new();
+        for index in 0..USERNAME_ATTEMPTS_PER_WINDOW {
+            let ip: IpAddr = format!("10.0.{}.{}", index / 200, index % 200 + 1)
+                .parse()
+                .unwrap();
+            assert!(limiter.allow_endpoint("login", "alice", Some(ip)).await);
+        }
+        for index in 0..(MAX_KEYS + 500) {
+            // One /48 each, so neither address ceiling stops the flood.
+            let ip: IpAddr = format!("2001:db8:{index:x}::1").parse().unwrap();
+            limiter
+                .allow_endpoint("login", &format!("flood-{index}"), Some(ip))
+                .await;
+        }
+        let fresh: IpAddr = "192.0.2.1".parse().unwrap();
+        assert!(
+            !limiter.allow_endpoint("login", "alice", Some(fresh)).await,
+            "the flood evicted alice's username bucket and reset her ceiling"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_flood_of_address_keys_does_not_evict_an_account_bucket() {
+        let limiter = RateLimiter::new();
+        let window = Duration::from_secs(300);
+        for _ in 0..5 {
+            assert!(limiter.allow_account("rotate", "alice", 5, window).await);
+        }
+        for index in 0..(MAX_KEYS + 500) {
+            limiter
+                .allow(&format!("ip:flood:{index}"), 5, Duration::from_secs(60))
+                .await;
+        }
+        assert!(!limiter.allow_account("rotate", "alice", 5, window).await);
+    }
+
+    #[tokio::test]
+    async fn ipv6_addresses_share_a_slash_48_ceiling() {
+        let limiter = RateLimiter::new();
+        for index in 0..IPV6_SLASH_48_ATTEMPTS_PER_MINUTE {
+            let ip: IpAddr = format!("2001:db8:1:{index:x}::1").parse().unwrap();
+            assert!(
+                limiter
+                    .allow_endpoint("login", &format!("user-{index}"), Some(ip))
+                    .await
+            );
+        }
+        let other_64: IpAddr = "2001:db8:1:ffff::1".parse().unwrap();
+        assert!(
+            !limiter
+                .allow_endpoint("login", "next", Some(other_64))
+                .await
+        );
+        let other_48: IpAddr = "2001:db8:2::1".parse().unwrap();
+        assert!(
+            limiter
+                .allow_endpoint("login", "next", Some(other_48))
                 .await
         );
     }
