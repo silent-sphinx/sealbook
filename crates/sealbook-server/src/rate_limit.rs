@@ -12,6 +12,10 @@ const MAX_KEYS: usize = 10_000;
 /// a flood cannot outrun the sweep.
 const SWEEP_INTERVAL: Duration = Duration::from_secs(30);
 
+/// Most attempts on one endpoint for one username, from any address, per window.
+const USERNAME_ATTEMPTS_PER_WINDOW: usize = 30;
+const USERNAME_WINDOW: Duration = Duration::from_secs(300);
+
 /// One key's recent calls, and the window they are counted over.
 ///
 /// The window belongs to the bucket rather than to the call doing the pruning,
@@ -185,7 +189,18 @@ impl RateLimiter {
             Some(ip) => format!("user:{endpoint}:{username}:{ip}"),
             None => format!("user:{endpoint}:{username}"),
         };
-        self.allow(&user_key, 5, Duration::from_secs(60)).await
+        if !self.allow(&user_key, 5, Duration::from_secs(60)).await {
+            return false;
+        }
+        // Per-username ceiling across all addresses, so guesses spread over many
+        // IPs still hit a wall. Loose enough that an attacker locking out a real
+        // user for a few minutes is the worst case.
+        self.allow(
+            &format!("name:{endpoint}:{username}"),
+            USERNAME_ATTEMPTS_PER_WINDOW,
+            USERNAME_WINDOW,
+        )
+        .await
     }
 }
 
@@ -361,6 +376,23 @@ mod tests {
         }
         assert!(!limiter.allow_endpoint("login", "alice", None).await);
         assert!(limiter.allow_endpoint("recover", "alice", None).await);
+    }
+
+    #[tokio::test]
+    async fn a_username_is_capped_across_many_addresses() {
+        let limiter = RateLimiter::new();
+        for index in 0..USERNAME_ATTEMPTS_PER_WINDOW {
+            let ip: IpAddr = format!("10.0.{}.{}", index / 200, index % 200 + 1)
+                .parse()
+                .unwrap();
+            assert!(limiter.allow_endpoint("login", "alice", Some(ip)).await);
+        }
+        let fresh: IpAddr = "192.0.2.1".parse().unwrap();
+        assert!(
+            !limiter.allow_endpoint("login", "alice", Some(fresh)).await,
+            "guesses spread over many addresses must hit the username ceiling"
+        );
+        assert!(limiter.allow_endpoint("login", "bob", Some(fresh)).await);
     }
 
     #[tokio::test]

@@ -2,7 +2,7 @@ FROM rust:1-bookworm AS builder
 
 WORKDIR /src
 COPY . .
-RUN cargo build --release -p sealbook-server
+RUN cargo build --release --locked -p sealbook-server
 
 FROM debian:bookworm-slim AS runtime
 

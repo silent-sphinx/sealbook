@@ -47,6 +47,10 @@ const NONCE_HEADER: &str = "x-sealbook-nonce";
 /// is tens of chunk PUTs, and a client may upload several at once.
 const ATTACHMENT_OPS_PER_MINUTE: usize = 6_000;
 
+/// Smallest chunk size a multi-chunk attachment may declare. Clients always use
+/// `ATTACHMENT_CHUNK_SIZE`, so this only turns away deliberately tiny chunks.
+const MIN_ATTACHMENT_CHUNK_SIZE: usize = 64 * 1024;
+
 /// Longest a `pending` attachment lives before the sweep reclaims it.
 ///
 /// An upload that was interrupted leaves chunks and reserved quota behind; this
@@ -189,6 +193,12 @@ pub(crate) async fn create_attachment(
     }
     if body.chunk_size as usize > ATTACHMENT_CHUNK_SIZE {
         return Err(err(StatusCode::BAD_REQUEST, "chunk size too large"));
+    }
+    // Each chunk is a database row whose keys and index cost far more than its
+    // ciphertext counts against the quota, so tiny chunks would stretch the quota
+    // into millions of rows. A single chunk is exempt: it is one row regardless.
+    if body.chunk_count > 1 && (body.chunk_size as usize) < MIN_ATTACHMENT_CHUNK_SIZE {
+        return Err(err(StatusCode::BAD_REQUEST, "chunk size too small"));
     }
     // The declared chunking must be the one and only tiling of the declared size,
     // so the completeness check at commit (count of stored chunks) is meaningful.
@@ -484,6 +494,7 @@ pub(crate) async fn get_attachment_meta(
     headers: HeaderMap,
 ) -> Result<Json<AttachmentMetaResponse>, (StatusCode, Json<ErrorBody>)> {
     let session = require_session(&state, &headers).await?;
+    require_read_budget(&state, "attachment-meta", &session.account_id).await?;
 
     let row: Option<(String, i64, i64, i64, i64)> = sqlx::query_as(
         "SELECT state, chunk_size, chunk_count, total_ciphertext_size, created_at
@@ -514,6 +525,7 @@ pub(crate) async fn download_chunk(
     headers: HeaderMap,
 ) -> Result<Response, (StatusCode, Json<ErrorBody>)> {
     let session = require_session(&state, &headers).await?;
+    require_read_budget(&state, "attachment-chunk", &session.account_id).await?;
 
     // Only a committed attachment is served, so a second device never sees a
     // half-uploaded one mid-write. This join of state and chunk also means an
@@ -622,6 +634,7 @@ pub(crate) async fn list_attachments(
     headers: HeaderMap,
 ) -> Result<Json<ListAttachmentsResponse>, (StatusCode, Json<ErrorBody>)> {
     let session = require_session(&state, &headers).await?;
+    require_read_budget(&state, "attachment-list", &session.account_id).await?;
 
     // Ids and age only. The server is content-blind, so it cannot know which
     // attachments a note still references: the orphan sweep is the client's,
