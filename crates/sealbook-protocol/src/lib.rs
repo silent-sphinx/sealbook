@@ -1,6 +1,7 @@
 pub mod attachment;
 mod base64url;
 pub mod envelope;
+pub mod profile;
 #[cfg(feature = "schema")]
 pub mod schema;
 pub mod version;

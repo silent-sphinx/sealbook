@@ -667,10 +667,51 @@ pub struct HttpBytesResponse {
 #[derive(uniffi::Object)]
 pub struct HttpClient {
     inner: reqwest::blocking::Client,
+    /// The SHA-256 fingerprint of the certificate on the last completed handshake.
+    last_fingerprint: std::sync::Mutex<Option<String>>,
+}
+
+impl HttpClient {
+    fn note_certificate(&self, response: &reqwest::blocking::Response) {
+        let fingerprint = response
+            .extensions()
+            .get::<reqwest::tls::TlsInfo>()
+            .and_then(|info| info.peer_certificate())
+            .map(certificate_fingerprint);
+        if let Some(fingerprint) = fingerprint {
+            if let Ok(mut slot) = self.last_fingerprint.lock() {
+                *slot = Some(fingerprint);
+            }
+        }
+    }
+}
+
+/// The certificate's SHA-256 fingerprint, formatted as the server logs it
+/// (upper-case hex pairs joined by colons) so the two can be compared by eye.
+fn certificate_fingerprint(der: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(der)
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect::<Vec<_>>()
+        .join(":")
 }
 
 #[uniffi::export]
 impl HttpClient {
+    /// The SHA-256 fingerprint of the certificate seen on the last handshake,
+    /// formatted as the server logs it, or `None` before any request.
+    ///
+    /// Read right after the pre-auth profile fetch: the app compares it to the
+    /// certificate it pinned for this server and refuses a change before sending
+    /// a credential, as the native client does over its own transport.
+    pub fn server_fingerprint(&self) -> Option<String> {
+        self.last_fingerprint
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone())
+    }
+
     /// Trusts the public roots, plus `extra_trust_pem` (a development server's
     /// certificate, debug builds only) and `platform_roots`, the DER
     /// certificates of the device's own trust store.
@@ -695,11 +736,15 @@ impl HttpClient {
             // Cleartext would undo the point of the transport, and the app's
             // network security config refused it before this existed.
             .https_only(true)
+            .tls_info(true)
             .connect_timeout(timeout)
             .timeout(timeout)
             .build()
             .map_err(|e| HttpError::Tls { msg: e.to_string() })?;
-        Ok(Arc::new(Self { inner }))
+        Ok(Arc::new(Self {
+            inner,
+            last_fingerprint: std::sync::Mutex::new(None),
+        }))
     }
 
     /// One request, blocking. Callers are already on a background thread.
@@ -727,6 +772,7 @@ impl HttpClient {
         let response = req.send().map_err(|e| HttpError::Transport {
             msg: transport_message(&e),
         })?;
+        self.note_certificate(&response);
         let status = response.status().as_u16();
         let body = response
             .text()
@@ -770,6 +816,7 @@ impl HttpClient {
         let response = req.send().map_err(|e| HttpError::Transport {
             msg: transport_message(&e),
         })?;
+        self.note_certificate(&response);
         let status = response.status().as_u16();
         let header = read_header.and_then(|name| {
             response
@@ -803,4 +850,106 @@ fn transport_message(err: &reqwest::Error) -> String {
         source = cause.source();
     }
     parts.join(": ")
+}
+
+/// Severity of a server-safety finding, mirroring `sealbook_protocol::Severity`.
+#[derive(uniffi::Enum)]
+pub enum SafetySeverity {
+    Fatal,
+    Warn,
+}
+
+/// One thing wrong with a server's advertised crypto posture.
+#[derive(uniffi::Record)]
+pub struct SafetyFinding {
+    pub field: String,
+    pub severity: SafetySeverity,
+    pub expected: String,
+    pub reported: String,
+    pub message: String,
+}
+
+/// The outcome of checking a server's `/health/crypto` profile before auth.
+#[derive(uniffi::Record)]
+pub struct SafetyVerdict {
+    pub findings: Vec<SafetyFinding>,
+    /// True when at least one finding blocks: the app must refuse and send nothing.
+    pub fatal: bool,
+}
+
+/// Checks a server's advertised crypto posture before anything identifying is
+/// sent. Android drives the post-quantum rustls transport above, so this is a
+/// native check. `pinned_pq_required` and `pinned_device_proof` are the posture
+/// this device accepted for the server before, if any; both `None` is first
+/// contact.
+///
+/// A profile that cannot be parsed is one with every field absent, which the
+/// evaluator reports as warnings rather than refusing outright.
+#[uniffi::export]
+pub fn server_safety_check(
+    profile_json: String,
+    pinned_pq_required: Option<bool>,
+    pinned_device_proof: Option<bool>,
+) -> SafetyVerdict {
+    use sealbook_protocol::profile::{
+        evaluate_crypto_profile, has_fatal, CryptoProfile, PinnedPosture, Severity, Transport,
+    };
+
+    let profile: CryptoProfile = serde_json::from_str(&profile_json).unwrap_or_default();
+    let pinned =
+        (pinned_pq_required.is_some() || pinned_device_proof.is_some()).then(|| PinnedPosture {
+            tls_kx_pq_required: pinned_pq_required.unwrap_or(false),
+            opaque_requires_device_proof: pinned_device_proof.unwrap_or(false),
+        });
+    let findings = evaluate_crypto_profile(&profile, Transport::Native, pinned);
+    let fatal = has_fatal(&findings);
+    SafetyVerdict {
+        findings: findings
+            .into_iter()
+            .map(|finding| SafetyFinding {
+                field: finding.field,
+                severity: match finding.severity {
+                    Severity::Fatal => SafetySeverity::Fatal,
+                    Severity::Warn => SafetySeverity::Warn,
+                },
+                expected: finding.expected,
+                reported: finding.reported,
+                message: finding.message,
+            })
+            .collect(),
+        fatal,
+    }
+}
+
+#[cfg(test)]
+mod safety_tests {
+    use super::*;
+
+    #[test]
+    fn a_fingerprint_is_colon_separated_upper_case_hex() {
+        let fingerprint = certificate_fingerprint(b"cert");
+        assert_eq!(fingerprint.len(), 32 * 3 - 1);
+        assert!(fingerprint.split(':').all(|pair| pair.len() == 2
+            && pair
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_lowercase())));
+    }
+
+    #[test]
+    fn an_unreadable_profile_warns_and_does_not_block() {
+        let verdict = server_safety_check("not json".into(), None, None);
+        assert!(!verdict.fatal);
+        assert!(!verdict.findings.is_empty());
+    }
+
+    #[test]
+    fn a_dropped_pinned_requirement_is_fatal() {
+        let profile = r#"{"protocol":"sealbook-v1","object_aead":"XChaCha20-Poly1305-256",
+            "signature_algorithms":["ML-DSA-65","Ed25519"],
+            "hpke_ciphersuite":"hpke-xwing-sha256-chacha20poly1305",
+            "opaque_ksf":"argon2id-m65536-t3-p1","tls_kx_pq_required":true,
+            "opaque_requires_device_proof":false}"#;
+        assert!(!server_safety_check(profile.into(), None, None).fatal);
+        assert!(server_safety_check(profile.into(), Some(true), Some(true)).fatal);
+    }
 }
