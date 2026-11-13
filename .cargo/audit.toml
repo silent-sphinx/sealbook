@@ -4,4 +4,9 @@ ignore = [
     # The OPAQUE suite is Ristretto255 and no NIST curve is in the tree, so none
     # of its arithmetic runs. Drop once opaque-ke 4.1 ships.
     "RUSTSEC-2026-0387",
+    # libsqlite3-sys 0.30 arrives through sqlx 0.8 and 0.9, and no sqlx release
+    # yet moves to the patched 0.39. Only a process that opens a database file
+    # with a crafted sibling -wal file is exposed, and the server opens only its
+    # own database. Drop once sqlx-sqlite moves to libsqlite3-sys >=0.39.
+    "RUSTSEC-2026-0459",
 ]
