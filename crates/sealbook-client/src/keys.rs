@@ -8,7 +8,7 @@ use uuid::Uuid;
 use sealbook_crypto::{
     key_rotation_transcript, key_wraps_digest, rotated_objects_digest, rotation_recovery_payload,
     sign, unwrap_for_device, CollectionKey, DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets,
-    ObjectDigestEntry, WrapDigestEntry, XWING_CIPHERSUITE,
+    ObjectDigestEntry, WrapBinding, WrapDigestEntry, XWING_CIPHERSUITE,
 };
 use sealbook_protocol::{
     CollectionKeysResponse, DevicePublicKeys, DualSignatureBody, RosterBody, RosterSignerBody,
@@ -165,7 +165,16 @@ impl SealbookClient {
             kdf_salt: salt,
             phrase,
             phrase_recovery,
-        } = rotation_wraps_typed(&new_ck, &recipients, &username, password)?;
+        } = rotation_wraps_typed(
+            &new_ck,
+            &WrapBinding {
+                collection_id,
+                key_epoch: plan.manifest.key_epoch,
+            },
+            &recipients,
+            &username,
+            password,
+        )?;
 
         let new_ck_b64 = URL_SAFE_NO_PAD.encode(new_ck.as_bytes());
         let mut objects = Vec::with_capacity(plan.reseal.len());
@@ -322,6 +331,10 @@ impl SealbookClient {
                 enc: wrap.hpke_enc.clone(),
                 ciphertext: wrap.wrapped_ck.clone(),
                 ciphersuite: XWING_CIPHERSUITE,
+            },
+            &WrapBinding {
+                collection_id,
+                key_epoch: resp.key_epoch,
             },
         )?;
         self.collection_key = Some(key);

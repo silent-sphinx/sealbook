@@ -29,8 +29,8 @@ use sealbook_crypto::{
     recovery_password_payload, sign, sign_phrase_recovery, unwrap_collection_key,
     unwrap_for_device, unwrap_for_phrase, username_change_payload, wrap_collection_key,
     wrap_for_device, wrap_for_phrase, CollectionKey, DeviceHpkePublic, DeviceHpkeSecret,
-    DeviceHpkeWrap, DeviceSigningSecrets, RecoveryWrap, PHRASE_CIPHERSUITE, PHRASE_SCHEME,
-    RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
+    DeviceHpkeWrap, DeviceSigningSecrets, RecoveryWrap, WrapBinding, PHRASE_CIPHERSUITE,
+    PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
 };
 use sealbook_protocol::{
     valid_username, AccountChallengeResponse, ChangePasswordRequest, ChangePasswordStartRequest,
@@ -386,7 +386,14 @@ pub fn register_finish_request(
 
     let password_wrap = wrap_collection_key(password.as_bytes(), &salt, &key)?;
     let phrase_wrap = wrap_for_phrase(&entropy, &key)?;
-    let device_wrap = wrap_for_device(&DeviceHpkePublic(keys.xwing_hpke_pk.clone()), &key)?;
+    let device_wrap = wrap_for_device(
+        &DeviceHpkePublic(keys.xwing_hpke_pk.clone()),
+        &key,
+        &WrapBinding {
+            collection_id: identity.collection_id,
+            key_epoch: 1,
+        },
+    )?;
     let phrase_public = phrase_recovery_public(&entropy)?;
     let phrase_recovery = PhraseRecoveryBody {
         mldsa_pk: phrase_public.mldsa_pk.clone(),
@@ -620,6 +627,10 @@ pub fn login_accept(
         &served.kdf_salt,
         &state.hpke_sk,
         state.device_id,
+        &WrapBinding {
+            collection_id: served.collection_id,
+            key_epoch: served.key_epoch,
+        },
         &served.key_wraps,
     )?;
     let mut state = state.clone();
@@ -747,7 +758,14 @@ pub fn recover_finish_request(
 
     let salt = generate_kdf_salt();
     let password_wrap = wrap_collection_key(password.as_bytes(), &salt, &key)?;
-    let device_wrap = wrap_for_device(&DeviceHpkePublic(keys.xwing_hpke_pk.clone()), &key)?;
+    let device_wrap = wrap_for_device(
+        &DeviceHpkePublic(keys.xwing_hpke_pk.clone()),
+        &key,
+        &WrapBinding {
+            collection_id: started.collection_id,
+            key_epoch: started.roster.key_epoch,
+        },
+    )?;
     let payload = recovery_password_payload(
         &upload,
         &salt,
@@ -1061,6 +1079,7 @@ fn open_collection_key(
     kdf_salt: &[u8],
     hpke_sk: &[u8],
     device_id: Uuid,
+    binding: &WrapBinding,
     wraps: &[KeyWrapBody],
 ) -> Result<CollectionKey, CoreError> {
     let device = device_id.to_string();
@@ -1075,6 +1094,7 @@ fn open_collection_key(
                 ciphertext: wrap.wrapped_ck.clone(),
                 ciphersuite: XWING_CIPHERSUITE,
             },
+            binding,
         )?);
     }
     if let Some(wrap) = wraps.iter().find(|wrap| wrap.recipient_kind == "recovery") {

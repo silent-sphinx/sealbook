@@ -33,8 +33,8 @@ use sealbook_core::{
 };
 use sealbook_crypto::{
     device_hpke_keypair_from_ikm, phrase_recovery_public, signing_from_seeds, wrap_collection_key,
-    wrap_for_device, wrap_for_phrase, CollectionKey, DeviceHpkePublic, PHRASE_CIPHERSUITE,
-    PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
+    wrap_for_device, wrap_for_phrase, CollectionKey, DeviceHpkePublic, WrapBinding,
+    PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
 };
 use sealbook_protocol::{
     AccountChallengeResponse, ChangePasswordRequest, ChangePasswordStartResponse,
@@ -1050,8 +1050,15 @@ fn build() -> Fixture {
         roster_transcript: vec![6u8; 32],
     };
 
-    let device_wrap =
-        wrap_for_device(&DeviceHpkePublic(unb64(&device.device.xwing_hpke_pk)), &key).unwrap();
+    let device_wrap = wrap_for_device(
+        &DeviceHpkePublic(unb64(&device.device.xwing_hpke_pk)),
+        &key,
+        &WrapBinding {
+            collection_id,
+            key_epoch: 1,
+        },
+    )
+    .unwrap();
     let password_wrap = wrap_collection_key(PASSWORD.as_bytes(), &salt, &key).unwrap();
     let device_key_wrap = KeyWrapBody {
         recipient_kind: "device".into(),

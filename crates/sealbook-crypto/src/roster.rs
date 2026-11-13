@@ -271,6 +271,14 @@ pub fn verify_roster_chain<'a>(
         Some((key, epoch)) if epoch == latest.key_epoch => {
             verify_roster_mac(key, &latest.transcript(collection_id), &latest.mac)?;
         }
+        // A device holding a newer key has seen a rotation this roster predates. A
+        // revoked device that still knew the old key could sign and MAC a fork
+        // there, so a roster behind the held key is never accepted.
+        Some((_, epoch)) if epoch > latest.key_epoch => {
+            return Err(roster_err(
+                "the served roster is older than the collection key this device holds",
+            ));
+        }
         _ if pin.is_none() => {
             return Err(roster_err(
                 "an unpinned roster can only be trusted with the collection key of its epoch",
@@ -417,5 +425,45 @@ mod tests {
             &key,
         );
         assert!(verify_roster_chain(collection, Some(pin), &[fork], None).is_err());
+    }
+
+    #[test]
+    fn a_roster_behind_the_held_key_is_refused_even_with_a_valid_signature_and_mac() {
+        let collection = Uuid::new_v4();
+        let old_key = CollectionKey::generate();
+        let (_, phrase) = generate_device_signing().unwrap();
+        let a = member();
+        let revoked = member();
+        let attacker = member();
+        let genesis = signed(
+            collection,
+            1,
+            vec![a.device.clone(), revoked.device.clone()],
+            &phrase,
+            &a,
+            &old_key,
+        );
+        let pin = RosterPin {
+            roster_seq: 1,
+            transcript: genesis.transcript(collection),
+        };
+        // The revoked device still knows the epoch 1 key and is still a member of
+        // the roster this lagging client pinned.
+        let fork = signed(
+            collection,
+            2,
+            vec![
+                a.device.clone(),
+                revoked.device.clone(),
+                attacker.device.clone(),
+            ],
+            &phrase,
+            &revoked,
+            &old_key,
+        );
+        let chain = [genesis, fork];
+        assert!(verify_roster_chain(collection, Some(pin), &chain, None).is_ok());
+        let new_key = CollectionKey::generate();
+        assert!(verify_roster_chain(collection, Some(pin), &chain, Some((&new_key, 2))).is_err());
     }
 }

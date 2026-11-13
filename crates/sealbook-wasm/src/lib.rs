@@ -27,8 +27,8 @@ use sealbook_crypto::{
     rotated_objects_digest, rotation_recovery_payload, sign, unwrap_collection_key,
     unwrap_for_device, wrap_collection_key, wrap_for_device, wrap_for_phrase, CollectionKey,
     DeviceHpkePublic, DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets, EncryptedObject,
-    ManifestDigestEntry, ObjectDigestEntry, RecoveryWrap, WrapDigestEntry, MANIFEST_BUCKETS,
-    PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
+    ManifestDigestEntry, ObjectDigestEntry, RecoveryWrap, WrapBinding, WrapDigestEntry,
+    MANIFEST_BUCKETS, PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
 };
 use sealbook_protocol::envelope::{open_envelope, seal_envelope, Unsealed};
 use sealbook_protocol::{DevicePublicKeys, RosterBody, RosterSignerBody, SEALED_CONTENT_TYPE};
@@ -113,7 +113,8 @@ struct WrapIn {
 /// material without a round trip. Production registers through
 /// `core_new_registration`.
 #[wasm_bindgen]
-pub fn create_enrollment(password: &str) -> Result<Ts<Enrollment>, JsError> {
+pub fn create_enrollment(password: &str, collection_id: &str) -> Result<Ts<Enrollment>, JsError> {
+    let collection_id = parse_uuid(collection_id)?;
     let (hpke_sk, hpke_pk) = generate_device_hpke().map_err(js_err)?;
     let (sign_sk, sign_pk) = generate_device_signing().map_err(js_err)?;
     let ck = CollectionKey::generate();
@@ -121,7 +122,15 @@ pub fn create_enrollment(password: &str) -> Result<Ts<Enrollment>, JsError> {
     let recovery = wrap_collection_key(password.as_bytes(), &salt, &ck).map_err(js_err)?;
     let (phrase, phrase_entropy) = generate_phrase().map_err(js_err)?;
     let phrase_wrap = wrap_for_phrase(&phrase_entropy, &ck).map_err(js_err)?;
-    let device_wrap = wrap_for_device(&hpke_pk, &ck).map_err(js_err)?;
+    let device_wrap = wrap_for_device(
+        &hpke_pk,
+        &ck,
+        &WrapBinding {
+            collection_id,
+            key_epoch: 1,
+        },
+    )
+    .map_err(js_err)?;
     let device_id = Uuid::new_v4();
     let transcript = enrollment_transcript(
         device_id,
@@ -167,6 +176,8 @@ pub fn unwrap_ck(
     kdf_salt_b64: &str,
     hpke_sk_b64: &str,
     device_id: &str,
+    collection_id: &str,
+    key_epoch: u32,
     wraps_json: &str,
 ) -> Result<String, JsError> {
     let wraps: Vec<WrapIn> = serde_json::from_str(wraps_json).map_err(js_err)?;
@@ -180,6 +191,10 @@ pub fn unwrap_ck(
                 enc: unb64(&device.hpke_enc)?,
                 ciphertext: unb64(&device.wrapped_ck)?,
                 ciphersuite: XWING_CIPHERSUITE,
+            },
+            &WrapBinding {
+                collection_id: parse_uuid(collection_id)?,
+                key_epoch: u64::from(key_epoch),
             },
         )
         .map_err(js_err)?;
@@ -425,10 +440,19 @@ pub fn create_device() -> Result<Ts<DeviceOut>, JsError> {
 }
 
 #[wasm_bindgen]
-pub fn wrap_ck_for_device(ck_b64: &str, hpke_pk_b64: &str) -> Result<String, JsError> {
+pub fn wrap_ck_for_device(
+    ck_b64: &str,
+    hpke_pk_b64: &str,
+    collection_id: &str,
+    key_epoch: u32,
+) -> Result<String, JsError> {
     let wrap = wrap_for_device(
         &DeviceHpkePublic(unb64(hpke_pk_b64)?),
         &ck_from_b64(ck_b64)?,
+        &WrapBinding {
+            collection_id: parse_uuid(collection_id)?,
+            key_epoch: u64::from(key_epoch),
+        },
     )
     .map_err(js_err)?;
     serde_json::to_string(&serde_json::json!({
@@ -1277,15 +1301,22 @@ pub fn core_rotation_plan(
 #[wasm_bindgen]
 pub fn core_rotation_wraps(
     new_ck_b64: &str,
+    collection_id: &str,
+    new_key_epoch: u32,
     recipients: Ts<CoreDeviceList>,
     username: &str,
     password: &str,
 ) -> Result<Ts<sealbook_core::CoreRotationWraps>, JsError> {
-    Ok(
-        sealbook_core::rotation_wraps(new_ck_b64, &recipients.to_rust()?.0, username, password)
-            .map_err(core_err)?
-            .into_ts()?,
+    Ok(sealbook_core::rotation_wraps(
+        new_ck_b64,
+        parse_uuid(collection_id)?,
+        u64::from(new_key_epoch),
+        &recipients.to_rust()?.0,
+        username,
+        password,
     )
+    .map_err(core_err)?
+    .into_ts()?)
 }
 
 /// The devices a rotation re-wraps the new key for, from the verified roster.

@@ -15,7 +15,7 @@ use sealbook_crypto::{
     generate_device_signing, login_start_transcript, object_aad, open_login_challenge,
     phrase_lookup_id, phrase_recovery_transcript, sign, sign_phrase_recovery, wrap_for_device,
     CollectionKey, DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets, EncryptedObject,
-    PAIR_CONFIRMATION_LEN, PHRASE_SCHEME, XWING_CIPHERSUITE,
+    WrapBinding, PAIR_CONFIRMATION_LEN, PHRASE_SCHEME, XWING_CIPHERSUITE,
 };
 use sealbook_protocol::{
     DualSignatureBody, KeyWrapBody, LoginChallengeRequest, LoginChallengeResponse,
@@ -314,7 +314,15 @@ async fn recovery_challenge_cannot_be_replayed() {
         &hpke_pk.0,
     );
     let enrollment_sig = sign(&sign_sk, &enrollment).unwrap();
-    let wrap = wrap_for_device(&hpke_pk, owner.collection_key().unwrap()).unwrap();
+    let wrap = wrap_for_device(
+        &hpke_pk,
+        owner.collection_key().unwrap(),
+        &WrapBinding {
+            collection_id: owner.state.as_ref().unwrap().collection_id,
+            key_epoch: owner.cached_key_epoch(),
+        },
+    )
+    .unwrap();
     let pw = recovery_password(
         "correct horse battery",
         &response.opaque_response,
@@ -1797,7 +1805,15 @@ async fn recovery_rejects_a_proof_with_a_foreign_mldsa_signature() {
         &hpke_pk.0,
     );
     let enrollment_sig = sign(&sign_sk, &enrollment).unwrap();
-    let wrap = wrap_for_device(&hpke_pk, owner.collection_key().unwrap()).unwrap();
+    let wrap = wrap_for_device(
+        &hpke_pk,
+        owner.collection_key().unwrap(),
+        &WrapBinding {
+            collection_id: owner.state.as_ref().unwrap().collection_id,
+            key_epoch: owner.cached_key_epoch(),
+        },
+    )
+    .unwrap();
     let pw = recovery_password(
         "correct horse battery",
         &start.opaque_response,
@@ -3406,8 +3422,15 @@ async fn a_rotation_that_tombstones_a_live_object_is_refused() {
     let new_ck = CollectionKey::generate();
     let salt = generate_kdf_salt();
     let (_phrase, entropy) = generate_phrase().unwrap();
-    let device_wrap = wrap_for_device(&DeviceHpkePublic(device.xwing_hpke_pk.clone()), &new_ck)
-        .expect("wrap for device");
+    let device_wrap = wrap_for_device(
+        &DeviceHpkePublic(device.xwing_hpke_pk.clone()),
+        &new_ck,
+        &WrapBinding {
+            collection_id,
+            key_epoch: owner.server_key_epoch().await.unwrap() + 1,
+        },
+    )
+    .expect("wrap for device");
     let recovery_wrap =
         wrap_collection_key(password.as_bytes(), &salt, &new_ck).expect("wrap for password");
     let phrase_wrap = wrap_for_phrase(&entropy, &new_ck).expect("wrap for phrase");
@@ -3582,8 +3605,15 @@ async fn a_rotation_whose_recovery_material_was_modified_after_signing_is_refuse
     let new_ck = CollectionKey::generate();
     let salt = generate_kdf_salt();
     let (_phrase, entropy) = generate_phrase().unwrap();
-    let device_wrap = wrap_for_device(&DeviceHpkePublic(device.xwing_hpke_pk.clone()), &new_ck)
-        .expect("wrap for device");
+    let device_wrap = wrap_for_device(
+        &DeviceHpkePublic(device.xwing_hpke_pk.clone()),
+        &new_ck,
+        &WrapBinding {
+            collection_id,
+            key_epoch: owner.server_key_epoch().await.unwrap() + 1,
+        },
+    )
+    .expect("wrap for device");
     let recovery_wrap =
         wrap_collection_key(password.as_bytes(), &salt, &new_ck).expect("wrap for password");
     let phrase_wrap = wrap_for_phrase(&entropy, &new_ck).expect("wrap for phrase");
@@ -5331,7 +5361,15 @@ async fn a_recovery_that_never_rotated_is_caught_at_the_next_login() {
         ),
     )
     .unwrap();
-    let wrap = wrap_for_device(&hpke_pk, owner.collection_key().unwrap()).unwrap();
+    let wrap = wrap_for_device(
+        &hpke_pk,
+        owner.collection_key().unwrap(),
+        &WrapBinding {
+            collection_id: owner.state.as_ref().unwrap().collection_id,
+            key_epoch: owner.cached_key_epoch(),
+        },
+    )
+    .unwrap();
     let pw = recovery_password(
         password,
         &start.opaque_response,
@@ -5544,7 +5582,15 @@ async fn a_recovery_whose_new_password_was_modified_after_signing_is_refused() {
         ),
     )
     .unwrap();
-    let wrap = wrap_for_device(&hpke_pk, owner.collection_key().unwrap()).unwrap();
+    let wrap = wrap_for_device(
+        &hpke_pk,
+        owner.collection_key().unwrap(),
+        &WrapBinding {
+            collection_id: owner.state.as_ref().unwrap().collection_id,
+            key_epoch: owner.cached_key_epoch(),
+        },
+    )
+    .unwrap();
     let pw = recovery_password(
         password,
         &start.opaque_response,
@@ -5792,6 +5838,10 @@ async fn a_joining_device_refuses_a_roster_it_did_not_confirm() {
     let server_wrap = wrap_for_device(
         &sealbook_crypto::DeviceHpkePublic(joiner_hpke_pk),
         &server_ck,
+        &WrapBinding {
+            collection_id: collection_uuid,
+            key_epoch: owner.cached_key_epoch(),
+        },
     )
     .unwrap();
     sqlx::query(
@@ -6302,8 +6352,15 @@ async fn a_rotation_that_retires_a_tombstone_above_the_floor_is_refused() {
     let new_ck = CollectionKey::generate();
     let salt = generate_kdf_salt();
     let (_phrase, entropy) = generate_phrase().unwrap();
-    let device_wrap =
-        wrap_for_device(&DeviceHpkePublic(device.xwing_hpke_pk.clone()), &new_ck).unwrap();
+    let device_wrap = wrap_for_device(
+        &DeviceHpkePublic(device.xwing_hpke_pk.clone()),
+        &new_ck,
+        &WrapBinding {
+            collection_id,
+            key_epoch: owner.server_key_epoch().await.unwrap() + 1,
+        },
+    )
+    .unwrap();
     let recovery_wrap = wrap_collection_key(password.as_bytes(), &salt, &new_ck).unwrap();
     let phrase_wrap = wrap_for_phrase(&entropy, &new_ck).unwrap();
     let key_wraps = vec![

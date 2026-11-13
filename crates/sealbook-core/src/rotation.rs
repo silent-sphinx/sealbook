@@ -12,8 +12,8 @@ use base64::Engine;
 use sealbook_crypto::{
     decrypt_object, encrypt_object, generate_kdf_salt, generate_phrase, object_aad,
     phrase_lookup_id, phrase_recovery_public, wrap_collection_key, wrap_for_device,
-    wrap_for_phrase, CollectionKey, DeviceHpkePublic, EncryptedObject, PHRASE_CIPHERSUITE,
-    PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
+    wrap_for_phrase, CollectionKey, DeviceHpkePublic, EncryptedObject, WrapBinding,
+    PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
 };
 use sealbook_protocol::envelope::{open_envelope, Unsealed};
 use sealbook_protocol::{KeyWrapBody, PhraseRecoveryBody};
@@ -317,6 +317,7 @@ pub struct RotationWraps {
 /// to keep.
 pub fn rotation_wraps_typed(
     new_key: &CollectionKey,
+    binding: &WrapBinding,
     recipients: &[CoreDevice],
     username: &str,
     password: &str,
@@ -335,7 +336,7 @@ pub fn rotation_wraps_typed(
                 .map_err(|_| CoreError::Malformed {
                     detail: "device HPKE key".into(),
                 })?;
-        let wrap = wrap_for_device(&DeviceHpkePublic(pk), new_key)?;
+        let wrap = wrap_for_device(&DeviceHpkePublic(pk), new_key, binding)?;
         key_wraps.push(KeyWrapBody {
             recipient_kind: "device".into(),
             recipient_id: device.device_id.to_string(),
@@ -401,12 +402,23 @@ pub struct CoreRotationWraps {
 /// [`rotation_wraps_typed`] for a host that holds the new key as base64url.
 pub fn rotation_wraps(
     new_ck_b64: &str,
+    collection_id: Uuid,
+    new_key_epoch: u64,
     recipients: &[CoreDevice],
     username: &str,
     password: &str,
 ) -> Result<CoreRotationWraps, CoreError> {
     let key = CollectionKey::from_bytes(crate::roster::collection_key(new_ck_b64)?);
-    let wraps = rotation_wraps_typed(&key, recipients, username, password)?;
+    let wraps = rotation_wraps_typed(
+        &key,
+        &WrapBinding {
+            collection_id,
+            key_epoch: new_key_epoch,
+        },
+        recipients,
+        username,
+        password,
+    )?;
     let b64 = |bytes: &[u8]| URL_SAFE_NO_PAD.encode(bytes);
     Ok(CoreRotationWraps {
         key_wraps: wraps
@@ -743,6 +755,13 @@ mod tests {
         assert!(rotation_entries(&plan, &[]).unwrap().is_empty());
     }
 
+    fn binding() -> WrapBinding {
+        WrapBinding {
+            collection_id: Uuid::from_u128(9),
+            key_epoch: 4,
+        }
+    }
+
     fn enrolled(id: u128) -> (CoreDevice, sealbook_crypto::DeviceHpkeSecret) {
         let (secret, public) = sealbook_crypto::generate_device_hpke().unwrap();
         let mut entry = device(id);
@@ -755,8 +774,14 @@ mod tests {
         let (first, first_secret) = enrolled(1);
         let (second, _) = enrolled(2);
         let key = CollectionKey::from_bytes(KEY);
-        let wraps =
-            rotation_wraps_typed(&key, &[first.clone(), second.clone()], "ada", "hunter2").unwrap();
+        let wraps = rotation_wraps_typed(
+            &key,
+            &binding(),
+            &[first.clone(), second.clone()],
+            "ada",
+            "hunter2",
+        )
+        .unwrap();
         let order: Vec<(&str, &str)> = wraps
             .key_wraps
             .iter()
@@ -783,6 +808,7 @@ mod tests {
                 ciphertext: wraps.key_wraps[0].wrapped_ck.clone(),
                 ciphersuite: XWING_CIPHERSUITE,
             },
+            &binding(),
         )
         .unwrap();
         assert_eq!(opened.as_bytes(), &KEY);
@@ -791,7 +817,15 @@ mod tests {
     #[test]
     fn the_host_form_carries_the_same_wraps_as_base64() {
         let (only, _) = enrolled(1);
-        let wraps = rotation_wraps(&URL_SAFE_NO_PAD.encode(KEY), &[only], "ada", "pw").unwrap();
+        let wraps = rotation_wraps(
+            &URL_SAFE_NO_PAD.encode(KEY),
+            binding().collection_id,
+            binding().key_epoch,
+            &[only],
+            "ada",
+            "pw",
+        )
+        .unwrap();
         assert_eq!(wraps.key_wraps.len(), 3);
         assert_eq!(wraps.phrase.split_whitespace().count(), 24);
         assert!(URL_SAFE_NO_PAD.decode(&wraps.kdf_salt).is_ok());
@@ -802,9 +836,14 @@ mod tests {
     fn a_device_key_that_is_not_base64_is_refused() {
         let mut bad = device(1);
         bad.xwing_hpke_pk = "***".into();
-        assert!(
-            rotation_wraps_typed(&CollectionKey::from_bytes(KEY), &[bad], "ada", "pw").is_err()
-        );
+        assert!(rotation_wraps_typed(
+            &CollectionKey::from_bytes(KEY),
+            &binding(),
+            &[bad],
+            "ada",
+            "pw"
+        )
+        .is_err());
     }
 }
 
@@ -839,11 +878,20 @@ pub mod ffi {
     #[uniffi::export]
     pub fn rotation_wraps(
         new_ck_b64: String,
+        collection_id: Uuid,
+        new_key_epoch: u64,
         recipients: Vec<CoreDevice>,
         username: String,
         password: String,
     ) -> Result<CoreRotationWraps, CoreError> {
-        super::rotation_wraps(&new_ck_b64, &recipients, &username, &password)
+        super::rotation_wraps(
+            &new_ck_b64,
+            collection_id,
+            new_key_epoch,
+            &recipients,
+            &username,
+            &password,
+        )
     }
 
     #[uniffi::export]

@@ -17,7 +17,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sealbook_crypto::{
     enrollment_transcript, pair_confirmation, pair_grant_transcript, sign, wrap_for_device,
-    CollectionKey, DeviceHpkePublic, DeviceSigningSecrets, XWING_CIPHERSUITE,
+    CollectionKey, DeviceHpkePublic, DeviceSigningSecrets, WrapBinding, XWING_CIPHERSUITE,
 };
 use sealbook_protocol::{
     DevicePublicKeys, DualSignatureBody, KeyWrapBody, PairApproveRequest, PairJoinRequest,
@@ -326,7 +326,14 @@ pub fn pair_approve(
     }
     let key = CollectionKey::from_bytes(session.collection_key.ok_or(CoreError::NoCollectionKey)?);
     let joining = DevicePublicKeys::try_from(&preview.device)?;
-    let wrap = wrap_for_device(&DeviceHpkePublic(joining.xwing_hpke_pk.clone()), &key)?;
+    let wrap = wrap_for_device(
+        &DeviceHpkePublic(joining.xwing_hpke_pk.clone()),
+        &key,
+        &WrapBinding {
+            collection_id: context.collection_id,
+            key_epoch: session.key_epoch,
+        },
+    )?;
     let grant = sign(
         secrets,
         &pair_grant_transcript(

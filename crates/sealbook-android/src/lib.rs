@@ -5,8 +5,8 @@ use sealbook_crypto::{
     manifest_digest, object_aad, pair_confirmation, rotated_objects_digest,
     rotation_recovery_payload, sign, unwrap_collection_key, unwrap_for_device, wrap_for_device,
     CollectionKey, DeviceHpkePublic, DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets,
-    EncryptedObject, ManifestDigestEntry, ObjectDigestEntry, RecoveryWrap, WrapDigestEntry,
-    XWING_CIPHERSUITE,
+    EncryptedObject, ManifestDigestEntry, ObjectDigestEntry, RecoveryWrap, WrapBinding,
+    WrapDigestEntry, XWING_CIPHERSUITE,
 };
 use sealbook_protocol::envelope::{open_envelope, seal_envelope, Unsealed};
 use sealbook_protocol::{DevicePublicKeys, RosterBody, RosterSignerBody, SEALED_CONTENT_TYPE};
@@ -81,6 +81,8 @@ pub fn unwrap_ck(
     kdf_salt_b64: String,
     hpke_sk_b64: String,
     device_id: String,
+    collection_id: String,
+    key_epoch: u64,
     wraps_json: String,
 ) -> Result<String, CryptoError> {
     #[derive(serde::Deserialize)]
@@ -105,6 +107,10 @@ pub fn unwrap_ck(
                 enc: unb64(&device.hpke_enc)?,
                 ciphertext: unb64(&device.wrapped_ck)?,
                 ciphersuite: XWING_CIPHERSUITE,
+            },
+            &WrapBinding {
+                collection_id: parse_uuid(&collection_id)?,
+                key_epoch,
             },
         )?;
         return Ok(b64(key.as_bytes()));
@@ -302,10 +308,19 @@ pub struct WrapResult {
 }
 
 #[uniffi::export]
-pub fn wrap_ck_for_device(ck_b64: String, hpke_pk_b64: String) -> Result<WrapResult, CryptoError> {
+pub fn wrap_ck_for_device(
+    ck_b64: String,
+    hpke_pk_b64: String,
+    collection_id: String,
+    key_epoch: u64,
+) -> Result<WrapResult, CryptoError> {
     let wrap = wrap_for_device(
         &DeviceHpkePublic(unb64(&hpke_pk_b64)?),
         &ck_from_b64(&ck_b64)?,
+        &WrapBinding {
+            collection_id: parse_uuid(&collection_id)?,
+            key_epoch,
+        },
     )?;
     Ok(WrapResult {
         enc: b64(&wrap.enc),

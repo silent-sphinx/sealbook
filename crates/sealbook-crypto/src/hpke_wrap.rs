@@ -5,6 +5,7 @@ use hpke::{
 };
 use rand::RngCore;
 use sha2::Sha256;
+use uuid::Uuid;
 use zeroize::Zeroize;
 
 use crate::aead::CollectionKey;
@@ -14,8 +15,10 @@ pub const XWING_CIPHERSUITE: &str = "hpke-xwing-sha256-chacha20poly1305";
 pub const XWING_PUBLIC_KEY_LEN: usize = 1216;
 pub const XWING_ENCAPSULATED_KEY_LEN: usize = 1120;
 pub const HPKE_AEAD_TAG_LEN: usize = 16;
-const HPKE_INFO: &[u8] = b"sealbook/collection-key/v1";
-const HPKE_AAD: &[u8] = b"sealbook-ck";
+const HPKE_INFO_LEGACY: &[u8] = b"sealbook/collection-key/v1";
+const HPKE_AAD_LEGACY: &[u8] = b"sealbook-ck";
+const HPKE_INFO: &[u8] = b"sealbook/collection-key/v2";
+const HPKE_AAD_PREFIX: &[u8] = b"sealbook-ck-v2";
 const LOGIN_INFO: &[u8] = b"sealbook/login-challenge/v1";
 const LOGIN_AAD: &[u8] = b"sealbook-login";
 
@@ -90,13 +93,39 @@ pub fn validate_device_hpke_public(public: &DeviceHpkePublic) -> Result<(), Cryp
         .map_err(CryptoError::from)
 }
 
+/// The collection and key epoch a device wrap belongs to.
+///
+/// Sealed into the wrap's AAD, so a server cannot hand a device an older wrap
+/// labelled as a newer epoch, or one from another collection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WrapBinding {
+    pub collection_id: Uuid,
+    pub key_epoch: u64,
+}
+
+impl WrapBinding {
+    fn aad(&self) -> Vec<u8> {
+        let mut aad = Vec::with_capacity(HPKE_AAD_PREFIX.len() + 24);
+        aad.extend_from_slice(HPKE_AAD_PREFIX);
+        aad.extend_from_slice(self.collection_id.as_bytes());
+        aad.extend_from_slice(&self.key_epoch.to_be_bytes());
+        aad
+    }
+}
+
 pub fn wrap_for_device(
     recipient_pk: &DeviceHpkePublic,
     key: &CollectionKey,
+    binding: &WrapBinding,
 ) -> Result<DeviceHpkeWrap, CryptoError> {
     let pk = <Kem as KemTrait>::PublicKey::from_bytes(&recipient_pk.0)?;
-    let (encapped, ciphertext) =
-        hpke::single_shot_seal::<Aead, Kdf, Kem>(&OpModeS::Base, &pk, HPKE_INFO, &key.0, HPKE_AAD)?;
+    let (encapped, ciphertext) = hpke::single_shot_seal::<Aead, Kdf, Kem>(
+        &OpModeS::Base,
+        &pk,
+        HPKE_INFO,
+        &key.0,
+        &binding.aad(),
+    )?;
     Ok(DeviceHpkeWrap {
         enc: encapped.to_bytes().to_vec(),
         ciphertext,
@@ -104,11 +133,20 @@ pub fn wrap_for_device(
     })
 }
 
+/// Opens a device wrap bound to `binding`.
+///
+/// Wraps made before binding existed carry no collection or epoch, so they are
+/// still opened, but only once the bound form has failed. A client treats that as
+/// a legacy wrap it should replace at the next rotation. Until every wrap has been
+/// replaced, a server could serve the legacy form to skip the binding; the
+/// roster's key-epoch check is what stops a stale roster being accepted.
 pub fn unwrap_for_device(
     secret: &DeviceHpkeSecret,
     wrap: &DeviceHpkeWrap,
+    binding: &WrapBinding,
 ) -> Result<CollectionKey, CryptoError> {
-    let bytes = open_secret(secret, wrap, HPKE_INFO, HPKE_AAD)?;
+    let bytes = open_secret(secret, wrap, HPKE_INFO, &binding.aad())
+        .or_else(|_| open_secret(secret, wrap, HPKE_INFO_LEGACY, HPKE_AAD_LEGACY))?;
     Ok(CollectionKey::from_bytes(bytes))
 }
 
@@ -198,14 +236,43 @@ pub fn random_bytes(len: usize) -> Vec<u8> {
 mod tests {
     use super::*;
 
+    fn binding(epoch: u64) -> WrapBinding {
+        WrapBinding {
+            collection_id: Uuid::from_u128(7),
+            key_epoch: epoch,
+        }
+    }
+
     #[test]
     fn xwing_wrap_round_trip() {
         let (sk, pk) = generate_device_hpke().unwrap();
         let key = CollectionKey::generate();
-        let wrap = wrap_for_device(&pk, &key).unwrap();
-        let opened = unwrap_for_device(&sk, &wrap).unwrap();
+        let wrap = wrap_for_device(&pk, &key, &binding(2)).unwrap();
+        let opened = unwrap_for_device(&sk, &wrap, &binding(2)).unwrap();
         assert_eq!(opened.as_bytes(), key.as_bytes());
         assert_eq!(wrap.ciphersuite, XWING_CIPHERSUITE);
+    }
+
+    #[test]
+    fn a_bound_wrap_does_not_open_for_another_epoch_or_collection() {
+        let (sk, pk) = generate_device_hpke().unwrap();
+        let key = CollectionKey::generate();
+        let wrap = wrap_for_device(&pk, &key, &binding(2)).unwrap();
+        assert!(unwrap_for_device(&sk, &wrap, &binding(3)).is_err());
+        let other = WrapBinding {
+            collection_id: Uuid::from_u128(8),
+            key_epoch: 2,
+        };
+        assert!(unwrap_for_device(&sk, &wrap, &other).is_err());
+    }
+
+    #[test]
+    fn a_wrap_made_before_binding_still_opens() {
+        let (sk, pk) = generate_device_hpke().unwrap();
+        let key = CollectionKey::generate();
+        let legacy = seal_secret(&pk, &key.0, HPKE_INFO_LEGACY, HPKE_AAD_LEGACY).unwrap();
+        let opened = unwrap_for_device(&sk, &legacy, &binding(5)).unwrap();
+        assert_eq!(opened.as_bytes(), key.as_bytes());
     }
 
     #[test]

@@ -22,7 +22,7 @@ pub use hpke_wrap::{
     ct_eq, device_hpke_keypair_from_ikm, device_hpke_public_from_ikm, generate_device_hpke,
     generate_login_challenge, hybrid_session_key, open_login_challenge, seal_login_challenge,
     unwrap_for_device, validate_device_hpke_public, wrap_for_device, DeviceHpkePublic,
-    DeviceHpkeSecret, DeviceHpkeWrap, HPKE_AEAD_TAG_LEN, XWING_CIPHERSUITE,
+    DeviceHpkeSecret, DeviceHpkeWrap, WrapBinding, HPKE_AEAD_TAG_LEN, XWING_CIPHERSUITE,
     XWING_ENCAPSULATED_KEY_LEN, XWING_PUBLIC_KEY_LEN,
 };
 pub use phrase::{
