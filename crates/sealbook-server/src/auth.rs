@@ -331,7 +331,7 @@ pub(crate) async fn login_start(
     }
     if !state
         .limiter
-        .allow_endpoint(
+        .allow_password_attempt(
             "login",
             &body.username,
             Some(state.trusted_proxies.client_ip(addr.ip(), &headers)),

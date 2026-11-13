@@ -228,6 +228,30 @@ impl RateLimiter {
     }
 
     pub async fn allow_endpoint(&self, endpoint: &str, username: &str, ip: Option<IpAddr>) -> bool {
+        self.allow_with_ceiling(endpoint, endpoint, username, ip)
+            .await
+    }
+
+    /// For every route that evaluates an account's OPRF on a caller's input.
+    /// Each evaluation lets someone holding a credential response test one
+    /// password guess, so all such routes draw on one per-username ceiling.
+    pub async fn allow_password_attempt(
+        &self,
+        endpoint: &str,
+        username: &str,
+        ip: Option<IpAddr>,
+    ) -> bool {
+        self.allow_with_ceiling(endpoint, "password", username, ip)
+            .await
+    }
+
+    async fn allow_with_ceiling(
+        &self,
+        endpoint: &str,
+        ceiling: &str,
+        username: &str,
+        ip: Option<IpAddr>,
+    ) -> bool {
         let ip_key = ip.map(rate_limit_ip);
         if let Some(ip) = ip_key {
             if !self
@@ -265,7 +289,7 @@ impl RateLimiter {
         // IPs still hit a wall. An attacker can hold it full for as long as they
         // keep sending (audit finding 5).
         self.allow_subject(
-            &format!("name:{endpoint}:{username}"),
+            &format!("name:{ceiling}:{username}"),
             1,
             USERNAME_ATTEMPTS_PER_WINDOW,
             USERNAME_WINDOW,
@@ -504,6 +528,35 @@ mod tests {
         assert!(
             limiter
                 .allow_endpoint("login", "next", Some(other_48))
+                .await
+        );
+    }
+
+    /// Audit finding 4: `recover-start` evaluates the same OPRF as `login`, so
+    /// it must not offer a second budget of password guesses for one username.
+    #[tokio::test]
+    async fn login_and_recovery_share_one_password_attempt_ceiling() {
+        let limiter = RateLimiter::new();
+        for index in 0..USERNAME_ATTEMPTS_PER_WINDOW {
+            let ip: IpAddr = format!("10.0.{}.{}", index / 200, index % 200 + 1)
+                .parse()
+                .unwrap();
+            assert!(
+                limiter
+                    .allow_password_attempt("login", "alice", Some(ip))
+                    .await
+            );
+        }
+        let fresh: IpAddr = "192.0.2.1".parse().unwrap();
+        assert!(
+            !limiter
+                .allow_password_attempt("recover-start", "alice", Some(fresh))
+                .await,
+            "recover-start must draw on the ceiling login has used up"
+        );
+        assert!(
+            limiter
+                .allow_password_attempt("recover-start", "bob", Some(fresh))
                 .await
         );
     }
