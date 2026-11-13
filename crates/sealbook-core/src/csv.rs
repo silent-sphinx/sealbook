@@ -189,6 +189,9 @@ pub fn csv_import(text: &str, address_book_id: &str) -> CoreContactImport {
         return crate::contact_json::too_large();
     }
     let rows = csv_rows(text);
+    if rows.len() > crate::contact_json::MAX_IMPORTED_CONTACTS + 1 {
+        return crate::contact_json::too_many();
+    }
     let mut contacts = Vec::new();
     let mut skipped = Vec::new();
     if rows.len() >= 2 {
@@ -520,7 +523,9 @@ fn read(row: &Row, default_book: &str) -> Option<CoreContactDraft> {
             "comment",
             "description",
         ]),
-        avatar: row.get(&["avatar", "photo"]),
+        avatar: row
+            .get(&["avatar", "photo"])
+            .and_then(crate::contact_json::safe_avatar),
         profile,
         address_book_id: resolve_address_book_id(Some(book)),
         created_at: row.get(&["created at"]),

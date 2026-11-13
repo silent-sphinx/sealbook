@@ -37,12 +37,24 @@ pub(crate) fn trim(text: &str) -> &str {
 }
 
 pub(crate) fn unescape(value: &str) -> String {
-    let value = value.replace("\\n", "\n").replace("\\N", "\n");
-    let value = value
-        .replace("\\,", ",")
-        .replace("\\;", ";")
-        .replace("\\\\", "\\");
-    trim(&value).to_string()
+    let mut out = String::with_capacity(value.len());
+    let mut chars = value.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('n' | 'N') => out.push('\n'),
+            Some(escaped @ (',' | ';' | '\\')) => out.push(escaped),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    trim(&out).to_string()
 }
 
 fn escape(value: &str) -> String {
@@ -51,7 +63,16 @@ fn escape(value: &str) -> String {
         .replace(';', "\\;")
         .replace(',', "\\,")
         .replace("\r\n", "\\n")
-        .replace('\n', "\\n")
+        .replace(['\n', '\r'], "\\n")
+}
+
+/// A value for a parameter such as `TYPE=`, where escaping cannot help: the
+/// characters that end or split a parameter, or a line, are dropped.
+fn param_value(value: &str) -> String {
+    value
+        .chars()
+        .filter(|c| !c.is_control() && !matches!(c, ':' | ';' | ',' | '"' | '\\'))
+        .collect()
 }
 
 fn normalize_date(raw: &str) -> String {
@@ -166,6 +187,9 @@ pub fn vcard_import(text: &str, address_book_id: &str) -> CoreContactImport {
         if line.eq_ignore_ascii_case("END:VCARD") {
             if in_card && !props.is_empty() {
                 seen += 1;
+                if seen > crate::contact_json::MAX_IMPORTED_CONTACTS {
+                    return crate::contact_json::too_many();
+                }
                 keep(&mut cards, &mut skipped, seen, build(&props, &book));
             }
             in_card = false;
@@ -384,11 +408,11 @@ fn build(props: &[Prop], book: &str) -> Option<CoreContactDraft> {
                     continue;
                 }
                 let lower = raw.to_lowercase();
-                if lower.starts_with("data:")
+                let value = if lower.starts_with("data:")
                     || lower.starts_with("http://")
                     || lower.starts_with("https://")
                 {
-                    avatar = Some(raw.to_string());
+                    raw.to_string()
                 } else {
                     let kind = prop.param("TYPE").unwrap_or("jpeg").to_lowercase();
                     let mime = if kind.contains("png") {
@@ -399,8 +423,15 @@ fn build(props: &[Prop], book: &str) -> Option<CoreContactDraft> {
                         "image/jpeg"
                     };
                     let body: String = raw.split_whitespace().collect();
-                    avatar = Some(format!("data:{mime};base64,{body}"));
-                }
+                    if !body
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
+                    {
+                        continue;
+                    }
+                    format!("data:{mime};base64,{body}")
+                };
+                avatar = crate::contact_json::safe_avatar(value);
             }
             _ => {}
         }
@@ -499,7 +530,9 @@ fn card(c: &CoreContactDraft) -> String {
         }
         let kind = match (&email.kind, email.label.as_deref()) {
             (CoreChannelKind::Work, _) => "WORK".to_string(),
-            (CoreChannelKind::Custom, Some(label)) if !label.is_empty() => label.to_uppercase(),
+            (CoreChannelKind::Custom, Some(label)) if !param_value(label).is_empty() => {
+                param_value(label).to_uppercase()
+            }
             _ => "HOME".to_string(),
         };
         lines.push(format!("EMAIL;TYPE={kind}:{}", escape(value)));
@@ -513,7 +546,9 @@ fn card(c: &CoreContactDraft) -> String {
         let kind = match (&phone.kind, phone.label.as_deref()) {
             (CoreChannelKind::Mobile, _) => "CELL".to_string(),
             (CoreChannelKind::Work, _) => "WORK".to_string(),
-            (CoreChannelKind::Custom, Some(label)) if !label.is_empty() => label.to_uppercase(),
+            (CoreChannelKind::Custom, Some(label)) if !param_value(label).is_empty() => {
+                param_value(label).to_uppercase()
+            }
             _ => "HOME".to_string(),
         };
         lines.push(format!("TEL;TYPE={kind}:{}", escape(value)));
@@ -529,7 +564,9 @@ fn card(c: &CoreContactDraft) -> String {
             CoreContactDateKind::Anniversary => format!("ANNIVERSARY:{value}"),
             CoreContactDateKind::Custom => {
                 let label = date.label.as_deref().filter(|v| !v.is_empty());
-                format!("X-DATE;LABEL={}:{value}", escape(label.unwrap_or("Event")))
+                let label = param_value(label.unwrap_or("Event"));
+                let label = if label.is_empty() { "Event" } else { &label };
+                format!("X-DATE;LABEL={label}:{value}")
             }
         });
     }
@@ -540,7 +577,7 @@ fn card(c: &CoreContactDraft) -> String {
         }
         lines.push(format!(
             "X-SOCIALPROFILE;TYPE={}:{}",
-            escape(&social.platform),
+            param_value(&social.platform),
             escape(&social.handle)
         ));
     }

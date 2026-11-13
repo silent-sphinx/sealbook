@@ -30,6 +30,32 @@ pub(crate) fn too_large() -> CoreContactImport {
     }
 }
 
+/// What a direct vCard or CSV import returns for a file holding more than
+/// [`MAX_IMPORTED_CONTACTS`] cards or rows.
+pub(crate) fn too_many() -> CoreContactImport {
+    CoreContactImport {
+        contacts: Vec::new(),
+        skipped: vec![CoreContactSkipped {
+            label: "File".into(),
+            reason: "it holds too many contacts (maximum 1,000)".into(),
+        }],
+    }
+}
+
+/// An avatar worth storing: a raster image as a `data:` URL, or an `https` URL.
+/// Anything else (`javascript:`, `data:text/html`, SVG, plain `http`) is dropped,
+/// because hosts may use the value as an image source.
+pub(crate) fn safe_avatar(value: String) -> Option<String> {
+    let lower = value.to_ascii_lowercase();
+    let image = lower.strip_prefix("data:image/").is_some_and(|rest| {
+        ["png;", "jpeg;", "jpg;", "gif;", "webp;"]
+            .iter()
+            .any(|kind| rest.starts_with(kind))
+            && rest.contains(";base64,")
+    });
+    (image || lower.starts_with("https://")).then_some(value)
+}
+
 /// The cards in a contacts file, and which format the file was read as.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
@@ -170,7 +196,7 @@ fn card(entry: &Map<String, Value>, default_book: &str) -> Option<CoreContactDra
         dates: list(entry, "dates", date_of),
         socials: list(entry, "socials", social_of),
         notes: field(entry, "notes"),
-        avatar: field(entry, "avatar"),
+        avatar: field(entry, "avatar").and_then(safe_avatar),
         address_book_id: resolve_address_book_id(Some(book)),
         created_at: field(entry, "createdAt"),
         ..CoreContactDraft::default()
