@@ -164,6 +164,10 @@ pub struct RosterBody {
     #[serde(with = "b64")]
     pub phrase_ed25519_pk: Vec<u8>,
     pub signer: RosterSignerBody,
+    /// Commits to this epoch's collection key under the signature. Absent on
+    /// rosters sealed before it existed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty", with = "b64")]
+    pub key_commitment: Vec<u8>,
     pub signature: DualSignatureBody,
     #[serde(with = "b64")]
     pub mac: Vec<u8>,
@@ -192,6 +196,7 @@ impl RosterBody {
                 }
                 RosterSignerBody::Phrase => sealbook_crypto::RosterSigner::Phrase,
             },
+            key_commitment: self.key_commitment.clone(),
             signature: sealbook_crypto::DualSignature {
                 mldsa: self.signature.mldsa.clone(),
                 ed25519: self.signature.ed25519.clone(),
@@ -200,7 +205,8 @@ impl RosterBody {
         }
     }
 
-    /// Signs and MACs a roster over `devices`.
+    /// Signs and MACs a roster over `devices`, committing to `key` as the key of
+    /// `key_epoch`.
     #[allow(clippy::too_many_arguments)]
     pub fn seal(
         collection_id: Uuid,
@@ -220,6 +226,8 @@ impl RosterBody {
             phrase_mldsa_pk,
             phrase_ed25519_pk,
             signer,
+            key_commitment: sealbook_crypto::key_commitment(key, collection_id, key_epoch)?
+                .to_vec(),
             signature: DualSignatureBody {
                 mldsa: Vec::new(),
                 ed25519: Vec::new(),
@@ -294,6 +302,7 @@ impl RosterBody {
                 }
                 sealbook_crypto::RosterSigner::Phrase => RosterSignerBody::Phrase,
             },
+            key_commitment: roster.key_commitment,
             signature: DualSignatureBody {
                 mldsa: roster.signature.mldsa,
                 ed25519: roster.signature.ed25519,

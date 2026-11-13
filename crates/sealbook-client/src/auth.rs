@@ -102,15 +102,15 @@ impl SealbookClient {
         let finished = self.post(&server, &finish, None).await?;
         let logged = sealbook_core::login_accept(&core_state, password, &finished)?;
 
-        self.collection_key = Some(key_from(&logged.collection_key)?);
-        self.key_epoch = logged.key_epoch;
+        self.collection_key = None;
         self.recovery_pending = logged.recovery_pending;
         self.state = Some(LocalState::from_core(logged.state));
-        // Before anything reads or writes the vault: the roster is what every
-        // later device-set decision is made from, and a device no longer in it
-        // has been revoked and should say so here rather than fail confusingly
-        // later.
-        self.sync_roster().await?;
+        // Before anything reads or writes the vault: the roster is what shows
+        // the key just opened is the account's and not one the server sealed to
+        // this device, what every later device-set decision is made from, and
+        // where a device that has been revoked finds out.
+        self.adopt_key(key_from(&logged.collection_key)?, logged.key_epoch)
+            .await?;
         if self.recovery_pending && !allow_recovery_pending {
             return Err(ClientError::RecoveryRotationPending);
         }

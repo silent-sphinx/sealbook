@@ -300,7 +300,9 @@ impl SealbookClient {
     /// Re-fetches this device's collection-key wrap after a rotation.
     ///
     /// Only the device's own X-Wing secret is needed, so this does not require
-    /// the password.
+    /// the password. The wrap alone proves nothing about the key, since anyone
+    /// with this device's public key can seal one, so the key is adopted only
+    /// once the roster for its epoch commits to it.
     pub async fn refresh_collection_key(&mut self) -> Result<u64, ClientError> {
         let (server, collection_id, device_id, token, hpke_sk) = {
             let state = self.state.as_ref().ok_or(ClientError::NoState)?;
@@ -337,8 +339,7 @@ impl SealbookClient {
                 key_epoch: resp.key_epoch,
             },
         )?;
-        self.collection_key = Some(key);
-        self.key_epoch = resp.key_epoch;
+        self.adopt_key(key, resp.key_epoch).await?;
         Ok(resp.key_epoch)
     }
 }

@@ -4,8 +4,11 @@
 //! Every decision here is `sealbook_core::roster`; this module is the reqwest
 //! shell around it and the conversion to and from `LocalState`.
 
-use sealbook_core::{pin_roster, roster_accept, roster_request, CoreSession, VerifiedRoster};
-use sealbook_crypto::CryptoError;
+use sealbook_core::{
+    pin_roster, roster_accept, roster_accept_key, roster_request, CoreSession, HttpResponse,
+    RosterContext, VerifiedRoster,
+};
+use sealbook_crypto::{CollectionKey, CryptoError};
 use sealbook_protocol::{DevicePublicKeys, RosterBody};
 
 use crate::{ClientError, SealbookClient};
@@ -52,6 +55,39 @@ impl SealbookClient {
     /// caller that wants the roster's own account of itself rather than the
     /// wire bytes.
     pub(crate) async fn verified_roster_core(&self) -> Result<VerifiedRoster, ClientError> {
+        let response = self.fetch_roster().await?;
+        let context = self.roster_context()?;
+        Ok(roster_accept(&context, &self.core_session(), &response)?)
+    }
+
+    /// Verifies the current roster against a key this device has just been
+    /// served, and pins it. `key` must not be used if this fails.
+    pub(crate) async fn adopt_key(
+        &mut self,
+        key: CollectionKey,
+        key_epoch: u64,
+    ) -> Result<Vec<DevicePublicKeys>, ClientError> {
+        let response = self.fetch_roster().await?;
+        let session = CoreSession {
+            collection_key: Some(key.0),
+            key_epoch,
+            verified_roster: None,
+        };
+        let verified = roster_accept_key(&self.roster_context()?, &session, &response)?;
+        let roster: RosterBody = serde_json::from_str(&verified.roster_json)
+            .map_err(|err| roster_error(&format!("core returned an unreadable roster: {err}")))?;
+        self.collection_key = Some(key);
+        self.key_epoch = key_epoch;
+        self.pin_roster(&roster)?;
+        Ok(roster.devices)
+    }
+
+    fn roster_context(&self) -> Result<RosterContext, ClientError> {
+        let state = self.state.as_ref().ok_or(ClientError::NoState)?;
+        Ok(state.to_core().roster_context())
+    }
+
+    async fn fetch_roster(&self) -> Result<HttpResponse, ClientError> {
         let (context, token) = {
             let state = self.state.as_ref().ok_or(ClientError::NoState)?;
             (
@@ -60,8 +96,7 @@ impl SealbookClient {
             )
         };
         let request = roster_request(&context)?;
-        let response = self.send(&request, Some(&token)).await?;
-        Ok(roster_accept(&context, &self.core_session(), &response)?)
+        self.send(&request, Some(&token)).await
     }
 
     /// Verifies the current roster and pins it, returning its devices.

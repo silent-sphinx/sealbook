@@ -1403,6 +1403,10 @@
           },
           "type": "array"
         },
+        "key_commitment": {
+          "$ref": "#/$defs/Base64Url",
+          "description": "Commits to this epoch's collection key under the signature. Absent on\nrosters sealed before it existed."
+        },
         "key_epoch": {
           "format": "uint64",
           "minimum": 0,

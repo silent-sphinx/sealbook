@@ -6,11 +6,11 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sealbook_core::{
-    pin_roster, roster_accept, roster_accept_sealed, roster_answers_for, roster_request,
-    CoreDeviceState, CoreError, CoreRoster, CoreRosterPin, CoreRosterSigner, CoreSession, Header,
-    HttpResponse, Method, RosterContext,
+    pin_roster, roster_accept, roster_accept_key, roster_accept_sealed, roster_answers_for,
+    roster_request, CoreDeviceState, CoreError, CoreRoster, CoreRosterPin, CoreRosterSigner,
+    CoreSession, Header, HttpResponse, Method, RosterContext,
 };
-use sealbook_crypto::{signing_from_seeds, CollectionKey, DeviceSigningSecrets};
+use sealbook_crypto::{roster_mac, signing_from_seeds, CollectionKey, DeviceSigningSecrets};
 use sealbook_protocol::{DevicePublicKeys, RosterBody, RosterSignerBody};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -244,6 +244,59 @@ fn a_tampered_roster_breaks_the_chain() {
         body: serde_json::to_vec(&serde_json::json!({ "rosters": rosters, "floor": 1 })).unwrap(),
     };
     let err = roster_accept(&fixture.context(1), &fixture.session(), &response).unwrap_err();
+    assert_eq!(err.kind(), "Roster", "{err:?}");
+}
+
+#[test]
+fn a_served_key_the_roster_commits_to_is_accepted() {
+    let fixture = fixture();
+    let verified = roster_accept_key(
+        &fixture.context(1),
+        &fixture.session(),
+        &fixture.served(1, 1),
+    )
+    .expect("the account's own key verifies");
+    assert_eq!(verified.pin.roster_seq, 3);
+}
+
+/// The server holds every device's public key and every roster, so it can seal
+/// a key of its own to a device and recompute the newest roster's MAC under it.
+/// The signature it cannot redo is what the commitment sits under.
+#[test]
+fn a_served_key_the_roster_does_not_commit_to_is_refused_even_with_a_matching_mac() {
+    let fixture = fixture();
+    let substitute = CollectionKey::generate();
+    let mut rosters = fixture.rosters.clone();
+    let newest = rosters.last_mut().unwrap();
+    let transcript = newest.pin(fixture.collection_id).transcript;
+    newest.mac = roster_mac(&substitute, &transcript).unwrap().to_vec();
+    let response = HttpResponse {
+        status: 200,
+        headers: Vec::new(),
+        body: serde_json::to_vec(&serde_json::json!({ "rosters": rosters, "floor": 1 })).unwrap(),
+    };
+    let session = CoreSession {
+        collection_key: Some(substitute.0),
+        key_epoch: fixture.key_epoch,
+        verified_roster: None,
+    };
+    let err = roster_accept_key(&fixture.context(1), &session, &response).unwrap_err();
+    assert_eq!(err.kind(), "Roster", "{err:?}");
+}
+
+#[test]
+fn a_served_key_labelled_with_an_older_epoch_than_the_roster_is_refused() {
+    let fixture = fixture();
+    let session = CoreSession {
+        collection_key: Some(CollectionKey::generate().0),
+        key_epoch: fixture.key_epoch - 1,
+        verified_roster: None,
+    };
+    // A key already held from before a rotation may still read the roster.
+    roster_accept(&fixture.context(1), &session, &fixture.served(1, 1))
+        .expect("a held older key reads the roster");
+    // One just served under that label is refused: nothing would check it.
+    let err = roster_accept_key(&fixture.context(1), &session, &fixture.served(1, 1)).unwrap_err();
     assert_eq!(err.kind(), "Roster", "{err:?}");
 }
 

@@ -905,6 +905,31 @@ pub fn core_roster_accept(
     .into_ts()?)
 }
 
+/// As `core_roster_accept`, for a collection key just opened from a wrap: after
+/// login, and after re-fetching the wrap following a rotation. The key must not
+/// be used if this refuses it.
+#[wasm_bindgen]
+pub fn core_roster_accept_key(
+    context: Ts<RosterContext>,
+    ck_b64: &str,
+    key_epoch: u64,
+    status: u16,
+    body: &str,
+) -> Result<Ts<VerifiedRoster>, JsError> {
+    let response = HttpResponse {
+        status,
+        headers: Vec::new(),
+        body: body.as_bytes().to_vec(),
+    };
+    Ok(sealbook_core::roster_accept_key(
+        &context.to_rust()?,
+        &core_session(ck_b64, key_epoch)?,
+        &response,
+    )
+    .map_err(core_err)?
+    .into_ts()?)
+}
+
 /// Verifies a roster this device sealed itself, once the server has accepted it.
 #[wasm_bindgen]
 pub fn core_roster_accept_sealed(

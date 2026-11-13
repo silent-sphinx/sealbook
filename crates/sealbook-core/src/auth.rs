@@ -610,10 +610,12 @@ pub fn login_finish_request(
 /// a device whose wrap was never written can still sign in. No wrap at all is
 /// [`AuthRefusal::NoKeyWrap`].
 ///
-/// The roster is not fetched here, and the host must sync it before anything
-/// reads or writes the vault: it is what every later device-set decision is made
-/// from, and a device no longer in it has been revoked and should learn so here
-/// rather than fail confusingly later.
+/// The roster is not fetched here, and the host must sync it with
+/// [`roster_accept_key`](crate::roster_accept_key) before anything reads or
+/// writes the vault. That is what shows the key opened here is the account's:
+/// the server can seal any key to this device. It is also what every later
+/// device-set decision is made from, and a device no longer in it has been
+/// revoked and should learn so here rather than fail confusingly later.
 pub fn login_accept(
     state: &CoreDeviceState,
     password: &str,

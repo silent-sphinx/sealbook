@@ -8,7 +8,7 @@
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use sealbook_crypto::{CollectionKey, RosterPin};
+use sealbook_crypto::{verify_roster_key, CollectionKey, RosterPin};
 use sealbook_protocol::{DevicePublicKeys, RosterBody, RosterResponse, RosterSignerBody};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -150,6 +150,34 @@ pub fn roster_accept(
     session: &CoreSession,
     response: &HttpResponse,
 ) -> Result<VerifiedRoster, CoreError> {
+    accept(context, session, response, false)
+}
+
+/// As [`roster_accept`], for a collection key this device has just been served
+/// and has not used yet: after [`login_accept`](crate::login_accept) and after
+/// re-fetching its wrap following a rotation.
+///
+/// A device wrap shows nothing about where its key came from, because anyone
+/// holding the device's public key, the server included, can seal one. So the
+/// key has to be the one the verified roster commits to, at the roster's own
+/// epoch. The key is not to be used for anything if this fails.
+pub fn roster_accept_key(
+    context: &RosterContext,
+    session: &CoreSession,
+    response: &HttpResponse,
+) -> Result<VerifiedRoster, CoreError> {
+    if session.collection_key.is_none() {
+        return Err(CoreError::roster("there is no collection key to check"));
+    }
+    accept(context, session, response, true)
+}
+
+fn accept(
+    context: &RosterContext,
+    session: &CoreSession,
+    response: &HttpResponse,
+    adopting_key: bool,
+) -> Result<VerifiedRoster, CoreError> {
     if response.status != 200 {
         return Err(CoreError::Server {
             detail: format!("the roster request returned HTTP {}", response.status),
@@ -169,6 +197,7 @@ pub fn roster_accept(
         session.key_epoch,
         pin,
         served.rosters,
+        adopting_key,
     )
 }
 
@@ -187,7 +216,14 @@ pub fn roster_accept_sealed(
     let roster: RosterBody = serde_json::from_str(roster_json)
         .map_err(|err| CoreError::malformed(format!("the sealed roster is unreadable: {err}")))?;
     let epoch = roster.key_epoch;
-    verify(context, session.collection_key, epoch, None, vec![roster])
+    verify(
+        context,
+        session.collection_key,
+        epoch,
+        None,
+        vec![roster],
+        false,
+    )
 }
 
 /// Records the roster this device has accepted, returning the state to persist.
@@ -254,6 +290,7 @@ fn verify(
     key_epoch: u64,
     pin: Option<RosterPin>,
     chain: Vec<RosterBody>,
+    adopting_key: bool,
 ) -> Result<VerifiedRoster, CoreError> {
     let collection = context.collection_id;
     let key = key.map(CollectionKey);
@@ -264,6 +301,11 @@ fn verify(
         key.as_ref().map(|key| (key, key_epoch)),
         context.device_id,
     )?;
+    if adopting_key {
+        if let Some(key) = &key {
+            verify_roster_key(collection, &latest.to_roster(), key, key_epoch)?;
+        }
+    }
     let transcript = latest.pin(collection).transcript;
     Ok(VerifiedRoster {
         roster: read(&latest),
@@ -390,6 +432,16 @@ pub mod ffi {
         body: String,
     ) -> Result<VerifiedRoster, CoreError> {
         super::roster_accept(&context, &session(ck_b64, key_epoch)?, &ok(body))
+    }
+
+    #[uniffi::export]
+    pub fn roster_accept_key(
+        context: RosterContext,
+        ck_b64: String,
+        key_epoch: u64,
+        body: String,
+    ) -> Result<VerifiedRoster, CoreError> {
+        super::roster_accept_key(&context, &session(Some(ck_b64), key_epoch)?, &ok(body))
     }
 
     #[uniffi::export]

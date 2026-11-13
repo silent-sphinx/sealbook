@@ -180,9 +180,9 @@ pub use pairing::{
 pub use payload::{payload_kind, write_payload, CorePayloadKind};
 pub use recurrence::{is_calendar_day, recurrence_days, recurrence_next};
 pub use roster::{
-    pin_roster, read_roster, roster_accept, roster_accept_sealed, roster_answers_for,
-    roster_request, CoreDevice, CoreRoster, CoreRosterPin, CoreRosterSigner, RosterContext,
-    VerifiedRoster,
+    pin_roster, read_roster, roster_accept, roster_accept_key, roster_accept_sealed,
+    roster_answers_for, roster_request, CoreDevice, CoreRoster, CoreRosterPin, CoreRosterSigner,
+    RosterContext, VerifiedRoster,
 };
 pub use rotation::{
     reseal_row, rotation_entries, rotation_plan, rotation_recipients, rotation_wraps,

@@ -37,8 +37,9 @@ pub use recovery::{
     SUPPORTED_RECOVERY_CIPHERSUITES,
 };
 pub use roster::{
-    roster_mac, roster_transcript, verify_roster_chain, verify_roster_mac, verify_roster_step,
-    Roster, RosterDevice, RosterPin, RosterSigner, ROSTER_MAC_LEN,
+    key_commitment, roster_mac, roster_transcript, verify_roster_chain, verify_roster_key,
+    verify_roster_mac, verify_roster_step, Roster, RosterDevice, RosterPin, RosterSigner,
+    KEY_COMMITMENT_LEN, ROSTER_MAC_LEN,
 };
 pub use sign::{
     generate_device_signing, sign, signing_from_seeds, verify, DeviceSigningPublic,

@@ -93,6 +93,9 @@ fn hand_roster(
         phrase_mldsa_pk,
         phrase_ed25519_pk,
         signer,
+        key_commitment: sealbook_crypto::key_commitment(key, collection_id, key_epoch)
+            .unwrap()
+            .to_vec(),
         signature: sealbook_crypto::DualSignature {
             mldsa: Vec::new(),
             ed25519: Vec::new(),
