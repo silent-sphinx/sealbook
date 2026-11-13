@@ -536,7 +536,7 @@ pub(crate) async fn load_or_create_dummy_hpke(
     Ok(pk)
 }
 
-/// The key the decoys served by `recover/start` are derived from.
+/// The key the decoys served by `recover/start` and `pair/join` are derived from.
 ///
 /// Persisted rather than generated per start, because a decoy that changed when
 /// the server restarted would tell a caller polling across a restart which of

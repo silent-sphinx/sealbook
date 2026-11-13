@@ -7,7 +7,6 @@ use std::time::{Duration, Instant};
 use axum::extract::{ConnectInfo, Path as AxumPath, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
-use rand::RngCore;
 use sqlx::{Row, Sqlite};
 use uuid::Uuid;
 
@@ -21,6 +20,7 @@ use sealbook_protocol::{
     PairApproveRequest, PairJoinRequest, PairJoinResponse, PairStatusResponse,
 };
 
+use crate::decoy::pairing_decoy_anchor;
 use crate::roster;
 use crate::session::require_session;
 use crate::*;
@@ -189,16 +189,18 @@ async fn current_roster_anchor(
 /// A stand-in anchor for a username with no account.
 ///
 /// `pair/join` answers the same way whether or not the account exists, so that it
-/// cannot be used to test usernames. An anchor is opaque to the joining device, so
-/// a random one keeps the two responses indistinguishable; the pairing simply has
-/// nothing that can ever approve it.
-fn decoy_roster_anchor() -> RosterAnchor {
-    let mut transcript = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut transcript);
-    RosterAnchor {
-        roster_seq: 1,
+/// cannot be used to test usernames. The pairing simply has nothing that can ever
+/// approve it. See `decoy::pairing_decoy_anchor`.
+fn decoy_roster_anchor(
+    state: &Shared,
+    username: &str,
+) -> Result<RosterAnchor, (StatusCode, Json<ErrorBody>)> {
+    let (roster_seq, transcript) = pairing_decoy_anchor(&state.decoy_key, username)
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "decoy"))?;
+    Ok(RosterAnchor {
+        roster_seq,
         transcript,
-    }
+    })
 }
 
 pub(crate) async fn pair_join(
@@ -232,8 +234,11 @@ pub(crate) async fn pair_join(
     let anchor = match &account {
         Some(row) => current_roster_anchor(&state, row.get::<String, _>("collection_id")).await?,
         None => None,
-    }
-    .unwrap_or_else(decoy_roster_anchor);
+    };
+    let anchor = match anchor {
+        Some(anchor) => anchor,
+        None => decoy_roster_anchor(&state, &body.username)?,
+    };
     let pair_id = Uuid::new_v4();
     let pair_code = generate_pair_code();
     let confirm = pair_confirmation(

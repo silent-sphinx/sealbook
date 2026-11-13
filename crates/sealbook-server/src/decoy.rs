@@ -1,5 +1,6 @@
 //! The collection, roster and phrase wrap `recover/start` answers with when the
-//! username and lookup id it was given do not match an account.
+//! username and lookup id it was given do not match an account, and the roster
+//! anchor `pair/join` answers with for a username that has none.
 //!
 //! The handler is written so that a miss and a hit are indistinguishable, which
 //! a response shaped differently for the two gives away. Everything here is
@@ -91,6 +92,23 @@ pub(crate) fn recovery_decoy(
         },
         roster,
     })
+}
+
+/// The roster `pair/join` anchors a username with no account on, as a sequence
+/// number and transcript.
+///
+/// Derived for the same reason as the recovery decoy: a real account anchors
+/// every join on the same roster, so a decoy made up per request is caught by
+/// joining twice. The sequence is spread like a recovery decoy's, since a fixed
+/// one is recognised against any account that has added a device.
+pub(crate) fn pairing_decoy_anchor(
+    key: &[u8; DECOY_KEY_LEN],
+    username: &str,
+) -> Result<(u64, [u8; 32]), CryptoError> {
+    let seed = |label: &str| decoy_seed(key, username.as_bytes(), label.as_bytes());
+    let shape = seed("pair-shape")?;
+    let roster_seq = 1 + u64::from(shape[0] % MAX_DECOY_DEVICES) + u64::from(shape[1] % 9);
+    Ok((roster_seq, seed("pair-transcript")?))
 }
 
 fn decoy_device(
@@ -215,5 +233,19 @@ mod tests {
             assert!(decoy.roster.key_epoch >= 1);
             assert!(decoy.roster.key_epoch <= decoy.roster.roster_seq);
         }
+    }
+
+    #[test]
+    fn a_pairing_decoy_is_stable_per_username_and_varied_across_them() {
+        let first = pairing_decoy_anchor(&KEY, "alice").expect("anchor");
+        assert_eq!(first, pairing_decoy_anchor(&KEY, "alice").expect("anchor"));
+        let mut seqs = std::collections::HashSet::new();
+        for name in ["bob", "carol", "dave", "erin", "frank", "grace", "heidi"] {
+            let (seq, transcript) = pairing_decoy_anchor(&KEY, name).expect("anchor");
+            assert_ne!(transcript, first.1);
+            assert!((1..=u64::from(MAX_DECOY_DEVICES) + 8).contains(&seq));
+            seqs.insert(seq);
+        }
+        assert!(seqs.len() > 1);
     }
 }

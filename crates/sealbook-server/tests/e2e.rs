@@ -19,8 +19,8 @@ use sealbook_crypto::{
 };
 use sealbook_protocol::{
     DualSignatureBody, KeyWrapBody, LoginChallengeRequest, LoginChallengeResponse,
-    LoginStartRequest, RecoverFinishRequest, RecoverStartRequest, RecoverStartResponse,
-    SEALED_CONTENT_TYPE,
+    LoginStartRequest, PairJoinRequest, PairJoinResponse, RecoverFinishRequest,
+    RecoverStartRequest, RecoverStartResponse, SEALED_CONTENT_TYPE,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -2051,6 +2051,96 @@ async fn a_recovery_lookup_that_matched_nothing_is_answered_like_one_that_did() 
         .recover(&base, "decoybob", &phrase, "new password please")
         .await
         .expect("recover");
+}
+
+/// `pair/join` must not say whether a username exists. A real account anchors
+/// every join on the same roster, so a decoy made up per request was told apart
+/// by joining twice, and one fixed at `roster_seq` 1 by any account that had
+/// paired a device since registering.
+#[tokio::test]
+async fn a_pairing_join_for_an_unknown_username_is_answered_like_one_for_an_account() {
+    let dir = std::env::temp_dir().join(format!("sealbook-pair-decoy-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut owner = SealbookClient::plaintext_http();
+    owner
+        .register(&base, "pairbob", "correct horse battery")
+        .await
+        .expect("register");
+
+    let http = reqwest::Client::new();
+    let join = |username: String| {
+        let http = http.clone();
+        let base = base.clone();
+        async move {
+            let (_, hpke_pk) = generate_device_hpke().unwrap();
+            let (sign_sk, sign_pk) = generate_device_signing().unwrap();
+            let device_id = Uuid::new_v4();
+            let enrollment = enrollment_transcript(
+                device_id,
+                &sign_pk.mldsa_pk,
+                &sign_pk.ed25519_pk,
+                &hpke_pk.0,
+            );
+            let signature = sign(&sign_sk, &enrollment).unwrap();
+            http.post(format!("{base}/v1/pair/join"))
+                .json(&PairJoinRequest {
+                    username,
+                    device: sealbook_protocol::DevicePublicKeys {
+                        device_id,
+                        mldsa_pk: sign_pk.mldsa_pk,
+                        ed25519_pk: sign_pk.ed25519_pk,
+                        xwing_hpke_pk: hpke_pk.0,
+                    },
+                    enrollment_signature: DualSignatureBody {
+                        mldsa: signature.mldsa,
+                        ed25519: signature.ed25519,
+                    },
+                })
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json::<PairJoinResponse>()
+                .await
+                .unwrap()
+        }
+    };
+
+    let hit = join("pairbob".into()).await;
+    let hit_again = join("pairbob".into()).await;
+    assert_eq!(hit.roster_seq, hit_again.roster_seq);
+    assert_eq!(hit.roster_transcript, hit_again.roster_transcript);
+
+    let miss = join("pairnobody".into()).await;
+    let miss_again = join("pairnobody".into()).await;
+    assert_eq!(
+        miss.roster_seq, miss_again.roster_seq,
+        "joining twice told an unknown username apart"
+    );
+    assert_eq!(
+        miss.roster_transcript, miss_again.roster_transcript,
+        "joining twice told an unknown username apart"
+    );
+    assert_eq!(miss.roster_transcript.len(), hit.roster_transcript.len());
+    assert_eq!(miss.confirm.len(), hit.confirm.len());
+
+    // Misses are unrelated to one another, so one known miss is no baseline, and
+    // their sequence numbers vary as real accounts' do.
+    let mut seqs = std::collections::HashSet::new();
+    for index in 0..8 {
+        let other = join(format!("pairnobody{index}")).await;
+        assert_ne!(other.roster_transcript, miss.roster_transcript);
+        assert!(other.roster_seq >= 1);
+        seqs.insert(other.roster_seq);
+    }
+    assert!(
+        seqs.len() > 1,
+        "every decoy anchor had the same roster_seq: {seqs:?}"
+    );
 }
 
 /// The OPAQUE evaluation must not depend on whether the lookup matched either.
