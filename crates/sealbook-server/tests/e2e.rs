@@ -7911,3 +7911,90 @@ async fn devices_label_themselves_and_lose_the_label_on_revoke() {
     assert_eq!(after[0].device_id, owner_id);
     assert_eq!(owner.remove_stale_device_labels().await.expect("sweep"), 0);
 }
+
+/// Sends `body` to `path` on `app` as if from `from`, so one test can play many
+/// callers while the real client talks to the same server over TCP.
+async fn post_as(
+    app: &axum::Router,
+    from: std::net::IpAddr,
+    path: &str,
+    body: &impl serde::Serialize,
+) -> reqwest::StatusCode {
+    use tower::ServiceExt;
+    let mut request = axum::http::Request::post(path)
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(serde_json::to_vec(body).unwrap()))
+        .unwrap();
+    request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(SocketAddr::new(from, 40000)));
+    let status = app.clone().oneshot(request).await.unwrap().status();
+    reqwest::StatusCode::from_u16(status.as_u16()).unwrap()
+}
+
+/// Audit finding 5: someone who knows a username, but holds none of its
+/// devices, must not be able to keep that account from signing in by sending
+/// login challenges, failed `login/start` or `recover/start` requests from many
+/// addresses.
+#[tokio::test]
+async fn failed_logins_from_outsiders_do_not_lock_the_owner_out() {
+    let dir = std::env::temp_dir().join(format!("sealbook-lockout-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let app = sealbook_server::app(db.to_str().unwrap()).await.unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let served = app.clone();
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            served.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        .unwrap();
+    });
+
+    let mut owner = SealbookClient::plaintext_http();
+    owner
+        .register(&base, "lockalice", "correct horse battery")
+        .await
+        .expect("register");
+    let device_id = owner.state.as_ref().unwrap().device_id;
+
+    for index in 0..40u8 {
+        let from = std::net::IpAddr::from([10, 0, 0, index]);
+        let challenge = LoginChallengeRequest {
+            username: "lockalice".into(),
+            device_id,
+        };
+        post_as(&app, from, "/v1/opaque/login/challenge", &challenge).await;
+
+        let (request, _state) = client_login_start(b"guessed password").unwrap();
+        let forged = LoginStartRequest {
+            challenge_id: Uuid::new_v4(),
+            username: "lockalice".into(),
+            device_id,
+            challenge: vec![0u8; 32],
+            request: request.clone(),
+            device_signature: DualSignatureBody {
+                mldsa: vec![0u8; 3309],
+                ed25519: vec![0u8; 64],
+            },
+        };
+        let status = post_as(&app, from, "/v1/opaque/login/start", &forged).await;
+        assert_eq!(status, 401, "forged login/start {index}");
+
+        let recover = RecoverStartRequest {
+            username: "lockalice".into(),
+            lookup_id: vec![0u8; 32],
+            opaque_request: request,
+        };
+        post_as(&app, from, "/v1/recover/start", &recover).await;
+    }
+
+    owner
+        .login("correct horse battery")
+        .await
+        .expect("the owner must still be able to sign in");
+    let _ = std::fs::remove_dir_all(&dir);
+}

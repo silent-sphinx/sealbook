@@ -15,6 +15,10 @@ const SWEEP_INTERVAL: Duration = Duration::from_secs(30);
 /// Most attempts on one endpoint for one username, from any address, per window.
 const USERNAME_ATTEMPTS_PER_WINDOW: usize = 30;
 const USERNAME_WINDOW: Duration = Duration::from_secs(300);
+/// Per-username ceiling on `recover/start`, kept small because each call adds
+/// a password guess on top of login's (audit finding 4) and a genuine recovery
+/// needs only a few.
+const RECOVERY_START_ATTEMPTS_PER_WINDOW: usize = 10;
 
 /// Most attempts on one endpoint from one IPv6 /64, and from one /48, per
 /// minute. A single customer is routinely given a /48, so the /64 limit alone
@@ -228,30 +232,49 @@ impl RateLimiter {
     }
 
     pub async fn allow_endpoint(&self, endpoint: &str, username: &str, ip: Option<IpAddr>) -> bool {
-        self.allow_with_ceiling(endpoint, endpoint, username, ip)
+        self.allow_address(endpoint, username, ip).await
+            && self
+                .allow_username(endpoint, username, USERNAME_ATTEMPTS_PER_WINDOW)
+                .await
+    }
+
+    /// `recover/start` evaluates the account's OPRF before any phrase proof, so
+    /// it is a second route for testing password guesses. It cannot share
+    /// login's ceiling, which anyone can then fill from here, so it has a
+    /// smaller one of its own.
+    pub async fn allow_recovery_start(&self, username: &str, ip: Option<IpAddr>) -> bool {
+        self.allow_address("recover-start", username, ip).await
+            && self
+                .allow_username(
+                    "recover-start",
+                    username,
+                    RECOVERY_START_ATTEMPTS_PER_WINDOW,
+                )
+                .await
+    }
+
+    /// The per-username ceiling on sign-in, charged only once the caller has
+    /// proved it holds one of the account's devices. Charged before that, anyone
+    /// who knew a username could hold it full and keep the owner out (audit
+    /// finding 5).
+    pub async fn allow_proven_login(&self, username: &str) -> bool {
+        self.allow_username("login", username, USERNAME_ATTEMPTS_PER_WINDOW)
             .await
     }
 
-    /// For every route that evaluates an account's OPRF on a caller's input.
-    /// Each evaluation lets someone holding a credential response test one
-    /// password guess, so all such routes draw on one per-username ceiling.
-    pub async fn allow_password_attempt(
-        &self,
-        endpoint: &str,
-        username: &str,
-        ip: Option<IpAddr>,
-    ) -> bool {
-        self.allow_with_ceiling(endpoint, "password", username, ip)
-            .await
+    async fn allow_username(&self, ceiling: &str, username: &str, limit: usize) -> bool {
+        self.allow_subject(
+            &format!("name:{ceiling}:{username}"),
+            1,
+            limit,
+            USERNAME_WINDOW,
+        )
+        .await
     }
 
-    async fn allow_with_ceiling(
-        &self,
-        endpoint: &str,
-        ceiling: &str,
-        username: &str,
-        ip: Option<IpAddr>,
-    ) -> bool {
+    /// The per-address limits of `allow_endpoint`, without its per-username
+    /// ceiling.
+    pub async fn allow_address(&self, endpoint: &str, username: &str, ip: Option<IpAddr>) -> bool {
         let ip_key = ip.map(rate_limit_ip);
         if let Some(ip) = ip_key {
             if !self
@@ -282,19 +305,7 @@ impl RateLimiter {
             Some(ip) => format!("user:{endpoint}:{username}:{ip}"),
             None => format!("user:{endpoint}:{username}"),
         };
-        if !self.allow(&user_key, 5, Duration::from_secs(60)).await {
-            return false;
-        }
-        // Per-username ceiling across all addresses, so guesses spread over many
-        // IPs still hit a wall. An attacker can hold it full for as long as they
-        // keep sending (audit finding 5).
-        self.allow_subject(
-            &format!("name:{ceiling}:{username}"),
-            1,
-            USERNAME_ATTEMPTS_PER_WINDOW,
-            USERNAME_WINDOW,
-        )
-        .await
+        self.allow(&user_key, 5, Duration::from_secs(60)).await
     }
 }
 
@@ -532,33 +543,46 @@ mod tests {
         );
     }
 
-    /// Audit finding 4: `recover-start` evaluates the same OPRF as `login`, so
-    /// it must not offer a second budget of password guesses for one username.
+    fn spread_address(index: usize) -> IpAddr {
+        format!("10.0.{}.{}", index / 200, index % 200 + 1)
+            .parse()
+            .unwrap()
+    }
+
+    /// Audit finding 5: unproven login attempts pass the per-address limits
+    /// only, so they cannot use up the owner's sign-in ceiling.
     #[tokio::test]
-    async fn login_and_recovery_share_one_password_attempt_ceiling() {
+    async fn address_checks_leave_the_proven_login_ceiling_alone() {
         let limiter = RateLimiter::new();
-        for index in 0..USERNAME_ATTEMPTS_PER_WINDOW {
-            let ip: IpAddr = format!("10.0.{}.{}", index / 200, index % 200 + 1)
-                .parse()
-                .unwrap();
+        for index in 0..USERNAME_ATTEMPTS_PER_WINDOW + 10 {
             assert!(
                 limiter
-                    .allow_password_attempt("login", "alice", Some(ip))
+                    .allow_address("login", "alice", Some(spread_address(index)))
+                    .await
+            );
+        }
+        for _ in 0..USERNAME_ATTEMPTS_PER_WINDOW {
+            assert!(limiter.allow_proven_login("alice").await);
+        }
+        assert!(!limiter.allow_proven_login("alice").await);
+    }
+
+    /// Audit finding 4: `recover-start` adds only a small budget of password
+    /// guesses beside login's, and filling it leaves sign-in untouched.
+    #[tokio::test]
+    async fn recovery_start_has_a_small_ceiling_of_its_own() {
+        let limiter = RateLimiter::new();
+        for index in 0..RECOVERY_START_ATTEMPTS_PER_WINDOW {
+            assert!(
+                limiter
+                    .allow_recovery_start("alice", Some(spread_address(index)))
                     .await
             );
         }
         let fresh: IpAddr = "192.0.2.1".parse().unwrap();
-        assert!(
-            !limiter
-                .allow_password_attempt("recover-start", "alice", Some(fresh))
-                .await,
-            "recover-start must draw on the ceiling login has used up"
-        );
-        assert!(
-            limiter
-                .allow_password_attempt("recover-start", "bob", Some(fresh))
-                .await
-        );
+        assert!(!limiter.allow_recovery_start("alice", Some(fresh)).await);
+        assert!(limiter.allow_recovery_start("bob", Some(fresh)).await);
+        assert!(limiter.allow_proven_login("alice").await);
     }
 
     #[tokio::test]

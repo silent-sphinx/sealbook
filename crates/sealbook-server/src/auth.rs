@@ -264,10 +264,12 @@ pub(crate) async fn login_challenge(
         return Err(err(StatusCode::BAD_REQUEST, "invalid username"));
     }
     // A separate bucket from `login`, so that splitting login into two requests
-    // does not halve the number of login attempts a user gets per minute.
+    // does not halve the number of login attempts a user gets per minute. Per
+    // address only: a per-username ceiling here could be filled by anyone who
+    // knew the name, and a challenge does no password work (audit finding 5).
     if !state
         .limiter
-        .allow_endpoint(
+        .allow_address(
             "login-challenge",
             &body.username,
             Some(state.trusted_proxies.client_ip(addr.ip(), &headers)),
@@ -331,7 +333,7 @@ pub(crate) async fn login_start(
     }
     if !state
         .limiter
-        .allow_password_attempt(
+        .allow_address(
             "login",
             &body.username,
             Some(state.trusted_proxies.client_ip(addr.ip(), &headers)),
@@ -388,6 +390,9 @@ pub(crate) async fn login_start(
     };
     verify(&public, &transcript, &signature)
         .map_err(|_| err(StatusCode::UNAUTHORIZED, "invalid credentials"))?;
+    if !state.limiter.allow_proven_login(&body.username).await {
+        return Err(err(StatusCode::TOO_MANY_REQUESTS, "rate limited"));
+    }
 
     let row = sqlx::query("SELECT opaque_record FROM accounts WHERE username = ?")
         .bind(&body.username)
