@@ -2908,6 +2908,44 @@ async fn deleting_an_account_without_a_device_signature_is_refused() {
     owner.delete_account().await.expect("delete");
 }
 
+/// An attachment challenge cannot authorise an account change, or the
+/// attachment route's far higher rate limit would stand in for the account one.
+#[tokio::test]
+async fn an_attachment_challenge_cannot_authorise_an_account_change() {
+    let dir = std::env::temp_dir().join(format!("sealbook-purpose-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+    let mut owner = SealbookClient::plaintext_http();
+    owner
+        .register(&base, "purposealice", "correct horse battery")
+        .await
+        .expect("register");
+    let token = owner
+        .state
+        .as_ref()
+        .and_then(|state| state.session_token.clone())
+        .unwrap();
+    let http = reqwest::Client::new();
+
+    let challenge = attachment_challenge(&http, &base, &token).await;
+    let request =
+        sealbook_core::delete_account_request(&owner.core_state().unwrap(), &challenge).unwrap();
+    let response = http
+        .delete(format!("{base}{}", request.path))
+        .bearer_auth(&token)
+        .header("content-type", "application/json")
+        .body(request.body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED);
+    assert!(
+        owner.list_contacts().await.is_ok(),
+        "the account should still exist"
+    );
+}
+
 /// Renaming an account is signed, and the signature covers the new name.
 #[tokio::test]
 async fn renaming_an_account_is_signed_and_keeps_the_vault_readable() {

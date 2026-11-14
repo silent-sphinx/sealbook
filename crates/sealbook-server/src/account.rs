@@ -58,6 +58,7 @@ pub(crate) async fn account_challenge(
     pending.insert(
         challenge_id,
         PendingAccountOp {
+            purpose: OpPurpose::Account,
             account_id: session.account_id,
             device_id: session.device_id,
             challenge,
@@ -74,9 +75,11 @@ pub(crate) async fn account_challenge(
 ///
 /// Single use: the challenge is removed whether or not verification succeeds, so a
 /// failed attempt cannot be retried against the same nonce.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn authorise_account_op(
     state: &AppState,
     session: &Session,
+    purpose: OpPurpose,
     op: &str,
     challenge_id: Uuid,
     challenge: &[u8],
@@ -90,6 +93,7 @@ pub(crate) async fn authorise_account_op(
         .remove(&challenge_id)
         .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "invalid account challenge"))?;
     if pending.created.elapsed() > Duration::from_secs(120)
+        || pending.purpose != purpose
         || pending.account_id != session.account_id
         || pending.device_id != session.device_id
         || challenge.len() != 32
@@ -166,6 +170,7 @@ pub(crate) async fn change_username(
     authorise_account_op(
         &state,
         &session,
+        OpPurpose::Account,
         "username",
         body.challenge_id,
         &body.challenge,
@@ -401,6 +406,7 @@ pub(crate) async fn delete_account(
     authorise_account_op(
         &state,
         &session,
+        OpPurpose::Account,
         "delete",
         body.challenge_id,
         &body.challenge,

@@ -131,6 +131,7 @@ pub(crate) async fn attachment_challenge(
     pending.insert(
         challenge_id,
         PendingAccountOp {
+            purpose: OpPurpose::Attachment,
             account_id: session.account_id,
             device_id: session.device_id,
             challenge,
@@ -157,6 +158,7 @@ async fn authorise_attachment_op(
     authorise_account_op(
         state,
         session,
+        OpPurpose::Attachment,
         op,
         auth.challenge_id,
         &auth.challenge,

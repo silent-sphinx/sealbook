@@ -106,10 +106,19 @@ struct PendingPasswordChange {
 
 /// A challenge issued for an account mutation, pending its signed request.
 struct PendingAccountOp {
+    purpose: OpPurpose,
     account_id: String,
     device_id: String,
     challenge: [u8; 32],
     created: Instant,
+}
+
+/// Which route issued a pending challenge. Each route has its own rate limit,
+/// so a challenge is only redeemable by the operations its route meters.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OpPurpose {
+    Account,
+    Attachment,
 }
 
 /// Per-account storage ceilings, so one account cannot fill the volume.
