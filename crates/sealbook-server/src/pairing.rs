@@ -195,7 +195,7 @@ fn decoy_roster_anchor(
     state: &Shared,
     username: &str,
 ) -> Result<RosterAnchor, (StatusCode, Json<ErrorBody>)> {
-    let (roster_seq, transcript) = pairing_decoy_anchor(&state.decoy_key, username)
+    let (roster_seq, transcript) = pairing_decoy_anchor(&state.decoy_key, username, now())
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "decoy"))?;
     Ok(RosterAnchor {
         roster_seq,
