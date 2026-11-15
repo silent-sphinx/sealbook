@@ -53,26 +53,6 @@
       "message": "One object in this vault can't be re-encrypted, so the key wasn't rotated and nothing was changed. Sign in on a device that can read it."
     },
     {
-      "name": "pair no anchor",
-      "error": {
-        "kind": "Pair",
-        "refusal": {
-          "refusal": "NoAnchor"
-        }
-      },
-      "message": "The server sent no device list for this account to anchor on, so there is nothing to pair against."
-    },
-    {
-      "name": "pair server code",
-      "error": {
-        "kind": "Pair",
-        "refusal": {
-          "refusal": "ServerCode"
-        }
-      },
-      "message": "This device and the new one don't agree on the account's devices. Start the pairing again."
-    },
-    {
       "name": "pair expired",
       "error": {
         "kind": "Pair",
@@ -106,26 +86,35 @@
       "message": "That device is already enrolled."
     },
     {
-      "name": "pair roster moved",
+      "name": "pair code",
       "error": {
         "kind": "Pair",
         "refusal": {
-          "refusal": "RosterMoved",
-          "joined_at": 4,
-          "now": 7
+          "refusal": "Code",
+          "reason": "word 4 is not a pairing-code word"
         }
       },
-      "message": "The new device started pairing against device list 4 but this account is now on 7. Start the pairing again."
+      "message": "That isn't a pairing code: word 4 is not a pairing-code word. Check it against the new device."
     },
     {
-      "name": "pair typed code",
+      "name": "pair code mismatch",
       "error": {
         "kind": "Pair",
         "refusal": {
-          "refusal": "TypedCode"
+          "refusal": "CodeMismatch"
         }
       },
-      "message": "That code doesn't match the one for this pairing."
+      "message": "That code doesn't match the new device, so nothing was shared. Start the pairing again on the new device for a fresh code."
+    },
+    {
+      "name": "pair unverified",
+      "error": {
+        "kind": "Pair",
+        "refusal": {
+          "refusal": "Unverified"
+        }
+      },
+      "message": "The other device's answer couldn't be verified, so this device was not added. Start the pairing again."
     },
     {
       "name": "auth username",

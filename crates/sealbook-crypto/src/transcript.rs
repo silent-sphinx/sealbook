@@ -313,8 +313,9 @@ pub fn enrollment_transcript(
 
 /// Signed by the approving device over the device a pairing enrols.
 ///
-/// Length-prefixed for the same reason as `enrollment_transcript`, with one more
-/// variable field after the keys.
+/// Covers the CPace run the approval came out of, so the grant cannot be lifted
+/// onto another pairing for the same keys. Every field is public, which is what
+/// lets the server check it.
 #[allow(clippy::too_many_arguments)]
 pub fn pair_grant_transcript(
     pair_id: Uuid,
@@ -323,67 +324,22 @@ pub fn pair_grant_transcript(
     mldsa_pk: &[u8],
     ed25519_pk: &[u8],
     xwing_hpke_pk: &[u8],
-    confirm: &str,
+    sid: &[u8],
+    joiner_share: &[u8],
+    approver_share: &[u8],
 ) -> [u8; 32] {
     let mut h = Sha256::new();
-    h.update(b"sealbook-pair-v2");
+    h.update(b"sealbook-pair-v3");
     h.update(pair_id.as_bytes());
     h.update(approver_device_id.as_bytes());
     h.update(new_device_id.as_bytes());
     absorb(&mut h, mldsa_pk);
     absorb(&mut h, ed25519_pk);
     absorb(&mut h, xwing_hpke_pk);
-    absorb(&mut h, confirm.as_bytes());
+    absorb(&mut h, sid);
+    absorb(&mut h, joiner_share);
+    absorb(&mut h, approver_share);
     h.finalize().into()
-}
-
-/// Number of base-32 characters in a pairing confirmation code.
-///
-/// 26 characters carry 130 bits, which keeps a second-preimage search against
-/// the code above the 128-bit post-quantum target used elsewhere. The previous
-/// 13-character code carried only 65 bits.
-pub const PAIR_CONFIRMATION_LEN: usize = 26;
-
-const _: () = assert!(
-    PAIR_CONFIRMATION_LEN * 5 >= 128,
-    "pairing confirmation code must carry at least 128 bits"
-);
-const _: () = assert!(
-    PAIR_CONFIRMATION_LEN.div_ceil(8) * 5 <= 32,
-    "pairing confirmation code must fit in a SHA-256 digest"
-);
-
-/// The code both screens show during a pairing, which the user compares.
-pub fn pair_confirmation(
-    pair_id: Uuid,
-    device_id: Uuid,
-    mldsa_pk: &[u8],
-    ed25519_pk: &[u8],
-    xwing_hpke_pk: &[u8],
-    roster_seq: u64,
-    roster_transcript: &[u8],
-) -> String {
-    const ALPH: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    let mut h = Sha256::new();
-    h.update(b"sealbook-pair-confirm-v2");
-    h.update(pair_id.as_bytes());
-    h.update(device_id.as_bytes());
-    absorb(&mut h, mldsa_pk);
-    absorb(&mut h, ed25519_pk);
-    absorb(&mut h, xwing_hpke_pk);
-    h.update(roster_seq.to_be_bytes());
-    absorb(&mut h, roster_transcript);
-    let digest = h.finalize();
-    let mut code = String::with_capacity(PAIR_CONFIRMATION_LEN);
-    for index in 0..PAIR_CONFIRMATION_LEN {
-        let mut value = 0u8;
-        for bit in 0..5 {
-            let bit_index = index * 5 + bit;
-            value |= ((digest[bit_index / 8] >> (bit_index % 8)) & 1) << bit;
-        }
-        code.push(ALPH[value as usize] as char);
-    }
-    code
 }
 
 /// Signed by the device before the server releases an OPAQUE credential
@@ -544,25 +500,6 @@ mod tests {
             ),
             base,
         );
-    }
-
-    #[test]
-    fn pair_confirmation_binds_joiner_keys_and_the_roster_anchor() {
-        let pair_id = Uuid::new_v4();
-        let device_id = Uuid::new_v4();
-        let anchor = [9u8; 32];
-        let first = pair_confirmation(pair_id, device_id, b"mldsa", b"ed", b"xwing", 4, &anchor);
-        let keys = pair_confirmation(pair_id, device_id, b"changed", b"ed", b"xwing", 4, &anchor);
-        assert_eq!(first.len(), PAIR_CONFIRMATION_LEN);
-        assert_ne!(first, keys);
-        // Bug #9: the roster a joining device was told to anchor on has to change
-        // the code, or the user comparing two codes confirms only one direction.
-        let other_roster =
-            pair_confirmation(pair_id, device_id, b"mldsa", b"ed", b"xwing", 4, &[8u8; 32]);
-        assert_ne!(first, other_roster);
-        let other_seq =
-            pair_confirmation(pair_id, device_id, b"mldsa", b"ed", b"xwing", 5, &anchor);
-        assert_ne!(first, other_seq);
     }
 
     #[test]
@@ -793,13 +730,18 @@ mod tests {
         );
 
         assert_ne!(
-            pair_grant_transcript(one, two, three, b"ab", b"c", b"d", "e"),
-            pair_grant_transcript(one, two, three, b"a", b"bc", b"d", "e"),
+            pair_grant_transcript(one, two, three, b"ab", b"c", b"d", b"e", b"f", b"g"),
+            pair_grant_transcript(one, two, three, b"a", b"bc", b"d", b"e", b"f", b"g"),
         );
         assert_ne!(
-            pair_grant_transcript(one, two, three, b"a", b"b", b"cd", "e"),
-            pair_grant_transcript(one, two, three, b"a", b"b", b"c", "de"),
-            "the confirmation code boundary must bind"
+            pair_grant_transcript(one, two, three, b"a", b"b", b"cd", b"e", b"f", b"g"),
+            pair_grant_transcript(one, two, three, b"a", b"b", b"c", b"de", b"f", b"g"),
+            "the session id boundary must bind"
+        );
+        assert_ne!(
+            pair_grant_transcript(one, two, three, b"a", b"b", b"c", b"d", b"ef", b"g"),
+            pair_grant_transcript(one, two, three, b"a", b"b", b"c", b"d", b"e", b"fg"),
+            "the two CPace shares must not be able to borrow bytes from each other"
         );
 
         assert_ne!(

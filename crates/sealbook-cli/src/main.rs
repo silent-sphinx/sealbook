@@ -102,8 +102,8 @@ enum Command {
     Login {},
     /// Add this device to an existing account (run here first).
     ///
-    /// Prints a code to give to `sealbook pair` on a device already signed in,
-    /// then waits for it to be approved.
+    /// Prints an eight-word code, and the same code as a QR, to enter or scan
+    /// on a device already signed in, then waits for it to be approved.
     PairJoin {
         /// The account to join.
         #[arg(long)]
@@ -111,9 +111,9 @@ enum Command {
     },
     /// Approve a new device that ran `pair-join` (run on a signed-in device).
     ///
-    /// Asks for the confirmation code the joining device shows.
+    /// Shows what the joining device says it is and asks before approving.
     Pair {
-        /// The code `pair-join` printed on the joining device.
+        /// The eight words `pair-join` printed on the joining device.
         #[arg(long)]
         code: String,
     },
@@ -817,32 +817,37 @@ async fn main() -> Result<()> {
         }
         Command::PairJoin { username } => {
             let mut client = SealbookClient::https(pinned.clone()).context("tls client")?;
-            let (pair_id, confirm) = client
+            let pairing = client
                 .pair_join(&cli.server, &username)
                 .await
                 .context("pair join")?;
-            save_state(&cli.state, client.state.as_ref().unwrap())?;
-            println!("On your other device run:\n  sealbook pair --code {pair_id}");
             println!(
-                "Confirm both screens show: {}",
-                sealbook_client::format_confirmation(&confirm)
+                "On a device that's already signed in, run:\n  sealbook pair --code \"{}\"",
+                pairing.code
             );
-            let mut wait = Duration::from_millis(sealbook_client::PAIR_POLL_INTERVAL_MS.into());
+            println!(
+                "or scan this with the Sealbook app:\n{}",
+                terminal_qr(&pairing.qr_text)?
+            );
+            let description = format!("CLI on {}", this_platform());
             loop {
-                tokio::time::sleep(wait).await;
-                match client.pair_poll(&pair_id).await? {
-                    sealbook_client::PairPoll::Ready => {
-                        println!("approved. sign in with: sealbook login");
-                        break;
+                let wait = match client.pair_join_step(&pairing, &description).await? {
+                    sealbook_client::PairJoinPoll::Ready => break,
+                    sealbook_client::PairJoinPoll::Expired => {
+                        anyhow::bail!("that pairing request expired or was refused; start again")
                     }
-                    sealbook_client::PairPoll::Expired => {
-                        anyhow::bail!("that pairing request expired; start again")
+                    sealbook_client::PairJoinPoll::Confirm => {
+                        sealbook_client::PAIR_POLL_INTERVAL_MS
                     }
-                    sealbook_client::PairPoll::Wait { after_ms } => {
-                        wait = Duration::from_millis(after_ms.into());
-                    }
-                }
+                    sealbook_client::PairJoinPoll::Wait { after_ms } => after_ms,
+                };
+                tokio::time::sleep(Duration::from_millis(wait.into())).await;
             }
+            // Saved only now: until the approval, this device has no roster pin,
+            // and a device signed in without one would trust whatever device list
+            // the server served it.
+            save_state(&cli.state, client.state.as_ref().unwrap())?;
+            println!("approved. sign in with: sealbook login");
         }
         Command::Pair { code } => {
             let password = read_secret("Password: ", "SEALBOOK_PASSWORD")?;
@@ -850,14 +855,32 @@ async fn main() -> Result<()> {
             let mut client =
                 SealbookClient::with_state_and_tls(state, pinned.clone()).context("tls client")?;
             sign_in(&mut client, &password).await?;
-            let preview = client.pair_preview(&code).await.context("pair preview")?;
+            let response = client.pair_respond(&code).await.context("pair")?;
+            println!("Waiting for the new device...");
+            let preview = loop {
+                if let Some(preview) = client.pair_preview_step(&response).await.context("pair")? {
+                    break preview;
+                }
+                tokio::time::sleep(Duration::from_millis(
+                    sealbook_client::PAIR_POLL_INTERVAL_MS.into(),
+                ))
+                .await;
+            };
             println!(
-                "Type the confirmation code shown on the joining device\n(spaces and case are ignored):"
+                "Add \"{}\" (device {}) to this account?\nOnly say yes if you are holding that device. [y/N]",
+                preview.description, preview.device.device_id
             );
-            let mut entered = String::new();
-            std::io::stdin().read_line(&mut entered)?;
+            let mut answer = String::new();
+            std::io::stdin().read_line(&mut answer)?;
+            if !matches!(answer.trim(), "y" | "Y" | "yes") {
+                client
+                    .pair_cancel(&response)
+                    .await
+                    .context("cancel pairing")?;
+                anyhow::bail!("not approved");
+            }
             client
-                .pair_approve_preview(&code, &preview, entered.trim())
+                .pair_approve(&response, &preview)
                 .await
                 .context("pair approve")?;
             save_state(&cli.state, client.state.as_ref().unwrap())?;
@@ -2289,6 +2312,15 @@ fn read_note_body(body: Option<String>, file: Option<PathBuf>) -> Result<String>
         .read_to_string(&mut buf)
         .context("read note body from stdin")?;
     Ok(buf)
+}
+
+/// A QR code drawn with half-block characters, two modules to a line.
+fn terminal_qr(text: &str) -> anyhow::Result<String> {
+    let code = qrcode::QrCode::new(text.as_bytes()).context("draw the pairing code")?;
+    Ok(code
+        .render::<qrcode::render::unicode::Dense1x2>()
+        .quiet_zone(true)
+        .build())
 }
 
 /// Signs in, finishing an interrupted recovery if the server says one is owed.

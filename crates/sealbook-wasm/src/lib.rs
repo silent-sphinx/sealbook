@@ -10,20 +10,21 @@ use sealbook_core::{
     CoreDevice, CoreDeviceEntry, CoreDeviceKind, CoreDeviceLabel, CoreDeviceLabelObject,
     CoreDeviceSecrets, CoreDeviceState, CoreExportAccount, CoreExportObject, CoreIcsExportEvent,
     CoreIcsImport, CoreManifestEntry, CoreNote, CoreNoteDraft, CoreNoteFile, CoreNoteFileEntry,
-    CoreNotebook, CorePairPreview, CoreRecurrence, CoreRoster, CoreRosterPin, CoreSealedRow,
-    CoreSession, CoreTask, CoreTaskDraft, CoreTaskList, CoreTaskListDraft, HttpRequest,
-    HttpResponse, LoggedIn, LoginStarting, ManifestContext, ManifestOutcome, ManifestPlan,
-    ManifestSigner, OpaqueStart, PairApproval, PairJoined, PairPoll, PairStatus, PasswordChange,
-    PasswordChangeStarted, RecoverStarted, Recovering, RegisterIdentity, Registering, ResealRow,
-    RosterContext, RotationPlan, RotationState, RowOutcome, RowRef, SignedManifest, SweepCursor,
-    SweepPage, VerifiedRoster, WalkCursor, WalkStep,
+    CoreNotebook, CorePairPreview, CorePairResponse, CoreRecurrence, CoreRoster, CoreRosterPin,
+    CoreSealedRow, CoreSession, CoreTask, CoreTaskDraft, CoreTaskList, CoreTaskListDraft,
+    HttpRequest, HttpResponse, LoggedIn, LoginStarting, ManifestContext, ManifestOutcome,
+    ManifestPlan, ManifestSigner, OpaqueStart, PairApproval, PairApprovePoll, PairJoinPoll,
+    PairJoined, PairResponded, PairStarted, PasswordChange, PasswordChangeStarted, RecoverStarted,
+    Recovering, RegisterIdentity, Registering, ResealRow, RosterContext, RotationPlan,
+    RotationState, RowOutcome, RowRef, SignedManifest, SweepCursor, SweepPage, VerifiedRoster,
+    WalkCursor, WalkStep,
 };
 use sealbook_crypto::RosterPin;
 use sealbook_crypto::{
     content_digest, decrypt_object, encrypt_object, enrollment_transcript, generate_device_hpke,
     generate_device_signing, generate_kdf_salt, generate_phrase, key_rotation_transcript,
     key_wraps_digest, manifest_bucket_digest, manifest_bucket_of, manifest_digest,
-    manifest_transcript, object_aad, pair_confirmation, phrase_lookup_id, phrase_recovery_public,
+    manifest_transcript, object_aad, phrase_lookup_id, phrase_recovery_public,
     rotated_objects_digest, rotation_recovery_payload, sign, unwrap_collection_key,
     unwrap_for_device, wrap_collection_key, wrap_for_device, wrap_for_phrase, CollectionKey,
     DeviceHpkePublic, DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets, EncryptedObject,
@@ -461,32 +462,6 @@ pub fn wrap_ck_for_device(
         "ciphersuite": XWING_CIPHERSUITE,
     }))
     .map_err(js_err)
-}
-
-/// The pairing code both screens show.
-///
-/// Kept for the tests that stand in for the server, which computes the same
-/// code; the client takes its own from core's pairing decisions.
-#[wasm_bindgen]
-#[allow(clippy::too_many_arguments)]
-pub fn pair_confirmation_code(
-    pair_id: &str,
-    device_id: &str,
-    mldsa_pk_b64: &str,
-    ed25519_pk_b64: &str,
-    hpke_pk_b64: &str,
-    roster_seq: u64,
-    roster_transcript_b64: &str,
-) -> Result<String, JsError> {
-    Ok(pair_confirmation(
-        parse_uuid(pair_id)?,
-        parse_uuid(device_id)?,
-        &unb64(mldsa_pk_b64)?,
-        &unb64(ed25519_pk_b64)?,
-        &unb64(hpke_pk_b64)?,
-        roster_seq,
-        &digest32(roster_transcript_b64)?,
-    ))
 }
 
 #[derive(Deserialize)]
@@ -1414,44 +1389,31 @@ pub fn core_rotation_entries(
 }
 
 // ── Core: pairing ──
+//
+// The steps are documented on `sealbook_core::pairing`. The `state` and
+// `response.keys` strings these hand out are secret, and a host keeps them in
+// memory only.
 
-/// The join request body, with the enrollment signature over the new keys.
+/// Makes the joining device's code and join request.
 #[wasm_bindgen]
-pub fn core_pair_join_body(
+pub fn core_pair_start(
     username: &str,
     device: Ts<CoreDevice>,
     mldsa_seed_b64: &str,
     ed25519_sk_b64: &str,
-) -> Result<String, JsError> {
-    sealbook_core::pair_join_body(
+) -> Result<Ts<PairStarted>, JsError> {
+    Ok(sealbook_core::pair_start(
         username,
         &device.to_rust()?,
         &core_secrets(mldsa_seed_b64, ed25519_sk_b64)?,
     )
-    .map_err(core_err)
+    .map_err(core_err)?
+    .into_ts()?)
 }
 
-/// Checks the join response and computes the code the joining device shows.
-///
-/// The code is this device's own, not the server's copy: a server that
-/// substituted the keys could show the real code and keep the ones it swapped in.
 #[wasm_bindgen]
-pub fn core_pair_join_accept(
-    device: Ts<CoreDevice>,
-    body: &str,
-) -> Result<Ts<PairJoined>, JsError> {
-    Ok(sealbook_core::pair_join_accept(&device.to_rust()?, body)
-        .map_err(core_err)?
-        .into_ts()?)
-}
-
-/// Where a poll says the pairing has got to.
-///
-/// Takes the status code as well as the body, because an expired code is a 404
-/// and not a status in the body.
-#[wasm_bindgen]
-pub fn core_pair_status(status: u16, body: &str) -> Result<Ts<PairStatus>, JsError> {
-    Ok(sealbook_core::pair_status(status, body)
+pub fn core_pair_join_accept(body: &str) -> Result<Ts<PairJoined>, JsError> {
+    Ok(sealbook_core::pair_join_accept(body)
         .map_err(core_err)?
         .into_ts()?)
 }
@@ -1459,34 +1421,93 @@ pub fn core_pair_status(status: u16, body: &str) -> Result<Ts<PairStatus>, JsErr
 /// What a joining device does after a poll. `status` is absent when the request
 /// got no answer.
 #[wasm_bindgen]
-pub fn core_pair_poll(status: Option<u16>, body: &str) -> Result<Ts<PairPoll>, JsError> {
-    Ok(sealbook_core::pair_poll(status, body).into_ts()?)
+pub fn core_pair_join_poll(status: Option<u16>, body: &str) -> Result<Ts<PairJoinPoll>, JsError> {
+    Ok(sealbook_core::pair_join_poll(status, body).into_ts()?)
 }
 
-/// The server-relative path that looks a pairing up, from a code as typed.
+/// The joining device's reply, once the approving device has answered.
 #[wasm_bindgen]
-pub fn core_pair_path(pair_key: &str) -> String {
-    sealbook_core::pair_path(pair_key)
+pub fn core_pair_confirm(
+    state: &str,
+    device: Ts<CoreDevice>,
+    pair_id: &str,
+    body: &str,
+    description: &str,
+) -> Result<String, JsError> {
+    sealbook_core::pair_confirm(
+        state,
+        &device.to_rust()?,
+        parse_uuid(pair_id)?,
+        body,
+        description,
+    )
+    .map_err(core_err)
 }
 
-/// The server-relative path an approval posts to.
+/// The roster pin the approving device sealed, once the pairing is ready.
 #[wasm_bindgen]
-pub fn core_pair_approve_path(pair_key: &str) -> String {
-    sealbook_core::pair_approve_path(pair_key)
+pub fn core_pair_finish(
+    state: &str,
+    device: Ts<CoreDevice>,
+    pair_id: &str,
+    body: &str,
+) -> Result<Ts<CoreRosterPin>, JsError> {
+    Ok(
+        sealbook_core::pair_finish(state, &device.to_rust()?, parse_uuid(pair_id)?, body)
+            .map_err(core_err)?
+            .into_ts()?,
+    )
 }
 
-/// Reads a pairing request and checks everything that does not need the typed
-/// code, against a roster this device verified from its own pin.
+/// The path that looks a code up, or a refusal if it is not a pairing code.
+#[wasm_bindgen]
+pub fn core_pair_lookup_path(typed: &str) -> Result<String, JsError> {
+    sealbook_core::pair_lookup_path(typed).map_err(core_err)
+}
+
+/// The approving device's answer, checked against a roster this device verified.
+#[wasm_bindgen]
+pub fn core_pair_respond(
+    ck_b64: &str,
+    key_epoch: u64,
+    verified: Ts<VerifiedRoster>,
+    username: &str,
+    typed: &str,
+    body: &str,
+) -> Result<Ts<PairResponded>, JsError> {
+    Ok(sealbook_core::pair_respond(
+        &core_session(ck_b64, key_epoch)?,
+        &verified.to_rust()?,
+        username,
+        typed,
+        body,
+    )
+    .map_err(core_err)?
+    .into_ts()?)
+}
+
+/// What an approving device does after a poll.
+#[wasm_bindgen]
+pub fn core_pair_approve_poll(
+    status: Option<u16>,
+    body: &str,
+) -> Result<Ts<PairApprovePoll>, JsError> {
+    Ok(sealbook_core::pair_approve_poll(status, body).into_ts()?)
+}
+
+/// Opens the joining device's reply.
 #[wasm_bindgen]
 pub fn core_pair_preview(
     ck_b64: &str,
     key_epoch: u64,
     verified: Ts<VerifiedRoster>,
+    response: Ts<CorePairResponse>,
     body: &str,
 ) -> Result<Ts<CorePairPreview>, JsError> {
     Ok(sealbook_core::pair_preview(
         &core_session(ck_b64, key_epoch)?,
         &verified.to_rust()?,
+        &response.to_rust()?,
         body,
     )
     .map_err(core_err)?
@@ -1494,7 +1515,7 @@ pub fn core_pair_preview(
 }
 
 /// Approves a joining device: wraps the collection key for it, signs the grant,
-/// and signs the roster step that adds it.
+/// signs the roster step that adds it, and seals that step's pin for it.
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
 pub fn core_pair_approve(
@@ -1504,37 +1525,44 @@ pub fn core_pair_approve(
     ck_b64: &str,
     key_epoch: u64,
     verified: Ts<VerifiedRoster>,
+    response: Ts<CorePairResponse>,
     preview: Ts<CorePairPreview>,
-    typed: &str,
 ) -> Result<Ts<PairApproval>, JsError> {
     Ok(sealbook_core::pair_approve(
         &core_secrets(mldsa_seed_b64, ed25519_sk_b64)?,
         &context.to_rust()?,
         &core_session(ck_b64, key_epoch)?,
         &verified.to_rust()?,
+        &response.to_rust()?,
         &preview.to_rust()?,
-        typed,
     )
     .map_err(core_err)?
     .into_ts()?)
 }
 
-/// Strips spacing and case differences from a typed code.
 #[wasm_bindgen]
-pub fn core_normalize_confirmation(entered: &str) -> String {
-    sealbook_core::normalize_confirmation(entered)
+pub fn core_pair_path(key: &str) -> String {
+    sealbook_core::pair_path(key)
 }
 
-/// A code split into display groups.
 #[wasm_bindgen]
-pub fn core_confirmation_groups(code: &str) -> Vec<String> {
-    sealbook_core::confirmation_groups(code)
+pub fn core_pair_respond_path(key: &str) -> String {
+    sealbook_core::pair_respond_path(key)
 }
 
-/// A code grouped for display.
 #[wasm_bindgen]
-pub fn core_format_confirmation(code: &str) -> String {
-    sealbook_core::format_confirmation(code)
+pub fn core_pair_confirm_path(key: &str) -> String {
+    sealbook_core::pair_confirm_path(key)
+}
+
+#[wasm_bindgen]
+pub fn core_pair_approve_path(key: &str) -> String {
+    sealbook_core::pair_approve_path(key)
+}
+
+#[wasm_bindgen]
+pub fn core_pair_cancel_path(key: &str) -> String {
+    sealbook_core::pair_cancel_path(key)
 }
 
 // ── Core: auth and account operations ──

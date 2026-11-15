@@ -902,15 +902,16 @@
     },
     "PairApproveRequest": {
       "properties": {
-        "confirmation": {
-          "type": "string"
-        },
         "grant": {
           "$ref": "#/$defs/DualSignatureBody"
         },
         "roster": {
           "$ref": "#/$defs/RosterBody",
           "description": "The current roster plus the new device, signed by the approver."
+        },
+        "sealed_pin": {
+          "$ref": "#/$defs/Base64Url",
+          "description": "The pin of `roster`, sealed for the joining device."
         },
         "wrap": {
           "$ref": "#/$defs/KeyWrapBody"
@@ -919,18 +920,43 @@
       "required": [
         "wrap",
         "grant",
-        "confirmation",
-        "roster"
+        "roster",
+        "sealed_pin"
+      ],
+      "type": "object"
+    },
+    "PairConfirmRequest": {
+      "description": "The joining device's answer once it has the approving device's share.\nAccepted once per pairing.",
+      "properties": {
+        "hello": {
+          "$ref": "#/$defs/Base64Url"
+        }
+      },
+      "required": [
+        "hello"
       ],
       "type": "object"
     },
     "PairJoinRequest": {
+      "description": "A pairing has two devices talking through the server: the joining device,\nwhich shows an eight-word code, and an approving device the user types or\nscans it into. The server sees only the code's first three words, the\nnameplate. The other five are the password for a CPace run whose two shares\ntravel in these bodies, and the joining device's keys are bound into it, so\neverything sealed under the run's keys proves both devices hold the same code\nand the same keys. See `sealbook_crypto::pairing`.",
       "properties": {
         "device": {
           "$ref": "#/$defs/DevicePublicKeys"
         },
         "enrollment_signature": {
           "$ref": "#/$defs/DualSignatureBody"
+        },
+        "nameplate": {
+          "description": "The code's first three words, hyphen-joined.",
+          "type": "string"
+        },
+        "share": {
+          "$ref": "#/$defs/Base64Url",
+          "description": "The joining device's CPace share."
+        },
+        "sid": {
+          "$ref": "#/$defs/Base64Url",
+          "description": "The CPace session id the joining device picked."
         },
         "username": {
           "type": "string"
@@ -939,45 +965,43 @@
       "required": [
         "username",
         "device",
-        "enrollment_signature"
+        "enrollment_signature",
+        "nameplate",
+        "sid",
+        "share"
       ],
       "type": "object"
     },
     "PairJoinResponse": {
+      "description": "The same for every username, including one with no account: nothing in it\ndepends on the account, so it cannot be used to test usernames.",
       "properties": {
-        "confirm": {
-          "type": "string"
-        },
-        "pair_code": {
-          "type": "string"
-        },
         "pair_id": {
           "format": "uuid",
           "type": "string"
-        },
-        "roster_seq": {
-          "description": "The roster the joining device must anchor on, and which `confirm` commits\nto: the account's current roster sequence and its transcript.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "roster_transcript": {
+        }
+      },
+      "required": [
+        "pair_id"
+      ],
+      "type": "object"
+    },
+    "PairRespondRequest": {
+      "description": "The approving device's CPace share. Accepted once per pairing.",
+      "properties": {
+        "share": {
           "$ref": "#/$defs/Base64Url"
         }
       },
       "required": [
-        "pair_id",
-        "pair_code",
-        "confirm",
-        "roster_seq",
-        "roster_transcript"
+        "share"
       ],
       "type": "object"
     },
     "PairStatusResponse": {
+      "description": "A pairing as the server holds it, from either side.\n\n`status` is `pending` until the approving device has sent its share,\n`responded` until the joining device has answered with `hello`, `confirmed`\nuntil the approval, and `ready` after it. The approving device, looking up\nby nameplate with a session on the account, is served the joining device's\nhalf; the joining device, polling by pair id, is served the approving\ndevice's. Empty byte fields are absent.",
       "properties": {
-        "confirm": {
-          "type": "string"
+        "approver_share": {
+          "$ref": "#/$defs/Base64Url"
         },
         "device": {
           "anyOf": [
@@ -989,18 +1013,23 @@
             }
           ]
         },
+        "hello": {
+          "$ref": "#/$defs/Base64Url",
+          "description": "Sealed by the joining device for the approving one."
+        },
+        "joiner_share": {
+          "$ref": "#/$defs/Base64Url"
+        },
         "pair_id": {
           "format": "uuid",
           "type": "string"
         },
-        "roster_seq": {
-          "description": "The roster sequence the joining device anchored on, for the account's own\ndevices only. It lets an approver whose roster has moved on since the\npairing started say so, rather than reporting a bare code mismatch.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+        "sealed_pin": {
+          "$ref": "#/$defs/Base64Url",
+          "description": "Sealed by the approving device for the joining one: the roster pin to\ntrust from."
+        },
+        "sid": {
+          "$ref": "#/$defs/Base64Url"
         },
         "status": {
           "type": "string"
@@ -1014,8 +1043,7 @@
       },
       "required": [
         "pair_id",
-        "status",
-        "confirm"
+        "status"
       ],
       "type": "object"
     },

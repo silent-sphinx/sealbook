@@ -22,6 +22,10 @@ pub enum CryptoError {
     Encoding,
     #[error("device roster: {0}")]
     Roster(String),
+    #[error("{0}")]
+    PairCode(String),
+    #[error("the other device's pairing message is not usable")]
+    PairShare,
 }
 
 impl From<hpke::HpkeError> for CryptoError {

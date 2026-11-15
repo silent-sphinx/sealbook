@@ -26,6 +26,7 @@ axum = "0.8"
 base64 = "0.22"
 chacha20poly1305 = "0.10"
 clap = { version = "4", features = ["derive"] }
+curve25519-dalek = "4.1"
 ed25519-dalek = { version = "2", features = ["rand_core", "zeroize"] }
 hex = "0.4"
 keyring = "3"

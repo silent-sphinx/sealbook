@@ -1,9 +1,10 @@
 //! The shared pairing fixture, and what core makes of it.
 //!
-//! One account with two enrolled devices and a third asking to join, as both
-//! sides of a pairing see it: the join response the new device checks, the
-//! status response the approver previews, the code both sides have to compute
-//! from those, and every refusal either side can raise.
+//! One account with two enrolled devices and a third asking to join, through
+//! every step of the PAKE handshake as each side sees it: the code the joining
+//! device makes, the approving device's answer to it, the joining device's
+//! sealed reply, the preview, the approval, and the roster pin the joining
+//! device ends up trusting. Then every refusal either side can raise.
 //!
 //! Held to the same document as `sealbook-web/src/lib/pairingParity.test.ts`
 //! and Android's `DevicePairingTest`, so a pairing that differs here differs
@@ -14,18 +15,22 @@
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
 use sealbook_core::{
-    confirmation_groups, format_confirmation, normalize_confirmation, pair_approve,
-    pair_approve_path, pair_join_accept, pair_join_body, pair_path, pair_preview, pair_status,
-    read_roster, roster_accept_sealed, CoreDevice, CoreError, CorePairPreview, CoreSession,
-    PairJoined, PairRefusal, PairStatus, RosterContext, VerifiedRoster,
+    pair_approve, pair_approve_path, pair_approve_poll, pair_cancel_path, pair_confirm_path,
+    pair_confirm_with_rng, pair_finish, pair_join_accept, pair_join_poll, pair_lookup_path,
+    pair_path, pair_preview, pair_respond, pair_respond_path, pair_respond_with_rng,
+    pair_start_with_rng, read_roster, roster_accept_sealed, CoreDevice, CoreError, CorePairPreview,
+    CorePairResponse, CoreRosterPin, CoreSession, PairApprovePoll, PairJoinPoll, PairJoined,
+    PairRefusal, PairResponded, PairStarted, RosterContext, VerifiedRoster, PAIR_POLL_INTERVAL_MS,
 };
 use sealbook_crypto::{
-    pair_confirmation, signing_from_seeds, CollectionKey, DeviceSigningSecrets, RosterPin,
+    pair_grant_transcript, signing_from_seeds, CollectionKey, DeviceSigningSecrets, RosterPin,
 };
 use sealbook_protocol::{
-    DevicePublicKeys, PairApproveRequest, PairJoinRequest, PairJoinResponse, PairStatusResponse,
-    RosterBody, RosterSignerBody,
+    DevicePublicKeys, PairApproveRequest, PairConfirmRequest, PairJoinRequest, PairJoinResponse,
+    PairRespondRequest, PairStatusResponse, RosterBody, RosterSignerBody,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -39,8 +44,16 @@ const COLLECTION: &str = "11111111-1111-1111-1111-111111111111";
 const ALPHA: &str = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 const BETA: &str = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 const JOINING: &str = "dddddddd-dddd-dddd-dddd-dddddddddddd";
+const INTRUDER: &str = "99999999-9999-9999-9999-999999999999";
 const PAIR_ID: &str = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
-const PAIR_CODE: &str = "KQ4R 7T2M 9XJB";
+const USERNAME: &str = "alice";
+const DESCRIPTION: &str = "Firefox on macOS";
+const WAIT_JOIN: PairJoinPoll = PairJoinPoll::Wait {
+    after_ms: PAIR_POLL_INTERVAL_MS,
+};
+const WAIT_APPROVE: PairApprovePoll = PairApprovePoll::Wait {
+    after_ms: PAIR_POLL_INTERVAL_MS,
+};
 
 #[derive(Serialize, Deserialize)]
 struct Fixture {
@@ -49,6 +62,9 @@ struct Fixture {
     /// The epoch the roster below is sealed at, and which an approving device
     /// has to be holding.
     key_epoch: u64,
+    username: String,
+    /// What the joining device says it is.
+    description: String,
     /// The device doing the approving, with the secrets it signs with.
     approver: Device,
     /// The roster the approval extends, as the approver verified it from its
@@ -58,26 +74,35 @@ struct Fixture {
     /// with.
     joining: Device,
     pair_id: Uuid,
-    pair_code: String,
-    /// The code both sides compute, over the joining device's keys and the
-    /// roster anchor. Neither side displays the server's copy.
-    confirm: String,
-    /// The join response, as the server answers the joining device.
+    /// Step 1, joining: the code, the join request, and this side's state.
+    started: PairStarted,
     join_response: String,
     joined: PairJoined,
-    /// The status response, as the server answers the approving device.
-    preview_response: String,
+    /// Step 2, approving: the pairing as the approver is served it, the code as
+    /// the user typed it, and the approver's answer.
+    typed: String,
+    pending_response: String,
+    responded: PairResponded,
+    /// Step 3, joining: the pairing with the approver's share, and the sealed
+    /// reply.
+    responded_response: String,
+    confirm_body: String,
+    /// Step 4, approving: the pairing with the reply, and what it opens to.
+    confirmed_response: String,
     preview: CorePairPreview,
-    /// Join responses the joining device refuses, and why.
-    join_refusals: Vec<JoinRefusal>,
-    /// Status responses an approval refuses, and why.
-    approve_refusals: Vec<ApproveRefusal>,
-    /// Codes as the user might type them, and what they normalize to.
+    /// Step 6, joining: the approved pairing, the roster the approval signed,
+    /// and the pin the joining device opens from it.
+    ready_response: String,
+    approved_roster_json: String,
+    finished: CoreRosterPin,
+    respond_refusals: Vec<RespondRefusal>,
+    preview_refusals: Vec<PreviewRefusal>,
+    finish_refusals: Vec<FinishRefusal>,
+    /// Codes as a user might enter them, and the lookup path or refusal.
     codes: Vec<CodeCase>,
-    /// Lookup keys and the path that resolves them.
     paths: Vec<PathCase>,
-    /// Poll answers and the state they report.
-    polls: Vec<PollCase>,
+    join_polls: Vec<JoinPollCase>,
+    approve_polls: Vec<ApprovePollCase>,
 }
 
 /// A device as its host holds it: the public keys the protocol carries and the
@@ -90,15 +115,9 @@ struct Device {
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-struct JoinRefusal {
+struct RespondRefusal {
     what: String,
-    response: String,
-    refusal: PairRefusal,
-}
-
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-struct ApproveRefusal {
-    what: String,
+    typed: String,
     response: String,
     /// The epoch the approving device holds, which only the rotation case
     /// differs on.
@@ -107,27 +126,54 @@ struct ApproveRefusal {
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct PreviewRefusal {
+    what: String,
+    /// The approver's state from its own answer.
+    response: CorePairResponse,
+    /// The pairing as served once the joining device replied.
+    body: String,
+    refusal: PairRefusal,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct FinishRefusal {
+    what: String,
+    body: String,
+    refusal: PairRefusal,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct CodeCase {
     typed: String,
-    normalized: String,
-    formatted: String,
-    groups: Vec<String>,
+    path: Option<String>,
+    refusal: Option<PairRefusal>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct PathCase {
-    /// What the user typed, or the pair id a host held on to.
+    /// A nameplate, or the pair id the joining device polls by.
     key: String,
     path: String,
-    approve_path: String,
+    respond: String,
+    confirm: String,
+    approve: String,
+    cancel: String,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-struct PollCase {
+struct JoinPollCase {
     what: String,
-    status: u16,
+    status: Option<u16>,
     body: String,
-    state: PairStatus,
+    decision: PairJoinPoll,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct ApprovePollCase {
+    what: String,
+    status: Option<u16>,
+    body: String,
+    decision: PairApprovePoll,
 }
 
 fn b64(bytes: &[u8]) -> String {
@@ -136,6 +182,13 @@ fn b64(bytes: &[u8]) -> String {
 
 fn fixture() -> Fixture {
     serde_json::from_str(&std::fs::read_to_string(FIXTURE).expect("pairing fixture")).unwrap()
+}
+
+fn pair_refusal(err: CoreError) -> PairRefusal {
+    match err {
+        CoreError::Pair { refusal } => refusal,
+        other => panic!("expected a pairing refusal, got {other}"),
+    }
 }
 
 impl Device {
@@ -167,238 +220,196 @@ impl Fixture {
         }
     }
 
-    fn approve(&self, typed: &str) -> Result<sealbook_core::PairApproval, CoreError> {
+    fn approve(&self) -> sealbook_core::PairApproval {
         pair_approve(
             &self.approver.secrets(),
             &self.context(),
             &self.session(self.key_epoch),
             &self.verified,
+            &self.responded.response,
             &self.preview,
-            typed,
         )
+        .expect("the approval signs")
     }
 }
 
-// ── The code both sides compute ──
+// ── The handshake ──
 
-/// The one property the whole handshake rests on: the joining device and the
-/// approving device, given what the server tells each of them, arrive at the
-/// same code without either taking the server's word for it.
+/// The property the whole handshake rests on: given only what the server relays,
+/// the two devices end up with the same keys, and the approving device opens the
+/// joining device's reply to the description it sealed.
 #[test]
-fn both_sides_compute_the_same_code_from_what_they_are_served() {
+fn each_step_gives_what_the_fixture_names() {
     let fixture = fixture();
-    let joined = pair_join_accept(&fixture.joining.device, &fixture.join_response)
-        .expect("the join response anchors");
+    assert_eq!(
+        pair_join_accept(&fixture.join_response).unwrap(),
+        fixture.joined
+    );
+    let responded = pair_respond_with_rng(
+        &mut StdRng::seed_from_u64(2),
+        &fixture.session(fixture.key_epoch),
+        &fixture.verified,
+        &fixture.username,
+        &fixture.typed,
+        &fixture.pending_response,
+    )
+    .expect("the approver answers");
+    assert_eq!(responded, fixture.responded);
+    let confirm = pair_confirm_with_rng(
+        &mut StdRng::seed_from_u64(3),
+        &fixture.started.state,
+        &fixture.joining.device,
+        fixture.pair_id,
+        &fixture.responded_response,
+        &fixture.description,
+    )
+    .expect("the joining device replies");
+    assert_eq!(confirm, fixture.confirm_body);
     let preview = pair_preview(
         &fixture.session(fixture.key_epoch),
         &fixture.verified,
-        &fixture.preview_response,
+        &fixture.responded.response,
+        &fixture.confirmed_response,
     )
-    .expect("the preview is approvable");
-    assert_eq!(joined.confirm, fixture.confirm);
-    assert_eq!(preview.confirm, fixture.confirm);
-    assert_eq!(joined, fixture.joined);
+    .expect("the reply opens");
     assert_eq!(preview, fixture.preview);
+    assert_eq!(preview.description, DESCRIPTION);
+    assert_eq!(preview.device, fixture.joining.device);
 }
 
-/// The anchor the joining device pins is the one the code committed to, so its
-/// first roster fetch is checked against a roster the user vouched for rather
-/// than against a MAC keyed from a collection key the same server supplies.
+/// The joining device's root of trust for the account's devices is the roster
+/// the approver signed, reached under the run's keys rather than taken from the
+/// server.
 #[test]
-fn the_joining_device_pins_the_anchor_the_code_commits_to() {
+fn the_joining_device_pins_the_roster_the_approval_signed() {
     let fixture = fixture();
-    let joined = pair_join_accept(&fixture.joining.device, &fixture.join_response).unwrap();
-    assert_eq!(joined.pin, fixture.verified.pin);
-    assert_eq!(
-        joined.confirm,
-        pair_confirmation(
-            joined.pair_id,
-            fixture.joining.device.device_id,
-            &URL_SAFE_NO_PAD
-                .decode(&fixture.joining.device.mldsa_pk)
-                .unwrap(),
-            &URL_SAFE_NO_PAD
-                .decode(&fixture.joining.device.ed25519_pk)
-                .unwrap(),
-            &URL_SAFE_NO_PAD
-                .decode(&fixture.joining.device.xwing_hpke_pk)
-                .unwrap(),
-            joined.pin.roster_seq,
-            &URL_SAFE_NO_PAD.decode(&joined.pin.transcript).unwrap(),
-        )
-    );
-}
-
-/// A code that differs from the one computed here is a refusal, not something
-/// to display: a server that substituted the joining device's keys could show
-/// the real code and keep the ones it swapped in.
-#[test]
-fn the_servers_copy_of_the_code_is_only_ever_compared_against_ours() {
-    let fixture = fixture();
-    let mut served: PairStatusResponse = serde_json::from_str(&fixture.preview_response).unwrap();
-    served.confirm = "AAAABBBBCCCCDDDDEEEEFFFFGG".into();
-    let refused = pair_preview(
-        &fixture.session(fixture.key_epoch),
-        &fixture.verified,
-        &serde_json::to_string(&served).unwrap(),
+    let pin = pair_finish(
+        &fixture.started.state,
+        &fixture.joining.device,
+        fixture.pair_id,
+        &fixture.ready_response,
     )
-    .expect_err("a code that is not ours is refused");
-    assert_eq!(
-        refused,
-        CoreError::Pair {
-            refusal: PairRefusal::ServerCode
-        }
-    );
+    .expect("the sealed pin opens");
+    assert_eq!(pin, fixture.finished);
+    let roster: RosterBody = serde_json::from_str(&fixture.approved_roster_json).unwrap();
+    let expected = roster.pin(fixture.collection_id);
+    assert_eq!(pin.roster_seq, expected.roster_seq);
+    assert_eq!(pin.transcript, b64(&expected.transcript));
+}
+
+/// A fresh approval seals a pin the joining device opens, for the roster that
+/// same approval signs.
+#[test]
+fn an_approval_seals_the_pin_of_its_own_roster_step() {
+    let fixture = fixture();
+    let approval = fixture.approve();
+    let body: PairApproveRequest = serde_json::from_str(&approval.body).unwrap();
+    let mut ready: PairStatusResponse = serde_json::from_str(&fixture.ready_response).unwrap();
+    ready.sealed_pin = body.sealed_pin;
+    let pin = pair_finish(
+        &fixture.started.state,
+        &fixture.joining.device,
+        fixture.pair_id,
+        &serde_json::to_string(&ready).unwrap(),
+    )
+    .unwrap();
+    let expected = body.roster.pin(fixture.collection_id);
+    assert_eq!(pin.roster_seq, expected.roster_seq);
+    assert_eq!(pin.transcript, b64(&expected.transcript));
 }
 
 // ── The refusals ──
 
 #[test]
-fn the_join_refusals_are_what_the_fixture_names() {
+fn the_respond_refusals_are_what_the_fixture_names() {
     let fixture = fixture();
-    for case in &fixture.join_refusals {
-        let refused = pair_join_accept(&fixture.joining.device, &case.response)
-            .expect_err(&format!("{} is refused", case.what));
-        assert_eq!(
-            refused,
-            CoreError::Pair {
-                refusal: case.refusal.clone()
-            },
-            "{}",
-            case.what
-        );
-    }
-}
-
-#[test]
-fn the_approve_refusals_are_what_the_fixture_names() {
-    let fixture = fixture();
-    for case in &fixture.approve_refusals {
-        let refused = pair_preview(
+    for case in &fixture.respond_refusals {
+        let refused = pair_respond(
             &fixture.session(case.held_epoch),
             &fixture.verified,
+            &fixture.username,
+            &case.typed,
             &case.response,
         )
         .expect_err(&format!("{} is refused", case.what));
-        assert_eq!(
-            refused,
-            CoreError::Pair {
-                refusal: case.refusal.clone()
-            },
-            "{}",
-            case.what
-        );
+        assert_eq!(pair_refusal(refused), case.refusal, "{}", case.what);
     }
 }
 
-/// The typed code is compared against the one recomputed at approval time, not
-/// against the one the preview was built from: the user has been looking at a
-/// screen in between.
+/// A wrong secret word and keys the server swapped in look the same from here:
+/// the reply does not open. That is the whole defence, so both are pinned.
 #[test]
-fn a_typed_code_that_does_not_match_refuses_the_approval() {
+fn the_preview_refusals_are_what_the_fixture_names() {
     let fixture = fixture();
-    let refused = fixture
-        .approve("AAAA BBBB CCCC DDDD EEEE FFFF GG")
-        .expect_err("a code that is not this pairing's is refused");
-    assert_eq!(
-        refused,
-        CoreError::Pair {
-            refusal: PairRefusal::TypedCode
-        }
-    );
-}
-
-/// Shown in groups of four, so the form the user can retype has to be accepted.
-#[test]
-fn the_code_is_accepted_as_it_is_displayed() {
-    let fixture = fixture();
-    for typed in [
-        fixture.confirm.clone(),
-        format_confirmation(&fixture.confirm),
-        format_confirmation(&fixture.confirm).to_lowercase(),
-        confirmation_groups(&fixture.confirm).join("-"),
-    ] {
-        fixture
-            .approve(&typed)
-            .unwrap_or_else(|err| panic!("{typed:?} should be accepted: {err}"));
+    assert!(!fixture.preview_refusals.is_empty());
+    for case in &fixture.preview_refusals {
+        let refused = pair_preview(
+            &fixture.session(fixture.key_epoch),
+            &fixture.verified,
+            &case.response,
+            &case.body,
+        )
+        .expect_err(&format!("{} is refused", case.what));
+        assert_eq!(pair_refusal(refused), case.refusal, "{}", case.what);
     }
 }
 
-// ── What an approval sends ──
-
-/// The roster step is what lets the joining device, and every other device,
-/// accept the new one without trusting the server's device list. It extends the
-/// roster this device verified by one sequence at the same epoch, and it has to
-/// verify from the approver's own pin: a step this device could not check is one
-/// it should not have sent.
 #[test]
-fn an_approval_signs_the_roster_step_that_adds_the_device() {
+fn the_finish_refusals_are_what_the_fixture_names() {
     let fixture = fixture();
-    let approval = fixture
-        .approve(&fixture.confirm)
-        .expect("the approval signs");
-    let next = read_roster(&approval.roster_json).unwrap();
-    assert_eq!(next.roster_seq, fixture.verified.roster.roster_seq + 1);
-    assert_eq!(next.key_epoch, fixture.verified.roster.key_epoch);
-    assert_eq!(
-        next.signer,
-        sealbook_core::CoreRosterSigner::Device {
-            device_id: fixture.approver.device.device_id
-        }
-    );
-    assert_eq!(
-        next.devices.iter().map(|d| d.device_id).collect::<Vec<_>>(),
-        fixture
-            .verified
-            .roster
-            .devices
-            .iter()
-            .map(|d| d.device_id)
-            .chain([fixture.joining.device.device_id])
-            .collect::<Vec<_>>()
-    );
-    let verified = roster_accept_sealed(
+    for case in &fixture.finish_refusals {
+        let refused = pair_finish(
+            &fixture.started.state,
+            &fixture.joining.device,
+            fixture.pair_id,
+            &case.body,
+        )
+        .expect_err(&format!("{} is refused", case.what));
+        assert_eq!(pair_refusal(refused), case.refusal, "{}", case.what);
+    }
+}
+
+/// The approval opens the reply again rather than trusting the preview it is
+/// handed, so a host cannot approve keys the run did not bind.
+#[test]
+fn an_approval_refuses_a_preview_the_run_did_not_open() {
+    let fixture = fixture();
+    let mut forged = fixture.preview.clone();
+    forged.hello = b64(&[0u8; 64]);
+    let refused = pair_approve(
+        &fixture.approver.secrets(),
         &fixture.context(),
         &fixture.session(fixture.key_epoch),
-        &approval.roster_json,
+        &fixture.verified,
+        &fixture.responded.response,
+        &forged,
     )
-    .expect("the step verifies from the approver's pin");
-    assert_eq!(verified.pin.roster_seq, next.roster_seq);
+    .expect_err("a preview that does not open is refused");
+    assert_eq!(pair_refusal(refused), PairRefusal::CodeMismatch);
 }
 
-/// The body carries the canonical code, the wrap addressed to the joining
-/// device, and the same roster the approval pins itself on.
-#[test]
-fn an_approval_sends_the_canonical_code_and_a_wrap_for_the_joining_device() {
-    let fixture = fixture();
-    let approval = fixture
-        .approve(&format_confirmation(&fixture.confirm))
-        .expect("the approval signs");
-    assert_eq!(approval.confirm, fixture.confirm);
-    let body: PairApproveRequest = serde_json::from_str(&approval.body).unwrap();
-    assert_eq!(body.confirmation, fixture.confirm);
-    assert_eq!(body.wrap.recipient_kind, "device");
-    assert_eq!(
-        body.wrap.recipient_id,
-        fixture.joining.device.device_id.to_string()
-    );
-    assert!(!body.wrap.wrapped_ck.is_empty() && !body.wrap.hpke_enc.is_empty());
-    assert_eq!(
-        serde_json::to_string(&body.roster).unwrap(),
-        approval.roster_json
-    );
-}
+// ── What each side sends ──
 
-/// Core signs the enrollment the server checks, so a host never assembles the
-/// transcript itself.
+/// Core signs the enrollment the server checks, and the nameplate the server
+/// sees is the code's first three words and nothing more.
 #[test]
-fn the_join_request_carries_an_enrollment_signature_over_the_new_keys() {
+fn the_join_request_carries_the_enrollment_and_only_the_nameplate() {
     let fixture = fixture();
-    let body = pair_join_body("alice", &fixture.joining.device, &fixture.joining.secrets())
-        .expect("the join request signs");
-    let request: PairJoinRequest = serde_json::from_str(&body).unwrap();
-    assert_eq!(request.username, "alice");
-    assert_eq!(request.device.device_id, fixture.joining.device.device_id);
+    let request: PairJoinRequest = serde_json::from_str(&fixture.started.body).unwrap();
+    assert_eq!(request.username, USERNAME);
+    let words: Vec<&str> = fixture.started.code.split(' ').collect();
+    assert_eq!(words.len(), 8);
+    assert_eq!(request.nameplate, words[..3].join("-"));
+    for secret in &words[3..] {
+        assert!(
+            !fixture.started.body.contains(secret),
+            "{secret} reached the server"
+        );
+    }
+    assert_eq!(
+        fixture.started.qr_text,
+        format!("SEALBOOK-PAIR:{}", fixture.started.code.to_uppercase())
+    );
     let keys = DevicePublicKeys::try_from(&fixture.joining.device).unwrap();
     sealbook_crypto::verify(
         &sealbook_crypto::DeviceSigningPublic {
@@ -419,36 +430,111 @@ fn the_join_request_carries_an_enrollment_signature_over_the_new_keys() {
     .expect("the server accepts the enrollment signature");
 }
 
+/// The roster step is what lets the joining device, and every other device,
+/// accept the new one without trusting the server's device list. It extends the
+/// roster this device verified by one sequence at the same epoch, and it has to
+/// verify from the approver's own pin.
+#[test]
+fn an_approval_signs_the_roster_step_that_adds_the_device() {
+    let fixture = fixture();
+    let approval = fixture.approve();
+    let next = read_roster(&approval.roster_json).unwrap();
+    assert_eq!(next.roster_seq, fixture.verified.roster.roster_seq + 1);
+    assert_eq!(next.key_epoch, fixture.verified.roster.key_epoch);
+    assert_eq!(
+        next.devices.iter().map(|d| d.device_id).collect::<Vec<_>>(),
+        fixture
+            .verified
+            .roster
+            .devices
+            .iter()
+            .map(|d| d.device_id)
+            .chain([fixture.joining.device.device_id])
+            .collect::<Vec<_>>()
+    );
+    let verified = roster_accept_sealed(
+        &fixture.context(),
+        &fixture.session(fixture.key_epoch),
+        &approval.roster_json,
+    )
+    .expect("the step verifies from the approver's pin");
+    assert_eq!(verified.pin.roster_seq, next.roster_seq);
+}
+
+/// The grant covers the CPace run, from fields the server holds, so the server
+/// can check it and cannot lift it onto another pairing.
+#[test]
+fn an_approval_grants_over_the_run_the_server_relayed() {
+    let fixture = fixture();
+    let approval = fixture.approve();
+    let body: PairApproveRequest = serde_json::from_str(&approval.body).unwrap();
+    assert_eq!(body.wrap.recipient_id, JOINING);
+    let join: PairJoinRequest = serde_json::from_str(&fixture.started.body).unwrap();
+    let respond: PairRespondRequest = serde_json::from_str(&fixture.responded.body).unwrap();
+    let keys = DevicePublicKeys::try_from(&fixture.joining.device).unwrap();
+    let approver = DevicePublicKeys::try_from(&fixture.approver.device).unwrap();
+    sealbook_crypto::verify(
+        &sealbook_crypto::DeviceSigningPublic {
+            mldsa_pk: approver.mldsa_pk,
+            ed25519_pk: approver.ed25519_pk,
+        },
+        &pair_grant_transcript(
+            fixture.pair_id,
+            fixture.approver.device.device_id,
+            keys.device_id,
+            &keys.mldsa_pk,
+            &keys.ed25519_pk,
+            &keys.xwing_hpke_pk,
+            &join.sid,
+            &join.share,
+            &respond.share,
+        ),
+        &sealbook_crypto::DualSignature {
+            mldsa: body.grant.mldsa,
+            ed25519: body.grant.ed25519,
+        },
+    )
+    .expect("the server accepts the grant");
+}
+
 // ── Codes, paths and polls ──
 
 #[test]
-fn the_code_cases_normalize_and_group_as_the_fixture_names() {
+fn the_code_cases_are_what_the_fixture_names() {
     for case in &fixture().codes {
-        assert_eq!(normalize_confirmation(&case.typed), case.normalized);
-        assert_eq!(format_confirmation(&case.typed), case.formatted);
-        assert_eq!(confirmation_groups(&case.typed), case.groups);
+        match pair_lookup_path(&case.typed) {
+            Ok(path) => assert_eq!(Some(path), case.path, "{}", case.typed),
+            Err(err) => assert_eq!(Some(pair_refusal(err)), case.refusal, "{}", case.typed),
+        }
     }
 }
 
-/// The server matches a code on its whitespace-normalized form, so a code typed
-/// with a stray double space has to resolve to the same path rather than to a
-/// 404 the host reports as "expired".
 #[test]
-fn the_lookup_path_is_what_the_fixture_names() {
+fn the_paths_are_what_the_fixture_names() {
     for case in &fixture().paths {
         assert_eq!(pair_path(&case.key), case.path);
-        assert_eq!(pair_approve_path(&case.key), case.approve_path);
+        assert_eq!(pair_respond_path(&case.key), case.respond);
+        assert_eq!(pair_confirm_path(&case.key), case.confirm);
+        assert_eq!(pair_approve_path(&case.key), case.approve);
+        assert_eq!(pair_cancel_path(&case.key), case.cancel);
     }
 }
 
-/// Expiry is a 404 and not a status in the body, so a host that reads only the
-/// body polls a dead pairing for ever.
 #[test]
-fn the_poll_cases_report_what_the_fixture_names() {
-    for case in &fixture().polls {
+fn the_polls_decide_what_the_fixture_names() {
+    let fixture = fixture();
+    for case in &fixture.join_polls {
         assert_eq!(
-            pair_status(case.status, &case.body).expect(&case.what),
-            case.state,
+            pair_join_poll(case.status, &case.body),
+            case.decision,
+            "{}",
+            case.what
+        );
+    }
+    for case in &fixture.approve_polls {
+        assert_eq!(
+            pair_approve_poll(case.status, &case.body),
+            case.decision,
             "{}",
             case.what
         );
@@ -469,22 +555,29 @@ fn regenerate_the_pairing_fixture() {
     std::fs::write(path, serde_json::to_string_pretty(&fixture).unwrap()).unwrap();
 }
 
+/// Everything but the approval, whose signatures, key wrap and sealing nonce
+/// are fresh each time, has to come out of the generator as it is checked in.
 #[test]
 fn the_checked_in_fixture_is_what_the_generator_builds() {
     let built = build();
     let have = fixture();
-    assert_eq!(built.confirm, have.confirm);
-    assert_eq!(built.joined, have.joined);
-    assert_eq!(built.preview, have.preview);
+    assert_eq!(built.started, have.started);
     assert_eq!(built.join_response, have.join_response);
-    assert_eq!(built.preview_response, have.preview_response);
+    assert_eq!(built.joined, have.joined);
+    assert_eq!(built.typed, have.typed);
+    assert_eq!(built.pending_response, have.pending_response);
+    assert_eq!(built.responded, have.responded);
+    assert_eq!(built.responded_response, have.responded_response);
+    assert_eq!(built.confirm_body, have.confirm_body);
+    assert_eq!(built.confirmed_response, have.confirmed_response);
+    assert_eq!(built.preview, have.preview);
     assert_eq!(built.verified.pin, have.verified.pin);
     assert_eq!(built.verified.roster_json, have.verified.roster_json);
-    assert_eq!(built.join_refusals, have.join_refusals);
-    assert_eq!(built.approve_refusals, have.approve_refusals);
+    assert_eq!(built.respond_refusals, have.respond_refusals);
     assert_eq!(built.codes, have.codes);
     assert_eq!(built.paths, have.paths);
-    assert_eq!(built.polls, have.polls);
+    assert_eq!(built.join_polls, have.join_polls);
+    assert_eq!(built.approve_polls, have.approve_polls);
 }
 
 fn device(id: &str, seed: u8) -> Device {
@@ -510,6 +603,51 @@ fn device(id: &str, seed: u8) -> Device {
     }
 }
 
+/// The pairing as the server would serve it at each step.
+struct Served {
+    pair_id: Uuid,
+    join: PairJoinRequest,
+}
+
+impl Served {
+    /// The approving device's view: the joining device's half.
+    fn to_approver(
+        &self,
+        status: &str,
+        device: Option<DevicePublicKeys>,
+        hello: Vec<u8>,
+    ) -> String {
+        serde_json::to_string(&PairStatusResponse {
+            pair_id: self.pair_id,
+            status: status.into(),
+            username: device.as_ref().map(|_| USERNAME.to_string()),
+            device,
+            sid: self.join.sid.clone(),
+            joiner_share: self.join.share.clone(),
+            approver_share: Vec::new(),
+            hello,
+            sealed_pin: Vec::new(),
+        })
+        .unwrap()
+    }
+
+    /// The joining device's view: the approving device's half.
+    fn to_joiner(&self, status: &str, approver_share: Vec<u8>, sealed_pin: Vec<u8>) -> String {
+        serde_json::to_string(&PairStatusResponse {
+            pair_id: self.pair_id,
+            status: status.into(),
+            username: None,
+            device: None,
+            sid: Vec::new(),
+            joiner_share: Vec::new(),
+            approver_share,
+            hello: Vec::new(),
+            sealed_pin,
+        })
+        .unwrap()
+    }
+}
+
 /// The account mid-pairing, and what core makes of each side of it.
 fn build() -> Fixture {
     let collection_id: Uuid = COLLECTION.parse().unwrap();
@@ -520,6 +658,7 @@ fn build() -> Fixture {
     let approver = device(ALPHA, 1);
     let second = device(BETA, 2);
     let joining = device(JOINING, 4);
+    let intruder = device(INTRUDER, 5);
 
     // The roster the approval extends: two devices at sequence 3, sealed by the
     // approver so that the step it signs below is reachable from this one.
@@ -546,190 +685,361 @@ fn build() -> Fixture {
     let roster_json = serde_json::to_string(&roster).unwrap();
     let verified = VerifiedRoster {
         roster: read_roster(&roster_json).unwrap(),
-        pin: sealbook_core::CoreRosterPin {
+        pin: CoreRosterPin {
             roster_seq: roster.roster_seq,
             transcript: b64(&anchor.transcript),
         },
         roster_json: roster_json.clone(),
         key_committed: true,
     };
+    let session = |held: u64| CoreSession {
+        collection_key: Some(*key.as_bytes()),
+        key_epoch: held,
+        verified_roster: None,
+    };
+    let context = RosterContext {
+        collection_id,
+        device_id: approver.device.device_id,
+        roster_seq: verified.pin.roster_seq,
+        roster_transcript: verified.pin.transcript.clone(),
+    };
 
-    let joining_keys = DevicePublicKeys::try_from(&joining.device).unwrap();
-    let confirm = pair_confirmation(
+    // Step 1: the joining device makes its code.
+    let started = pair_start_with_rng(
+        &mut StdRng::seed_from_u64(1),
+        USERNAME,
+        &joining.device,
+        &joining.secrets(),
+    )
+    .unwrap();
+    let join: PairJoinRequest = serde_json::from_str(&started.body).unwrap();
+    let join_response = serde_json::to_string(&PairJoinResponse { pair_id }).unwrap();
+    let joined = pair_join_accept(&join_response).unwrap();
+    let served = Served {
         pair_id,
-        joining_keys.device_id,
-        &joining_keys.mldsa_pk,
-        &joining_keys.ed25519_pk,
-        &joining_keys.xwing_hpke_pk,
-        anchor.roster_seq,
-        &anchor.transcript,
-    );
+        join: join.clone(),
+    };
+    let joining_keys = DevicePublicKeys::try_from(&joining.device).unwrap();
 
-    let join_response = |roster_seq: u64, transcript: Vec<u8>, confirm: &str| {
-        serde_json::to_string(&PairJoinResponse {
-            pair_id,
-            pair_code: PAIR_CODE.into(),
-            confirm: confirm.to_string(),
-            roster_seq,
-            roster_transcript: transcript,
-        })
+    // Step 2: the user types the code on the approver, which answers. The words
+    // are typed in capitals with a stray double space, as a user might.
+    let typed = started.code.to_uppercase().replacen(' ', "  ", 1);
+    let pending_response = served.to_approver("pending", Some(joining_keys.clone()), Vec::new());
+    let respond = |seed: u64, typed: &str, body: &str| {
+        pair_respond_with_rng(
+            &mut StdRng::seed_from_u64(seed),
+            &session(key_epoch),
+            &verified,
+            USERNAME,
+            typed,
+            body,
+        )
         .unwrap()
     };
-    let served_join = join_response(anchor.roster_seq, anchor.transcript.to_vec(), &confirm);
-
-    let status_response = |device: Option<DevicePublicKeys>, roster_seq, confirm: &str| {
-        serde_json::to_string(&PairStatusResponse {
-            pair_id,
-            status: "pending".into(),
-            confirm: confirm.to_string(),
-            username: Some("alice".into()),
-            device,
-            roster_seq,
-        })
+    let responded = respond(2, &typed, &pending_response);
+    let approver_share = serde_json::from_str::<PairRespondRequest>(&responded.body)
         .unwrap()
+        .share;
+
+    // Step 3: the joining device replies under the run's keys.
+    let reply = |seed: u64, approver_share: Vec<u8>| {
+        let body = served.to_joiner("responded", approver_share, Vec::new());
+        let confirm = pair_confirm_with_rng(
+            &mut StdRng::seed_from_u64(seed),
+            &started.state,
+            &joining.device,
+            pair_id,
+            &body,
+            DESCRIPTION,
+        )
+        .unwrap();
+        (body, confirm)
     };
-    let served_preview = status_response(
+    let (responded_response, confirm_body) = reply(3, approver_share.clone());
+    let hello = |confirm: &str| {
+        serde_json::from_str::<PairConfirmRequest>(confirm)
+            .unwrap()
+            .hello
+    };
+
+    // Step 4: the approver opens the reply.
+    let confirmed_response = served.to_approver(
+        "confirmed",
         Some(joining_keys.clone()),
-        Some(anchor.roster_seq),
-        &confirm,
+        hello(&confirm_body),
     );
+    let preview = pair_preview(
+        &session(key_epoch),
+        &verified,
+        &responded.response,
+        &confirmed_response,
+    )
+    .unwrap();
 
-    let other_code = "AAAABBBBCCCCDDDDEEEEFFFFGG";
-    let join_refusals = vec![
-        JoinRefusal {
-            what: "the account has no roster to anchor on".into(),
-            response: join_response(0, Vec::new(), &confirm),
-            refusal: PairRefusal::NoAnchor,
-        },
-        JoinRefusal {
-            // A sequence with a transcript that is not a digest is not an
-            // unpinned device: pinning it would trust the next roster served.
-            what: "the anchor's transcript is not a digest".into(),
-            response: join_response(anchor.roster_seq, vec![0; 7], &confirm),
-            refusal: PairRefusal::NoAnchor,
-        },
-        JoinRefusal {
-            what: "the server's code is not the one computed here".into(),
-            response: join_response(anchor.roster_seq, anchor.transcript.to_vec(), other_code),
-            refusal: PairRefusal::ServerCode,
-        },
-    ];
+    // Steps 5 and 6: the approval, and the joining device opening its pin.
+    let approval = pair_approve(
+        &approver.secrets(),
+        &context,
+        &session(key_epoch),
+        &verified,
+        &responded.response,
+        &preview,
+    )
+    .unwrap();
+    let approved: PairApproveRequest = serde_json::from_str(&approval.body).unwrap();
+    let ready_response =
+        served.to_joiner("ready", approver_share.clone(), approved.sealed_pin.clone());
+    let finished = pair_finish(&started.state, &joining.device, pair_id, &ready_response).unwrap();
 
-    let approve_refusals = vec![
-        ApproveRefusal {
-            what: "the pairing has expired, so there are no keys to approve".into(),
-            response: status_response(None, None, &confirm),
+    // The refusals.
+    let words: Vec<&str> = started.code.split(' ').collect();
+    let mut wrong_words = words.clone();
+    wrong_words[7] = if words[7] == "zoo" { "zone" } else { "zoo" };
+    let wrong_code = wrong_words.join(" ");
+
+    let respond_refusals = vec![
+        RespondRefusal {
+            what: "the pairing has expired, so there are no keys to answer for".into(),
+            typed: typed.clone(),
+            response: served.to_approver("pending", None, Vec::new()),
             held_epoch: key_epoch,
             refusal: PairRefusal::Expired,
         },
-        ApproveRefusal {
+        RespondRefusal {
+            what: "another device has already answered this pairing".into(),
+            typed: typed.clone(),
+            response: served.to_approver("responded", Some(joining_keys.clone()), Vec::new()),
+            held_epoch: key_epoch,
+            refusal: PairRefusal::Expired,
+        },
+        RespondRefusal {
             what: "the key was rotated after this session fetched it".into(),
-            response: served_preview.clone(),
+            typed: typed.clone(),
+            response: pending_response.clone(),
             held_epoch: key_epoch - 1,
             refusal: PairRefusal::KeyRotated {
                 held: key_epoch - 1,
                 roster: key_epoch,
             },
         },
-        ApproveRefusal {
+        RespondRefusal {
             what: "the device is already enrolled".into(),
-            response: status_response(
+            typed: typed.clone(),
+            response: served.to_approver(
+                "pending",
                 Some(DevicePublicKeys::try_from(&second.device).unwrap()),
-                Some(anchor.roster_seq),
-                &confirm,
+                Vec::new(),
             ),
             held_epoch: key_epoch,
             refusal: PairRefusal::AlreadyEnrolled {
                 device: second.device.device_id,
             },
         },
-        ApproveRefusal {
-            what: "a rotation or another pairing landed while this one waited".into(),
-            response: status_response(Some(joining_keys.clone()), Some(2), &confirm),
+        RespondRefusal {
+            what: "the code is short a word".into(),
+            typed: words[..7].join(" "),
+            response: pending_response.clone(),
             held_epoch: key_epoch,
-            refusal: PairRefusal::RosterMoved {
-                joined_at: 2,
-                now: anchor.roster_seq,
+            refusal: PairRefusal::Code {
+                reason: "a pairing code has 8 words, and this has 7".into(),
             },
         },
-        ApproveRefusal {
-            what: "the server's code is not the one computed here".into(),
-            response: status_response(
+    ];
+
+    // A wrong secret word: the approver answers, the joining device replies to
+    // that answer, and the reply does not open.
+    let wrong = respond(4, &wrong_code, &pending_response);
+    let wrong_share = serde_json::from_str::<PairRespondRequest>(&wrong.body)
+        .unwrap()
+        .share;
+    let (_, wrong_confirm) = reply(5, wrong_share);
+    // Swapped keys: the server shows the approver its own device in place of
+    // the joining one, and relays everything else as it is.
+    let intruder_keys = DevicePublicKeys::try_from(&intruder.device).unwrap();
+    let swapped = respond(
+        6,
+        &typed,
+        &served.to_approver("pending", Some(intruder_keys.clone()), Vec::new()),
+    );
+    let swapped_share = serde_json::from_str::<PairRespondRequest>(&swapped.body)
+        .unwrap()
+        .share;
+    let (_, swapped_confirm) = reply(7, swapped_share);
+    let preview_refusals = vec![
+        PreviewRefusal {
+            what: "the code typed differs from the joining device's in its last word".into(),
+            response: wrong.response,
+            body: served.to_approver(
+                "confirmed",
                 Some(joining_keys.clone()),
-                Some(anchor.roster_seq),
-                other_code,
+                hello(&wrong_confirm),
             ),
-            held_epoch: key_epoch,
-            refusal: PairRefusal::ServerCode,
+            refusal: PairRefusal::CodeMismatch,
+        },
+        PreviewRefusal {
+            what: "the server showed this device other keys than the joining device holds".into(),
+            response: swapped.response,
+            body: served.to_approver("confirmed", Some(intruder_keys), hello(&swapped_confirm)),
+            refusal: PairRefusal::CodeMismatch,
         },
     ];
 
-    let codes = ["ABCD EFGH", "abcd-efgh", " ABCDEFGH ", &confirm]
-        .iter()
-        .map(|typed| CodeCase {
-            typed: (*typed).to_string(),
-            normalized: normalize_confirmation(typed),
-            formatted: format_confirmation(typed),
-            groups: confirmation_groups(typed),
-        })
-        .collect();
+    let mut tampered_pin = approved.sealed_pin.clone();
+    let last = tampered_pin.len() - 1;
+    tampered_pin[last] ^= 1;
+    let other_share = serde_json::from_str::<PairRespondRequest>(&wrong.body)
+        .unwrap()
+        .share;
+    let finish_refusals = vec![
+        FinishRefusal {
+            what: "the sealed pin was altered on the way".into(),
+            body: served.to_joiner("ready", approver_share.clone(), tampered_pin),
+            refusal: PairRefusal::Unverified,
+        },
+        FinishRefusal {
+            what: "the share served now is not the one this device replied to".into(),
+            body: served.to_joiner("ready", other_share, approved.sealed_pin.clone()),
+            refusal: PairRefusal::Unverified,
+        },
+        FinishRefusal {
+            what: "the pairing is not ready, so there is no pin".into(),
+            body: served.to_joiner("responded", approver_share.clone(), Vec::new()),
+            refusal: PairRefusal::Unverified,
+        },
+    ];
 
-    let paths = [PAIR_CODE, "kq4r 7t2m 9xjb", "KQ4R  7T2M  9XJB", PAIR_ID]
+    let prefixes: Vec<String> = words
         .iter()
+        .map(|word| word.chars().take(4).collect())
+        .collect();
+    let mut misspelt = words.clone();
+    misspelt[3] = "qqqq";
+    let codes = [
+        started.code.clone(),
+        typed.clone(),
+        started.qr_text.clone(),
+        words.join("-"),
+        prefixes.join(" "),
+        misspelt.join(" "),
+        words[..7].join(" "),
+        String::new(),
+    ]
+    .into_iter()
+    .map(|typed| match pair_lookup_path(&typed) {
+        Ok(path) => CodeCase {
+            typed,
+            path: Some(path),
+            refusal: None,
+        },
+        Err(err) => CodeCase {
+            typed,
+            path: None,
+            refusal: Some(pair_refusal(err)),
+        },
+    })
+    .collect();
+
+    let paths = [join.nameplate.clone(), PAIR_ID.to_string()]
+        .into_iter()
         .map(|key| PathCase {
-            key: (*key).to_string(),
-            path: pair_path(key),
-            approve_path: pair_approve_path(key),
+            path: pair_path(&key),
+            respond: pair_respond_path(&key),
+            confirm: pair_confirm_path(&key),
+            approve: pair_approve_path(&key),
+            cancel: pair_cancel_path(&key),
+            key,
         })
         .collect();
 
-    let polls = vec![
-        PollCase {
-            what: "waiting for the other device".into(),
-            status: 200,
-            body: served_preview.clone(),
-            state: PairStatus::Pending,
+    let expired = r#"{"error":"expired"}"#.to_string();
+    let join_polls = vec![
+        JoinPollCase {
+            what: "waiting for an approving device".into(),
+            status: Some(200),
+            body: served.to_joiner("pending", Vec::new(), Vec::new()),
+            decision: WAIT_JOIN,
         },
-        PollCase {
+        JoinPollCase {
+            what: "an approving device has answered".into(),
+            status: Some(200),
+            body: responded_response.clone(),
+            decision: PairJoinPoll::Confirm,
+        },
+        JoinPollCase {
+            what: "replied, and waiting for the user to approve".into(),
+            status: Some(200),
+            body: served.to_joiner("confirmed", approver_share.clone(), Vec::new()),
+            decision: WAIT_JOIN,
+        },
+        JoinPollCase {
             what: "approved".into(),
-            status: 200,
-            body: status_response(None, None, &confirm).replace("pending", "ready"),
-            state: PairStatus::Ready,
+            status: Some(200),
+            body: served.to_joiner("ready", approver_share.clone(), Vec::new()),
+            decision: PairJoinPoll::Ready,
         },
-        PollCase {
+        JoinPollCase {
             what: "the code has timed out, which the server answers with a 404".into(),
-            status: 404,
-            body: r#"{"error":"expired"}"#.into(),
-            state: PairStatus::Expired,
+            status: Some(404),
+            body: expired.clone(),
+            decision: PairJoinPoll::Expired,
+        },
+        JoinPollCase {
+            what: "the request never got an answer".into(),
+            status: None,
+            body: String::new(),
+            decision: WAIT_JOIN,
         },
     ];
-
-    let session = CoreSession {
-        collection_key: Some(*key.as_bytes()),
-        key_epoch,
-        verified_roster: None,
-    };
-    let joined = pair_join_accept(&joining.device, &served_join).unwrap();
-    let preview = pair_preview(&session, &verified, &served_preview).unwrap();
+    let approve_polls = vec![
+        ApprovePollCase {
+            what: "waiting for the joining device to reply".into(),
+            status: Some(200),
+            body: served.to_approver("responded", Some(joining_keys.clone()), Vec::new()),
+            decision: WAIT_APPROVE,
+        },
+        ApprovePollCase {
+            what: "the joining device has replied".into(),
+            status: Some(200),
+            body: confirmed_response.clone(),
+            decision: PairApprovePoll::Preview,
+        },
+        ApprovePollCase {
+            what: "the code has timed out".into(),
+            status: Some(404),
+            body: expired,
+            decision: PairApprovePoll::Expired,
+        },
+    ];
 
     Fixture {
         collection_id,
         collection_key: b64(key.as_bytes()),
         key_epoch,
+        username: USERNAME.into(),
+        description: DESCRIPTION.into(),
         approver,
         verified,
         joining,
         pair_id,
-        pair_code: PAIR_CODE.into(),
-        confirm,
-        join_response: served_join,
+        started,
+        join_response,
         joined,
-        preview_response: served_preview,
+        typed,
+        pending_response,
+        responded,
+        responded_response,
+        confirm_body,
+        confirmed_response,
         preview,
-        join_refusals,
-        approve_refusals,
+        ready_response,
+        approved_roster_json: approval.roster_json,
+        finished,
+        respond_refusals,
+        preview_refusals,
+        finish_refusals,
         codes,
         paths,
-        polls,
+        join_polls,
+        approve_polls,
     }
 }

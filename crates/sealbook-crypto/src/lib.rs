@@ -1,10 +1,12 @@
 #![forbid(unsafe_code)]
 
 pub mod aead;
+pub mod cpace;
 pub mod decoy;
 pub mod error;
 pub mod hpke_wrap;
 pub mod opaque;
+pub mod pairing;
 pub mod phrase;
 pub mod recovery;
 pub mod roster;
@@ -25,11 +27,15 @@ pub use hpke_wrap::{
     DeviceHpkeSecret, DeviceHpkeWrap, WrapBinding, HPKE_AEAD_TAG_LEN, XWING_CIPHERSUITE,
     XWING_ENCAPSULATED_KEY_LEN, XWING_PUBLIC_KEY_LEN,
 };
+pub use pairing::{
+    pair_respond, PairCode, PairInitiator, PairKeys, PAIR_CODE_WORDS, PAIR_NAMEPLATE_WORDS,
+    PAIR_QR_PREFIX, PAIR_SID_LEN,
+};
 pub use phrase::{
-    dummy_phrase_recovery_public, entropy_from_phrase, generate_pair_code, generate_phrase,
-    phrase_lookup_id, phrase_recovery_keys, phrase_recovery_public, sign_phrase_recovery,
-    unwrap_for_phrase, verify_phrase_recovery, wrap_for_phrase, wrap_for_phrase_with_nonce,
-    PHRASE_CIPHERSUITE, PHRASE_ENTROPY_LEN, PHRASE_LOOKUP_ID_LEN, PHRASE_SCHEME,
+    dummy_phrase_recovery_public, entropy_from_phrase, generate_phrase, phrase_lookup_id,
+    phrase_recovery_keys, phrase_recovery_public, sign_phrase_recovery, unwrap_for_phrase,
+    verify_phrase_recovery, wrap_for_phrase, wrap_for_phrase_with_nonce, PHRASE_CIPHERSUITE,
+    PHRASE_ENTROPY_LEN, PHRASE_LOOKUP_ID_LEN, PHRASE_SCHEME,
 };
 pub use recovery::{
     generate_kdf_salt, is_supported_recovery_ciphersuite, unwrap_collection_key,
@@ -50,9 +56,8 @@ pub use transcript::{
     account_op_transcript, attachment_op_payload, content_digest, delete_account_payload,
     enrollment_transcript, key_rotation_transcript, key_wraps_digest, login_start_transcript,
     login_transcript, manifest_bucket_digest, manifest_bucket_of, manifest_digest, manifest_root,
-    manifest_transcript, pair_confirmation, pair_grant_transcript, password_change_payload,
+    manifest_transcript, pair_grant_transcript, password_change_payload,
     phrase_recovery_start_transcript, phrase_recovery_transcript, recovery_password_payload,
     rotated_objects_digest, rotation_recovery_payload, username_change_payload,
     ManifestDigestEntry, ObjectDigestEntry, WrapDigestEntry, MANIFEST_BUCKETS,
-    PAIR_CONFIRMATION_LEN,
 };

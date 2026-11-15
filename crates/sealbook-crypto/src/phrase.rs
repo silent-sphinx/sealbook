@@ -32,21 +32,6 @@ pub fn generate_phrase() -> Result<(String, [u8; PHRASE_ENTROPY_LEN]), CryptoErr
     Ok((phrase, entropy))
 }
 
-pub fn generate_pair_code() -> String {
-    let mut bytes = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut bytes);
-    bytes
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|chunk| {
-            let value = u16::from_le_bytes(*chunk) as usize;
-            BIP39_ENGLISH[value % BIP39_ENGLISH.len()]
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
 pub fn entropy_from_phrase(phrase: &str) -> Result<[u8; PHRASE_ENTROPY_LEN], CryptoError> {
     parse_mnemonic(phrase)
 }

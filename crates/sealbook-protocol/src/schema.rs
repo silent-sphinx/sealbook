@@ -64,6 +64,8 @@ pub fn wire_schema() -> Value {
         PairJoinRequest,
         PairJoinResponse,
         PairStatusResponse,
+        PairRespondRequest,
+        PairConfirmRequest,
         PairApproveRequest,
         RecoverStartRequest,
         RecoverStartResponse,

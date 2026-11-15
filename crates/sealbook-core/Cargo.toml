@@ -7,6 +7,7 @@ rust-version.workspace = true
 
 [dependencies]
 base64.workspace = true
+rand.workspace = true
 sealbook-crypto = { path = "../sealbook-crypto" }
 sealbook-protocol = { path = "../sealbook-protocol" }
 serde.workspace = true

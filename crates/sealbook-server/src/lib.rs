@@ -80,13 +80,20 @@ struct PendingPair {
     source: IpAddr,
     device: DevicePublicKeys,
     enrollment_signature: DualSignatureBody,
-    confirm: String,
-    pair_code: String,
-    /// The roster the joining device was served and anchored on, folded into
-    /// `confirm`. The approval has to extend exactly this roster, because it is
-    /// what the user confirmed.
-    roster_seq: u64,
-    roster_transcript: Vec<u8>,
+    /// The code's first three words: what the approving device looks this up by.
+    nameplate: String,
+    /// The CPace session id and the two shares, relayed as they are. The server
+    /// never holds the code's secret words, so it cannot finish either run.
+    sid: Vec<u8>,
+    joiner_share: Vec<u8>,
+    approver_share: Option<Vec<u8>>,
+    /// The device that answered with `approver_share`, the only one that may
+    /// approve: the run's keys are on it and nowhere else.
+    responder: Option<String>,
+    /// Sealed by the joining device for the approving one.
+    hello: Option<Vec<u8>>,
+    /// Sealed by the approving device for the joining one, with the approval.
+    sealed_pin: Option<Vec<u8>>,
     created: Instant,
     approved: bool,
 }
@@ -892,7 +899,10 @@ fn router(state: Shared) -> Router<Shared> {
         )
         .route("/v1/pair/join", post(pair_join))
         .route("/v1/pair/{id}", get(pair_status))
+        .route("/v1/pair/{id}/respond", post(pair_respond))
+        .route("/v1/pair/{id}/confirm", post(pair_confirm))
         .route("/v1/pair/{id}/approve", post(pair_approve))
+        .route("/v1/pair/{id}/cancel", post(pair_cancel))
         .route("/v1/recover/start", post(recover_start))
         .route("/v1/recover/finish", post(recover_finish))
         .route("/v1/account/challenge", post(account_challenge))
@@ -1198,10 +1208,13 @@ mod tests {
                 mldsa: Vec::new(),
                 ed25519: Vec::new(),
             },
-            confirm: String::new(),
-            pair_code: String::new(),
-            roster_seq: 1,
-            roster_transcript: Vec::new(),
+            nameplate: Uuid::new_v4().to_string(),
+            sid: Vec::new(),
+            joiner_share: Vec::new(),
+            approver_share: None,
+            responder: None,
+            hello: None,
+            sealed_pin: None,
             created: Instant::now()
                 .checked_sub(age)
                 .expect("the monotonic clock must be older than the test's ages"),

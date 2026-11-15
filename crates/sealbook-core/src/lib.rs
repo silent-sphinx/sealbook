@@ -172,10 +172,12 @@ pub use notes::{
     UNTITLED_NOTE_TITLE,
 };
 pub use pairing::{
-    confirmation_groups, format_confirmation, normalize_confirmation, pair_approve,
-    pair_approve_path, pair_join_accept, pair_join_body, pair_path, pair_poll, pair_preview,
-    pair_status, CorePairPreview, PairApproval, PairJoined, PairPoll, PairRefusal, PairStatus,
-    PAIR_POLL_INTERVAL_MS,
+    pair_approve, pair_approve_path, pair_approve_poll, pair_cancel_path, pair_confirm,
+    pair_confirm_path, pair_confirm_with_rng, pair_finish, pair_join_accept, pair_join_poll,
+    pair_lookup_path, pair_path, pair_preview, pair_respond, pair_respond_path,
+    pair_respond_with_rng, pair_start, pair_start_with_rng, CorePairPreview, CorePairResponse,
+    PairApproval, PairApprovePoll, PairJoinPoll, PairJoined, PairRefusal, PairResponded,
+    PairStarted, PAIR_DESCRIPTION_MAX, PAIR_POLL_INTERVAL_MS,
 };
 pub use payload::{payload_kind, write_payload, CorePayloadKind};
 pub use recurrence::{is_calendar_day, recurrence_days, recurrence_next};

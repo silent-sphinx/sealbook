@@ -2,11 +2,10 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sealbook_crypto::{
     content_digest, decrypt_object, encrypt_object, key_rotation_transcript, key_wraps_digest,
-    manifest_digest, object_aad, pair_confirmation, rotated_objects_digest,
-    rotation_recovery_payload, sign, unwrap_collection_key, unwrap_for_device, wrap_for_device,
-    CollectionKey, DeviceHpkePublic, DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets,
-    EncryptedObject, ManifestDigestEntry, ObjectDigestEntry, RecoveryWrap, WrapBinding,
-    WrapDigestEntry, XWING_CIPHERSUITE,
+    manifest_digest, object_aad, rotated_objects_digest, rotation_recovery_payload, sign,
+    unwrap_collection_key, unwrap_for_device, wrap_for_device, CollectionKey, DeviceHpkePublic,
+    DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets, EncryptedObject, ManifestDigestEntry,
+    ObjectDigestEntry, RecoveryWrap, WrapBinding, WrapDigestEntry, XWING_CIPHERSUITE,
 };
 use sealbook_protocol::envelope::{open_envelope, seal_envelope, Unsealed};
 use sealbook_protocol::{DevicePublicKeys, RosterBody, RosterSignerBody, SEALED_CONTENT_TYPE};
@@ -337,32 +336,6 @@ pub fn wrap_ck_for_device(
 pub struct DualSigResult {
     pub mldsa: String,
     pub ed25519: String,
-}
-
-/// The pairing code both screens show.
-///
-/// Kept for the tests that stand in for the server, which computes the same
-/// code; the app takes its own from core's pairing decisions.
-#[uniffi::export]
-#[allow(clippy::too_many_arguments)]
-pub fn pair_confirmation_code(
-    pair_id: String,
-    device_id: String,
-    mldsa_pk_b64: String,
-    ed25519_pk_b64: String,
-    hpke_pk_b64: String,
-    roster_seq: u64,
-    roster_transcript_b64: String,
-) -> Result<String, CryptoError> {
-    Ok(pair_confirmation(
-        parse_uuid(&pair_id)?,
-        parse_uuid(&device_id)?,
-        &unb64(&mldsa_pk_b64)?,
-        &unb64(&ed25519_pk_b64)?,
-        &unb64(&hpke_pk_b64)?,
-        roster_seq,
-        &digest32(&roster_transcript_b64)?,
-    ))
 }
 
 // ── Utility ──

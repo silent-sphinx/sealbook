@@ -6,7 +6,9 @@ use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::CertificateDer;
 use rustls::version::TLS13;
 use rustls::{ClientConfig, RootCertStore};
-use sealbook_client::{CoreCalendarDraft, CoreCalendarEventDraft, ExportedObject, SealbookClient};
+use sealbook_client::{
+    CoreCalendarDraft, CoreCalendarEventDraft, ExportedObject, PairJoinPoll, SealbookClient,
+};
 use sealbook_crypto::opaque::{
     client_login_start, client_register_finish, client_register_start, SealbookCipherSuite,
 };
@@ -15,12 +17,12 @@ use sealbook_crypto::{
     generate_device_signing, login_start_transcript, object_aad, open_login_challenge,
     phrase_lookup_id, phrase_recovery_transcript, sign, sign_phrase_recovery, wrap_for_device,
     CollectionKey, DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets, EncryptedObject,
-    WrapBinding, PAIR_CONFIRMATION_LEN, PHRASE_SCHEME, XWING_CIPHERSUITE,
+    WrapBinding, PHRASE_SCHEME, XWING_CIPHERSUITE,
 };
 use sealbook_protocol::{
     DualSignatureBody, KeyWrapBody, LoginChallengeRequest, LoginChallengeResponse,
-    LoginStartRequest, PairJoinRequest, PairJoinResponse, RecoverFinishRequest,
-    RecoverStartRequest, RecoverStartResponse, SEALED_CONTENT_TYPE,
+    LoginStartRequest, PairJoinRequest, RecoverFinishRequest, RecoverStartRequest,
+    RecoverStartResponse, SEALED_CONTENT_TYPE,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -162,6 +164,34 @@ fn recovery_roster(
     )
 }
 
+/// Pairs a new device into `username`'s account through every step the two
+/// devices take on their own: the join, the owner's answer to the code, the
+/// joining device's reply, the preview, the approval, and the joining device
+/// opening the roster pin the approval sealed for it.
+async fn pair_device(
+    joiner: &mut SealbookClient,
+    owner: &mut SealbookClient,
+    base: &str,
+    username: &str,
+) -> Result<(), sealbook_client::ClientError> {
+    let pairing = joiner.pair_join(base, username).await?;
+    let response = owner.pair_respond(&pairing.code).await?;
+    assert_eq!(
+        joiner.pair_join_step(&pairing, "test device").await?,
+        PairJoinPoll::Confirm
+    );
+    let preview = owner
+        .pair_preview_step(&response)
+        .await?
+        .expect("the joining device has replied");
+    owner.pair_approve(&response, &preview).await?;
+    assert_eq!(
+        joiner.pair_join_step(&pairing, "test device").await?,
+        PairJoinPoll::Ready
+    );
+    Ok(())
+}
+
 async fn spawn_http(db_path: &str) -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -228,14 +258,38 @@ async fn pair_second_device_then_login() {
         .expect("register");
 
     let mut joiner = SealbookClient::plaintext_http();
-    let (pair_code, confirm) = joiner.pair_join(&base, "pairalice").await.expect("join");
-    assert_eq!(confirm.len(), PAIR_CONFIRMATION_LEN);
-
+    let pairing = joiner.pair_join(&base, "pairalice").await.expect("join");
+    assert_eq!(pairing.code.split(' ').count(), 8);
+    // The server sees the nameplate and nothing else of the code.
+    let response = owner.pair_respond(&pairing.code).await.expect("respond");
+    assert_eq!(
+        joiner
+            .pair_join_step(&pairing, "CLI on Linux")
+            .await
+            .expect("reply"),
+        PairJoinPoll::Confirm
+    );
+    let preview = owner
+        .pair_preview_step(&response)
+        .await
+        .expect("preview")
+        .expect("the reply has arrived");
+    assert_eq!(preview.description, "CLI on Linux");
+    assert_eq!(
+        preview.device.device_id,
+        joiner.state.as_ref().unwrap().device_id
+    );
     owner
-        .pair_approve(&pair_code, &confirm)
+        .pair_approve(&response, &preview)
         .await
         .expect("approve");
-    assert!(joiner.pair_ready(&pair_code).await.expect("ready"));
+    assert_eq!(
+        joiner
+            .pair_join_step(&pairing, "CLI on Linux")
+            .await
+            .expect("ready"),
+        PairJoinPoll::Ready
+    );
 
     joiner
         .login("correct horse battery")
@@ -243,6 +297,148 @@ async fn pair_second_device_then_login() {
         .expect("joiner login");
     let listed = joiner.list_contacts().await.expect("list");
     assert!(listed.is_empty());
+}
+
+/// Each step of a pairing happens once, and only the device that answered the
+/// code can approve it: the run's keys are on that device and nowhere else. The
+/// joining device picks the nameplate, so a second join under one that is in
+/// use is refused rather than sharing a lookup. A cancelled pairing is gone for
+/// the joining device too.
+#[tokio::test]
+async fn each_pairing_step_happens_once_and_only_from_the_answering_device() {
+    let dir = std::env::temp_dir().join(format!("sealbook-pair-steps-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+    let password = "correct horse battery";
+
+    let mut owner = SealbookClient::plaintext_http();
+    owner.register(&base, "stepalice", password).await.unwrap();
+    let mut second = SealbookClient::plaintext_http();
+    pair_device(&mut second, &mut owner, &base, "stepalice")
+        .await
+        .expect("pair a second device");
+    second.login(password).await.expect("second login");
+
+    let http = reqwest::Client::new();
+    let mut joiner = SealbookClient::plaintext_http();
+    let pairing = joiner.pair_join(&base, "stepalice").await.expect("join");
+    let nameplate = pairing
+        .code
+        .split(' ')
+        .take(3)
+        .collect::<Vec<_>>()
+        .join("-");
+
+    // A second join under the same nameplate.
+    let device = sealbook_core::new_device().unwrap();
+    let secrets = sealbook_crypto::DeviceSigningSecrets {
+        mldsa_seed: URL_SAFE_NO_PAD.decode(&device.mldsa_seed).unwrap(),
+        ed25519_sk: URL_SAFE_NO_PAD.decode(&device.ed25519_sk).unwrap(),
+    };
+    let started = sealbook_core::pair_start("stepalice", &device.device, &secrets).unwrap();
+    let mut colliding: serde_json::Value = serde_json::from_str(&started.body).unwrap();
+    colliding["nameplate"] = serde_json::json!(nameplate);
+    let status = http
+        .post(format!("{base}/v1/pair/join"))
+        .json(&colliding)
+        .send()
+        .await
+        .unwrap()
+        .status();
+    assert_eq!(status, 409, "a nameplate in use must not be shared");
+
+    // Answered once, by the owner; the second device cannot answer it again.
+    let response = owner.pair_respond(&pairing.code).await.expect("respond");
+    assert!(
+        second.pair_respond(&pairing.code).await.is_err(),
+        "a pairing is answered once"
+    );
+    let second_token = second
+        .state
+        .as_ref()
+        .unwrap()
+        .session_token
+        .clone()
+        .unwrap();
+    let status = http
+        .post(format!("{base}/v1/pair/{nameplate}/respond"))
+        .bearer_auth(&second_token)
+        .json(&serde_json::json!({ "share": URL_SAFE_NO_PAD.encode([1u8; 32]) }))
+        .send()
+        .await
+        .unwrap()
+        .status();
+    assert_eq!(status, 409, "the server refuses a second answer");
+
+    // Replied to once.
+    assert_eq!(
+        joiner.pair_join_step(&pairing, "test").await.unwrap(),
+        PairJoinPoll::Confirm
+    );
+    let status = http
+        .post(format!("{base}/v1/pair/{}/confirm", pairing.pair_id))
+        .json(&serde_json::json!({ "hello": URL_SAFE_NO_PAD.encode([2u8; 64]) }))
+        .send()
+        .await
+        .unwrap()
+        .status();
+    assert_eq!(status, 409, "the server refuses a second reply");
+
+    // Approved only by the device that answered. The body only has to reach
+    // the check, so it reuses the account's current roster.
+    let collection_id = owner.state.as_ref().unwrap().collection_id;
+    let rosters: serde_json::Value = http
+        .get(format!(
+            "{base}/v1/collections/{collection_id}/roster?from=1"
+        ))
+        .bearer_auth(&second_token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let roster = rosters["rosters"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap()
+        .clone();
+    let zeros = |len: usize| URL_SAFE_NO_PAD.encode(vec![0u8; len]);
+    let response_body = http
+        .post(format!("{base}/v1/pair/{nameplate}/approve"))
+        .bearer_auth(&second_token)
+        .json(&serde_json::json!({
+            "wrap": {
+                "recipient_kind": "device",
+                "recipient_id": Uuid::new_v4().to_string(),
+                "hpke_enc": zeros(32),
+                "wrapped_ck": zeros(48),
+                "ciphersuite": XWING_CIPHERSUITE,
+            },
+            "grant": { "mldsa": zeros(8), "ed25519": zeros(8) },
+            "roster": roster,
+            "sealed_pin": zeros(80),
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response_body.status(), 409);
+    assert!(response_body
+        .text()
+        .await
+        .unwrap()
+        .contains("answered by another device"));
+
+    // Cancelled by the owner, and gone for the joining device.
+    owner.pair_cancel(&response).await.expect("cancel");
+    assert_eq!(
+        joiner.pair_join_step(&pairing, "test").await.unwrap(),
+        PairJoinPoll::Expired
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[tokio::test]
@@ -2083,10 +2279,9 @@ async fn a_recovery_lookup_that_matched_nothing_is_answered_like_one_that_did() 
         .expect("recover");
 }
 
-/// `pair/join` must not say whether a username exists. A real account anchors
-/// every join on the same roster, so a decoy made up per request was told apart
-/// by joining twice, and one fixed at `roster_seq` 1 by any account that had
-/// paired a device since registering.
+/// `pair/join` must not say whether a username exists. Its answer is a pair id
+/// and nothing else, whatever the username, and a joining device's poll shows
+/// nothing of the account either.
 #[tokio::test]
 async fn a_pairing_join_for_an_unknown_username_is_answered_like_one_for_an_account() {
     let dir = std::env::temp_dir().join(format!("sealbook-pair-decoy-{}", Uuid::new_v4()));
@@ -2101,76 +2296,63 @@ async fn a_pairing_join_for_an_unknown_username_is_answered_like_one_for_an_acco
         .expect("register");
 
     let http = reqwest::Client::new();
-    let join = |username: String| {
+    let join = |username: &'static str| {
         let http = http.clone();
         let base = base.clone();
         async move {
-            let (_, hpke_pk) = generate_device_hpke().unwrap();
-            let (sign_sk, sign_pk) = generate_device_signing().unwrap();
-            let device_id = Uuid::new_v4();
-            let enrollment = enrollment_transcript(
-                device_id,
-                &sign_pk.mldsa_pk,
-                &sign_pk.ed25519_pk,
-                &hpke_pk.0,
-            );
-            let signature = sign(&sign_sk, &enrollment).unwrap();
-            http.post(format!("{base}/v1/pair/join"))
-                .json(&PairJoinRequest {
-                    username,
-                    device: sealbook_protocol::DevicePublicKeys {
-                        device_id,
-                        mldsa_pk: sign_pk.mldsa_pk,
-                        ed25519_pk: sign_pk.ed25519_pk,
-                        xwing_hpke_pk: hpke_pk.0,
-                    },
-                    enrollment_signature: DualSignatureBody {
-                        mldsa: signature.mldsa,
-                        ed25519: signature.ed25519,
-                    },
-                })
+            let device = sealbook_core::new_device().unwrap();
+            let secrets = sealbook_crypto::DeviceSigningSecrets {
+                mldsa_seed: URL_SAFE_NO_PAD.decode(&device.mldsa_seed).unwrap(),
+                ed25519_sk: URL_SAFE_NO_PAD.decode(&device.ed25519_sk).unwrap(),
+            };
+            let started = sealbook_core::pair_start(username, &device.device, &secrets).unwrap();
+            let joined: serde_json::Value = http
+                .post(format!("{base}/v1/pair/join"))
+                .header("content-type", "application/json")
+                .body(started.body)
                 .send()
                 .await
                 .unwrap()
                 .error_for_status()
                 .unwrap()
-                .json::<PairJoinResponse>()
+                .json()
+                .await
+                .unwrap();
+            let pair_id = joined["pair_id"].as_str().unwrap().to_string();
+            let polled: serde_json::Value = http
+                .get(format!("{base}/v1/pair/{pair_id}"))
+                .send()
                 .await
                 .unwrap()
+                .json()
+                .await
+                .unwrap();
+            (joined, polled)
         }
     };
+    let keys = |value: &serde_json::Value| {
+        let mut keys: Vec<String> = value.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        keys
+    };
 
-    let hit = join("pairbob".into()).await;
-    let hit_again = join("pairbob".into()).await;
-    assert_eq!(hit.roster_seq, hit_again.roster_seq);
-    assert_eq!(hit.roster_transcript, hit_again.roster_transcript);
-
-    let miss = join("pairnobody".into()).await;
-    let miss_again = join("pairnobody".into()).await;
+    let (hit, hit_poll) = join("pairbob").await;
+    let (miss, miss_poll) = join("pairnobody").await;
+    assert_eq!(keys(&hit), vec!["pair_id".to_string()]);
     assert_eq!(
-        miss.roster_seq, miss_again.roster_seq,
-        "joining twice told an unknown username apart"
+        keys(&miss),
+        keys(&hit),
+        "a join told an unknown username apart"
     );
     assert_eq!(
-        miss.roster_transcript, miss_again.roster_transcript,
-        "joining twice told an unknown username apart"
+        keys(&miss_poll),
+        keys(&hit_poll),
+        "a poll told an unknown username apart"
     );
-    assert_eq!(miss.roster_transcript.len(), hit.roster_transcript.len());
-    assert_eq!(miss.confirm.len(), hit.confirm.len());
+    assert_eq!(miss_poll["status"], hit_poll["status"]);
+    assert!(hit_poll.get("username").is_none() && hit_poll.get("device").is_none());
 
-    // Misses are unrelated to one another, so one known miss is no baseline, and
-    // their sequence numbers vary as real accounts' do.
-    let mut seqs = std::collections::HashSet::new();
-    for index in 0..8 {
-        let other = join(format!("pairnobody{index}")).await;
-        assert_ne!(other.roster_transcript, miss.roster_transcript);
-        assert!(other.roster_seq >= 1);
-        seqs.insert(other.roster_seq);
-    }
-    assert!(
-        seqs.len() > 1,
-        "every decoy anchor had the same roster_seq: {seqs:?}"
-    );
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// The OPAQUE evaluation is under the account's username, the OPRF key its
@@ -2289,12 +2471,9 @@ async fn revoking_a_device_rotates_the_collection_key() {
 
     // Pair a second device, which then holds the same collection key.
     let mut joiner = SealbookClient::plaintext_http();
-    let (pair_code, confirm) = joiner.pair_join(&base, "rotalice").await.expect("join");
-    owner
-        .pair_approve(&pair_code, &confirm)
+    pair_device(&mut joiner, &mut owner, &base, "rotalice")
         .await
         .expect("approve");
-    assert!(joiner.pair_ready(&pair_code).await.expect("ready"));
     joiner
         .login("correct horse battery")
         .await
@@ -2398,9 +2577,7 @@ async fn revocation_removes_the_old_key_wraps() {
         .await
         .expect("register");
     let mut joiner = SealbookClient::plaintext_http();
-    let (pair_code, confirm) = joiner.pair_join(&base, "wrapalice").await.expect("join");
-    owner
-        .pair_approve(&pair_code, &confirm)
+    pair_device(&mut joiner, &mut owner, &base, "wrapalice")
         .await
         .expect("approve");
     joiner.login("correct horse battery").await.expect("login");
@@ -2452,9 +2629,7 @@ async fn rotation_issues_a_working_new_recovery_phrase() {
         .await
         .expect("put");
     let mut joiner = SealbookClient::plaintext_http();
-    let (pair_code, confirm) = joiner.pair_join(&base, "phralice").await.expect("join");
-    owner
-        .pair_approve(&pair_code, &confirm)
+    pair_device(&mut joiner, &mut owner, &base, "phralice")
         .await
         .expect("approve");
     joiner.login("correct horse battery").await.expect("login");
@@ -2521,12 +2696,9 @@ async fn revoking_a_device_works_on_a_vault_larger_than_the_default_body_limit()
     }
 
     let mut joiner = SealbookClient::plaintext_http();
-    let (pair_code, confirm) = joiner.pair_join(&base, "bigalice").await.expect("join");
-    owner
-        .pair_approve(&pair_code, &confirm)
+    pair_device(&mut joiner, &mut owner, &base, "bigalice")
         .await
         .expect("approve");
-    assert!(joiner.pair_ready(&pair_code).await.expect("ready"));
     joiner
         .login("correct horse battery")
         .await
@@ -3516,12 +3688,9 @@ async fn the_incremental_manifest_digest_matches_a_full_rebuild() {
     // A rotation rebuilds the state from scratch; the digest must land in the
     // same place the incremental path would have.
     let mut joiner = SealbookClient::plaintext_http();
-    let (pair_code, confirm) = joiner.pair_join(&base, "digestalice").await.expect("join");
-    owner
-        .pair_approve(&pair_code, &confirm)
+    pair_device(&mut joiner, &mut owner, &base, "digestalice")
         .await
         .expect("approve");
-    assert!(joiner.pair_ready(&pair_code).await.expect("ready"));
     joiner.login("correct horse battery").await.expect("login");
     let joiner_device = joiner.state.as_ref().unwrap().device_id;
     owner
@@ -4168,18 +4337,14 @@ async fn an_account_cannot_enrol_devices_without_limit() {
 
     // The sixteenth is accepted; it is the last slot.
     let mut sixteenth = SealbookClient::plaintext_http();
-    let (pair_code, confirm) = sixteenth.pair_join(&base, "capalice").await.unwrap();
-    owner
-        .pair_approve(&pair_code, &confirm)
+    pair_device(&mut sixteenth, &mut owner, &base, "capalice")
         .await
         .expect("the last free slot must be usable");
     assert_eq!(owner.list_devices().await.expect("list").len(), 16);
 
     // The seventeenth is refused, and says what to do about it.
     let mut seventeenth = SealbookClient::plaintext_http();
-    let (pair_code, confirm) = seventeenth.pair_join(&base, "capalice").await.unwrap();
-    let message = owner
-        .pair_approve(&pair_code, &confirm)
+    let message = pair_device(&mut seventeenth, &mut owner, &base, "capalice")
         .await
         .expect_err("enrolling past the cap must be refused")
         .to_string();
@@ -4201,9 +4366,7 @@ async fn an_account_cannot_enrol_devices_without_limit() {
     assert_eq!(owner.list_devices().await.expect("list").len(), 15);
 
     let mut replacement = SealbookClient::plaintext_http();
-    let (pair_code, confirm) = replacement.pair_join(&base, "capalice").await.unwrap();
-    owner
-        .pair_approve(&pair_code, &confirm)
+    pair_device(&mut replacement, &mut owner, &base, "capalice")
         .await
         .expect("a freed slot must be usable");
 
@@ -4311,9 +4474,10 @@ async fn an_account_at_the_device_cap_can_still_recover() {
 
     // The cap really is reached: a pairing from the live session is refused.
     let mut extra = SealbookClient::plaintext_http();
-    let (pair_code, confirm) = extra.pair_join(&base, "capcarol").await.unwrap();
     assert!(
-        owner.pair_approve(&pair_code, &confirm).await.is_err(),
+        pair_device(&mut extra, &mut owner, &base, "capcarol")
+            .await
+            .is_err(),
         "a pairing past the cap must still be refused"
     );
 
@@ -4437,9 +4601,7 @@ async fn roster_history_is_pruned_to_a_floor_a_stale_device_cannot_walk_back_pas
 
     // A pairing is the next real roster write, and writing one is what prunes.
     let mut joiner = SealbookClient::plaintext_http();
-    let (pair_code, confirm) = joiner.pair_join(&base, "flooralice").await.expect("join");
-    owner
-        .pair_approve(&pair_code, &confirm)
+    pair_device(&mut joiner, &mut owner, &base, "flooralice")
         .await
         .expect("approve");
 
@@ -4504,15 +4666,9 @@ async fn roster_history_is_pruned_to_a_floor_a_stale_device_cannot_walk_back_pas
     // current, and it leaves the stale device's replacement working.
     joiner.login(password).await.expect("joiner login");
     let mut repaired = SealbookClient::plaintext_http();
-    let (pair_code, confirm) = repaired
-        .pair_join(&base, "flooralice")
-        .await
-        .expect("re-join");
-    joiner
-        .pair_approve(&pair_code, &confirm)
+    pair_device(&mut repaired, &mut joiner, &base, "flooralice")
         .await
         .expect("a current device must still be able to approve");
-    assert!(repaired.pair_ready(&pair_code).await.expect("ready"));
     repaired.login(password).await.expect("re-paired login");
     assert!(repaired
         .list_contacts()
@@ -4780,12 +4936,9 @@ async fn the_quota_counters_never_drift_from_the_objects() {
     // A rotation re-pads every object, which moves the byte total, and now runs
     // with a tombstone already in the vault.
     let mut joiner = SealbookClient::plaintext_http();
-    let (pair_code, confirm) = joiner.pair_join(&base, "usagealice").await.expect("join");
-    owner
-        .pair_approve(&pair_code, &confirm)
+    pair_device(&mut joiner, &mut owner, &base, "usagealice")
         .await
         .expect("approve");
-    assert!(joiner.pair_ready(&pair_code).await.expect("ready"));
     joiner.login("correct horse battery").await.expect("login");
     let joiner_device = joiner.state.as_ref().unwrap().device_id;
     owner
@@ -4829,9 +4982,9 @@ async fn a_revocation_succeeds_with_a_tombstone_in_the_vault() {
     owner.delete_contact(doomed).await.expect("delete");
 
     let mut joiner = SealbookClient::plaintext_http();
-    let (code, confirm) = joiner.pair_join(&base, "tombalice").await.expect("join");
-    owner.pair_approve(&code, &confirm).await.expect("approve");
-    assert!(joiner.pair_ready(&code).await.expect("ready"));
+    pair_device(&mut joiner, &mut owner, &base, "tombalice")
+        .await
+        .expect("approve");
     joiner.login("correct horse battery").await.expect("login");
     let stolen_key = joiner.collection_key().unwrap().as_bytes().to_vec();
     let joiner_device = joiner.state.as_ref().unwrap().device_id;
@@ -4903,9 +5056,9 @@ async fn deleting_an_account_leaves_nothing_in_any_table() {
         .expect("upload attachment");
 
     let mut joiner = SealbookClient::plaintext_http();
-    let (code, confirm) = joiner.pair_join(&base, "erasealice").await.expect("join");
-    owner.pair_approve(&code, &confirm).await.expect("approve");
-    assert!(joiner.pair_ready(&code).await.expect("ready"));
+    pair_device(&mut joiner, &mut owner, &base, "erasealice")
+        .await
+        .expect("approve");
     joiner.login("correct horse battery").await.expect("login");
 
     let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
@@ -5384,8 +5537,9 @@ async fn a_paired_device_pins_the_manifest_it_syncs() {
         .unwrap();
 
     let mut joiner = SealbookClient::plaintext_http();
-    let (pair_code, confirm) = joiner.pair_join(&base, "pinbob").await.unwrap();
-    owner.pair_approve(&pair_code, &confirm).await.unwrap();
+    pair_device(&mut joiner, &mut owner, &base, "pinbob")
+        .await
+        .unwrap();
     joiner.login(password).await.unwrap();
     assert_eq!(joiner.state.as_ref().unwrap().manifest_seq, 0);
 
@@ -5926,18 +6080,16 @@ async fn a_joining_device_refuses_a_roster_it_did_not_confirm() {
         .unwrap();
 
     let mut joiner = SealbookClient::plaintext_http();
-    let (pair_code, confirm) = joiner.pair_join(&base, "anchoralice").await.expect("join");
+    pair_device(&mut joiner, &mut owner, &base, "anchoralice")
+        .await
+        .expect("pair");
     let anchored = joiner.state.as_ref().unwrap();
     assert_eq!(
-        anchored.roster_seq, 1,
-        "pairing must anchor the joining device on the roster the code commits to"
+        anchored.roster_seq, 2,
+        "pairing must pin the joining device on the roster the approval signed"
     );
     assert_eq!(anchored.roster_transcript.len(), 32);
     let joiner_device_id = anchored.device_id;
-    owner
-        .pair_approve(&pair_code, &confirm)
-        .await
-        .expect("approve");
 
     // The vault a malicious server would rather the new device saw: its own
     // collection key in the pairing wrap, and a roster under that key naming a
@@ -5971,7 +6123,7 @@ async fn a_joining_device_refuses_a_roster_it_did_not_confirm() {
     let server_ck = CollectionKey::generate();
     let forged = hand_roster(
         collection_uuid,
-        1,
+        2,
         1,
         vec![
             server_device.clone(),
@@ -6001,7 +6153,7 @@ async fn a_joining_device_refuses_a_roster_it_did_not_confirm() {
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO device_rosters (collection_id, roster_seq, body) VALUES (?, 1, ?)")
+    sqlx::query("INSERT INTO device_rosters (collection_id, roster_seq, body) VALUES (?, 2, ?)")
         .bind(&collection_id)
         .bind(serde_json::to_string(&forged).unwrap())
         .execute(&pool)
@@ -6042,35 +6194,51 @@ async fn a_joining_device_refuses_a_roster_it_did_not_confirm() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// The confirmed code is good for one roster. If the device set changes between a
-/// joining device asking to pair and the approval, the user's comparison no longer
-/// covers what would be enrolled, so the pairing has to start again.
+/// A rotation landing while a pairing waits does not break it. The approval
+/// extends the roster the approver verifies when the user agrees, and wraps the
+/// key it holds then, so the new device joins on the current key.
 #[tokio::test]
-async fn an_approval_is_refused_once_the_roster_has_moved_on() {
-    let dir = std::env::temp_dir().join(format!("sealbook-stale-anchor-{}", Uuid::new_v4()));
+async fn a_pairing_survives_a_rotation_in_the_middle() {
+    let dir = std::env::temp_dir().join(format!("sealbook-mid-rotation-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let db = dir.join("sealbook.db");
     let base = spawn_http(db.to_str().unwrap()).await;
 
     let password = "correct horse battery";
     let mut owner = SealbookClient::plaintext_http();
-    owner.register(&base, "stalealice", password).await.unwrap();
+    owner.register(&base, "midalice", password).await.unwrap();
+    owner
+        .put_contact(Uuid::new_v4(), r#"{"@type":"Card","name":{"full":"Ada"}}"#)
+        .await
+        .unwrap();
 
     let mut joiner = SealbookClient::plaintext_http();
-    let (pair_code, confirm) = joiner.pair_join(&base, "stalealice").await.expect("join");
-    // A new phrase rotates the key and advances the roster past the anchor the
-    // joining device was served.
+    let pairing = joiner.pair_join(&base, "midalice").await.expect("join");
+    let response = owner.pair_respond(&pairing.code).await.expect("respond");
+    // A new phrase rotates the key and advances the roster.
     owner.change_phrase(password).await.expect("rotate");
-
-    let error = owner
-        .pair_approve(&pair_code, &confirm)
-        .await
-        .expect_err("approving against a roster the user did not confirm must be refused")
-        .to_string();
-    assert!(
-        error.contains("start the pairing again"),
-        "the refusal should say what to do, got: {error}"
+    assert_eq!(
+        joiner.pair_join_step(&pairing, "test").await.unwrap(),
+        PairJoinPoll::Confirm
     );
+    let preview = owner
+        .pair_preview_step(&response)
+        .await
+        .expect("preview")
+        .expect("the reply has arrived");
+    owner
+        .pair_approve(&response, &preview)
+        .await
+        .expect("approve");
+    assert_eq!(
+        joiner.pair_join_step(&pairing, "test").await.unwrap(),
+        PairJoinPoll::Ready
+    );
+    joiner
+        .login(password)
+        .await
+        .expect("login on the current key");
+    assert_eq!(joiner.list_contacts().await.expect("list").len(), 1);
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -6875,12 +7043,9 @@ async fn a_cached_roster_still_accepts_a_manifest_from_a_newly_paired_device() {
     }
 
     let mut joiner = SealbookClient::plaintext_http();
-    let (pair_code, confirm) = joiner.pair_join(&base, "cachealice").await.expect("join");
-    owner
-        .pair_approve(&pair_code, &confirm)
+    pair_device(&mut joiner, &mut owner, &base, "cachealice")
         .await
         .expect("approve");
-    assert!(joiner.pair_ready(&pair_code).await.expect("ready"));
     joiner.login(password).await.expect("joiner login");
 
     // The joiner signs the next manifest. The owner's cached roster predates it,
@@ -7282,9 +7447,7 @@ async fn a_write_after_someone_else_rotated_is_not_sealed_under_the_old_key() {
     // A second device, which will do the rotating. The first one is left holding
     // the key of the epoch before it.
     let mut joiner = SealbookClient::plaintext_http();
-    let (pair_code, confirm) = joiner.pair_join(&base, "epochalice").await.expect("join");
-    owner
-        .pair_approve(&pair_code, &confirm)
+    pair_device(&mut joiner, &mut owner, &base, "epochalice")
         .await
         .expect("approve");
     joiner.login(password).await.expect("joiner login");
@@ -7816,12 +7979,9 @@ async fn rotating_a_device_does_not_touch_attachment_chunks() {
 
     // Pair and revoke a second device, which forces a full key rotation.
     let mut joiner = SealbookClient::plaintext_http();
-    let (pair_code, confirm) = joiner.pair_join(&base, "attrotalice").await.expect("join");
-    owner
-        .pair_approve(&pair_code, &confirm)
+    pair_device(&mut joiner, &mut owner, &base, "attrotalice")
         .await
         .expect("approve");
-    assert!(joiner.pair_ready(&pair_code).await.expect("ready"));
     joiner.login("correct horse battery").await.expect("login");
     let joiner_device = joiner.state.as_ref().unwrap().device_id;
     owner
@@ -7931,12 +8091,9 @@ async fn devices_label_themselves_and_lose_the_label_on_revoke() {
     assert_eq!(owner_name, sealbook_client::device_default_name(owner_id));
 
     let mut joiner = SealbookClient::plaintext_http();
-    let (pair_code, confirm) = joiner.pair_join(&base, "labelled").await.expect("join");
-    owner
-        .pair_approve(&pair_code, &confirm)
+    pair_device(&mut joiner, &mut owner, &base, "labelled")
         .await
         .expect("approve");
-    assert!(joiner.pair_ready(&pair_code).await.expect("ready"));
     joiner.login(password).await.expect("joiner login");
     let joiner_id = joiner.state.as_ref().unwrap().device_id;
 
@@ -8173,6 +8330,9 @@ async fn outsiders_cannot_hold_recovery_or_pairing_closed() {
             username: "holdalice".into(),
             device: device.clone(),
             enrollment_signature: forged_proof(),
+            nameplate: "hold-on-tight".into(),
+            sid: vec![0u8; 16],
+            share: vec![0u8; 32],
         };
         post_as(&app, from, "/v1/pair/join", &join).await;
     }

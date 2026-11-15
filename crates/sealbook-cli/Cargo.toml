@@ -16,6 +16,8 @@ clap.workspace = true
 hex.workspace = true
 jiff.workspace = true
 keyring.workspace = true
+# Draws the pairing code as a QR in the terminal, for an approving phone to scan.
+qrcode = { version = "0.14", default-features = false }
 rand.workspace = true
 rustls-pki-types.workspace = true
 sealbook-client = { path = "../sealbook-client" }

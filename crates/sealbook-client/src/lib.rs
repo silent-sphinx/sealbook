@@ -25,7 +25,7 @@ pub use attachments::UploadedAttachment;
 pub use client::SealbookClient;
 pub use error::{ClientError, ManifestError};
 pub use objects::{ExportedObject, ExportedVault};
-pub use pairing::{format_confirmation, normalize_confirmation};
+pub use pairing::JoinPairing;
 pub use state::LocalState;
 pub use tls::{certificate_from_pem, pq_tls_config, TrustAnchors};
 
@@ -48,8 +48,8 @@ pub use sealbook_core::{
     CoreContactDraft, CoreContactFile, CoreContactImport, CoreContactSource, CoreContactWork,
     CoreEventAlert, CoreExportAccount, CoreExportObject, CoreIcsEvent, CoreIcsExportEvent,
     CoreNote, CoreNoteAttachment, CoreNoteDraft, CoreNoteFileEntry, CoreNotebook, CoreOrderItem,
-    CoreRecurrence, CoreRecurrenceFrequency, PairPoll, MAX_ALERT_MINUTES_BEFORE,
-    MIN_ALERT_MINUTES_BEFORE, PAIR_POLL_INTERVAL_MS,
+    CorePairPreview, CorePairResponse, CoreRecurrence, CoreRecurrenceFrequency, PairApprovePoll,
+    PairJoinPoll, MAX_ALERT_MINUTES_BEFORE, MIN_ALERT_MINUTES_BEFORE, PAIR_POLL_INTERVAL_MS,
 };
 pub use sealbook_core::{
     attachment_limits, bookmark_export, bookmark_export_html, bookmark_import, can_disable_feature,

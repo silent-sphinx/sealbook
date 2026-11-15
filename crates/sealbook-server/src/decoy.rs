@@ -1,12 +1,10 @@
 //! The collection, roster and phrase wrap `recover/start` answers with when the
-//! username and lookup id it was given do not match an account, and the roster
-//! anchor `pair/join` answers with for a username that has none.
+//! username and lookup id it was given do not match an account.
 //!
 //! The handler is written so that a miss and a hit are indistinguishable, which
 //! a response shaped differently for the two gives away. Everything here is
 //! derived from a server-held key and the request, so one lookup is always
-//! answered the same way (a pairing anchor advancing over time, as a real
-//! roster does) and two lookups are answered unrelatedly: a caller cannot take
+//! answered the same way and two lookups are answered unrelatedly: a caller cannot take
 //! a lookup it knows to be a miss as a baseline and compare. The
 //! parts are real keys, signatures and ciphertexts rather than random bytes of
 //! the right length, because an X-Wing public key and an ML-DSA signature are
@@ -93,65 +91,6 @@ pub(crate) fn recovery_decoy(
         },
         roster,
     })
-}
-
-/// When a pairing decoy's roster starts to change: 2026-01-01 UTC. Fixed, so
-/// that every server derives the same history and a restart moves nothing.
-const PAIR_DECOY_ORIGIN: i64 = 1_767_225_600;
-
-/// A pairing decoy's roster changes at most once per window of this length.
-const PAIR_DECOY_WINDOW: i64 = 30 * 24 * 60 * 60;
-
-/// The chance, in sixths, that a pairing decoy's roster changes in a window:
-/// about twice a year, a guess at how often an account adds or removes a
-/// device or rotates its key.
-const PAIR_DECOY_CHANGE_SIXTHS: u8 = 1;
-
-/// The roster `pair/join` anchors a username with no account on, as a sequence
-/// number and transcript, at `now` in Unix seconds.
-///
-/// Derived for the same reason as the recovery decoy: a real account anchors
-/// every join on the same roster, so a decoy made up per request is caught by
-/// joining twice. The starting sequence is spread like a recovery decoy's,
-/// since a fixed one is recognised against any account that has added a
-/// device. It then advances now and then, because a real account's roster
-/// does, and an anchor watched for months that never moved would mark the
-/// username as unused.
-pub(crate) fn pairing_decoy_anchor(
-    key: &[u8; DECOY_KEY_LEN],
-    username: &str,
-    now: i64,
-) -> Result<(u64, [u8; 32]), CryptoError> {
-    let seed = |context: &[u8], label: &str| decoy_seed(key, context, label.as_bytes());
-    let shape = seed(username.as_bytes(), "pair-shape")?;
-    let start = 1 + u64::from(shape[0] % MAX_DECOY_DEVICES) + u64::from(shape[1] % 9);
-
-    let mut changes = 0;
-    let mut window_start = PAIR_DECOY_ORIGIN;
-    let mut window = 0u64;
-    while window_start < now {
-        let roll = seed(&with_suffix(username, window), "pair-change")?;
-        let offset =
-            i64::from(u32::from_be_bytes([roll[1], roll[2], roll[3], roll[4]])) % PAIR_DECOY_WINDOW;
-        if roll[0] % 6 < PAIR_DECOY_CHANGE_SIXTHS && window_start + offset < now {
-            changes += 1;
-        }
-        window_start += PAIR_DECOY_WINDOW;
-        window += 1;
-    }
-
-    let roster_seq = start + changes;
-    let transcript = seed(&with_suffix(username, roster_seq), "pair-transcript")?;
-    Ok((roster_seq, transcript))
-}
-
-/// The username followed by a number, as a derivation context. The number is
-/// fixed length, so where the username ends is unambiguous.
-fn with_suffix(username: &str, number: u64) -> Vec<u8> {
-    let mut context = Vec::with_capacity(username.len() + 8);
-    context.extend_from_slice(username.as_bytes());
-    context.extend_from_slice(&number.to_be_bytes());
-    context
 }
 
 fn decoy_device(
@@ -275,61 +214,6 @@ mod tests {
             assert!(decoy.roster.roster_seq >= devices);
             assert!(decoy.roster.key_epoch >= 1);
             assert!(decoy.roster.key_epoch <= decoy.roster.roster_seq);
-        }
-    }
-
-    const NAMES: [&str; 8] = [
-        "alice", "bob", "carol", "dave", "erin", "frank", "grace", "heidi",
-    ];
-    const DAY: i64 = 24 * 60 * 60;
-
-    fn anchor(name: &str, now: i64) -> (u64, [u8; 32]) {
-        pairing_decoy_anchor(&KEY, name, now).expect("anchor")
-    }
-
-    #[test]
-    fn a_pairing_decoy_is_stable_per_username_and_varied_across_them() {
-        let now = PAIR_DECOY_ORIGIN;
-        let first = anchor("alice", now);
-        assert_eq!(first, anchor("alice", now));
-        let mut seqs = std::collections::HashSet::new();
-        for name in &NAMES[1..] {
-            let (seq, transcript) = anchor(name, now);
-            assert_ne!(transcript, first.1);
-            assert!((1..=u64::from(MAX_DECOY_DEVICES) + 8).contains(&seq));
-            seqs.insert(seq);
-        }
-        assert!(seqs.len() > 1);
-    }
-
-    #[test]
-    fn a_pairing_decoy_moves_forward_now_and_then_like_a_real_roster() {
-        let start = PAIR_DECOY_ORIGIN;
-        let mut moved = 0;
-        for name in NAMES {
-            let mut last = anchor(name, start);
-            for day in 1..=(3 * 365) {
-                let next = anchor(name, start + day * DAY);
-                assert!(next.0 >= last.0, "{name}'s sequence went backwards");
-                if next.0 == last.0 {
-                    assert_eq!(next.1, last.1, "{name}'s transcript moved alone");
-                } else {
-                    assert_eq!(next.0, last.0 + 1, "{name} skipped a sequence");
-                    assert_ne!(next.1, last.1, "{name}'s transcript stayed");
-                    moved += 1;
-                }
-                last = next;
-            }
-        }
-        // About two changes a year each, so eight names over three years land
-        // near 48. The bounds only rule out never and constantly.
-        assert!((10..=120).contains(&moved), "{moved} changes");
-    }
-
-    #[test]
-    fn a_pairing_decoy_before_its_origin_is_its_starting_roster() {
-        for name in NAMES {
-            assert_eq!(anchor(name, 0), anchor(name, PAIR_DECOY_ORIGIN));
         }
     }
 }

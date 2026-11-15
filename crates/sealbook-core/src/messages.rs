@@ -27,12 +27,9 @@ pub fn rotation_message(refusal: &RotationRefusal) -> String {
 
 pub fn pair_message(refusal: &PairRefusal) -> String {
     match refusal {
-        PairRefusal::NoAnchor => "The server sent no device list for this account to anchor \
-             on, so there is nothing to pair against."
-            .into(),
-        PairRefusal::ServerCode => "This device and the new one don't agree on the account's \
-             devices. Start the pairing again."
-            .into(),
+        PairRefusal::Code { reason } => {
+            format!("That isn't a pairing code: {reason}. Check it against the new device.")
+        }
         PairRefusal::Expired => {
             "That pairing code has expired. Start the pairing again on the new device.".into()
         }
@@ -40,11 +37,12 @@ pub fn pair_message(refusal: &PairRefusal) -> String {
              fetched it. Sign in again and approve the new device after that."
             .into(),
         PairRefusal::AlreadyEnrolled { .. } => "That device is already enrolled.".into(),
-        PairRefusal::RosterMoved { joined_at, now } => format!(
-            "The new device started pairing against device list {joined_at} but this account \
-             is now on {now}. Start the pairing again."
-        ),
-        PairRefusal::TypedCode => "That code doesn't match the one for this pairing.".into(),
+        PairRefusal::CodeMismatch => "That code doesn't match the new device, so nothing was \
+             shared. Start the pairing again on the new device for a fresh code."
+            .into(),
+        PairRefusal::Unverified => "The other device's answer couldn't be verified, so this \
+             device was not added. Start the pairing again."
+            .into(),
     }
 }
 
@@ -249,11 +247,10 @@ mod tests {
     }
 
     #[test]
-    fn pairing_numbers_are_filled_in() {
-        let said = pair_message(&PairRefusal::RosterMoved {
-            joined_at: 4,
-            now: 7,
+    fn a_bad_code_says_what_is_wrong_with_it() {
+        let said = pair_message(&PairRefusal::Code {
+            reason: "word 4 is not a pairing-code word".into(),
         });
-        assert!(said.contains("list 4") && said.contains("on 7"), "{said}");
+        assert!(said.contains("word 4"), "{said}");
     }
 }

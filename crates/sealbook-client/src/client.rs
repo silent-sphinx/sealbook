@@ -212,8 +212,16 @@ impl SealbookClient {
     ///
     /// For the one read whose answer is in the status rather than the body: a
     /// pairing that has timed out is a 404, which every other path raises.
-    pub(crate) async fn get_status(&self, url: &str) -> Result<(u16, String), ClientError> {
-        let resp = self.http.get(url).send().await?;
+    pub(crate) async fn get_status(
+        &self,
+        url: &str,
+        token: Option<&str>,
+    ) -> Result<(u16, String), ClientError> {
+        let mut req = self.http.get(url);
+        if let Some(token) = token {
+            req = req.bearer_auth(token);
+        }
+        let resp = req.send().await?;
         let status = resp.status().as_u16();
         Ok((status, resp.text().await?))
     }

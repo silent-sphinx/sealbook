@@ -822,39 +822,84 @@ pub fn valid_username(username: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
 }
 
+/// A pairing has two devices talking through the server: the joining device,
+/// which shows an eight-word code, and an approving device the user types or
+/// scans it into. The server sees only the code's first three words, the
+/// nameplate. The other five are the password for a CPace run whose two shares
+/// travel in these bodies, and the joining device's keys are bound into it, so
+/// everything sealed under the run's keys proves both devices hold the same code
+/// and the same keys. See `sealbook_crypto::pairing`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PairJoinRequest {
     pub username: String,
     pub device: DevicePublicKeys,
     pub enrollment_signature: DualSignatureBody,
+    /// The code's first three words, hyphen-joined.
+    pub nameplate: String,
+    /// The CPace session id the joining device picked.
+    #[serde(with = "b64")]
+    pub sid: Vec<u8>,
+    /// The joining device's CPace share.
+    #[serde(with = "b64")]
+    pub share: Vec<u8>,
 }
 
+/// The same for every username, including one with no account: nothing in it
+/// depends on the account, so it cannot be used to test usernames.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PairJoinResponse {
     pub pair_id: Uuid,
-    pub pair_code: String,
-    pub confirm: String,
-    /// The roster the joining device must anchor on, and which `confirm` commits
-    /// to: the account's current roster sequence and its transcript.
-    pub roster_seq: u64,
-    #[serde(with = "b64")]
-    pub roster_transcript: Vec<u8>,
 }
 
+/// A pairing as the server holds it, from either side.
+///
+/// `status` is `pending` until the approving device has sent its share,
+/// `responded` until the joining device has answered with `hello`, `confirmed`
+/// until the approval, and `ready` after it. The approving device, looking up
+/// by nameplate with a session on the account, is served the joining device's
+/// half; the joining device, polling by pair id, is served the approving
+/// device's. Empty byte fields are absent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PairStatusResponse {
     pub pair_id: Uuid,
     pub status: String,
-    pub confirm: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device: Option<DevicePublicKeys>,
-    /// The roster sequence the joining device anchored on, for the account's own
-    /// devices only. It lets an approver whose roster has moved on since the
-    /// pairing started say so, rather than reporting a bare code mismatch.
-    pub roster_seq: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty", with = "b64")]
+    pub sid: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty", with = "b64")]
+    pub joiner_share: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty", with = "b64")]
+    pub approver_share: Vec<u8>,
+    /// Sealed by the joining device for the approving one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty", with = "b64")]
+    pub hello: Vec<u8>,
+    /// Sealed by the approving device for the joining one: the roster pin to
+    /// trust from.
+    #[serde(default, skip_serializing_if = "Vec::is_empty", with = "b64")]
+    pub sealed_pin: Vec<u8>,
+}
+
+/// The approving device's CPace share. Accepted once per pairing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PairRespondRequest {
+    #[serde(with = "b64")]
+    pub share: Vec<u8>,
+}
+
+/// The joining device's answer once it has the approving device's share.
+/// Accepted once per pairing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PairConfirmRequest {
+    #[serde(with = "b64")]
+    pub hello: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -862,9 +907,11 @@ pub struct PairStatusResponse {
 pub struct PairApproveRequest {
     pub wrap: KeyWrapBody,
     pub grant: DualSignatureBody,
-    pub confirmation: String,
     /// The current roster plus the new device, signed by the approver.
     pub roster: RosterBody,
+    /// The pin of `roster`, sealed for the joining device.
+    #[serde(with = "b64")]
+    pub sealed_pin: Vec<u8>,
 }
 
 /// Step 1 of recovery: fetch the phrase's key wrap and begin a password reset.

@@ -159,24 +159,48 @@ fn every_wire_body_in_the_shared_fixtures_meets_the_schema() {
             "verified/roster_json",
             "RosterBody",
         ),
+        ("pairing/handshake.json", "started/body", "PairJoinRequest"),
+        ("pairing/handshake.json", "join_response", "PairJoinResponse"),
         (
             "pairing/handshake.json",
-            "join_response",
-            "PairJoinResponse",
+            "pending_response",
+            "PairStatusResponse",
         ),
+        ("pairing/handshake.json", "responded/body", "PairRespondRequest"),
         (
             "pairing/handshake.json",
-            "join_refusals/*/response",
-            "PairJoinResponse",
+            "responded_response",
+            "PairStatusResponse",
         ),
+        ("pairing/handshake.json", "confirm_body", "PairConfirmRequest"),
         (
             "pairing/handshake.json",
-            "preview_response",
+            "confirmed_response",
             "PairStatusResponse",
         ),
         (
             "pairing/handshake.json",
-            "approve_refusals/*/response",
+            "ready_response",
+            "PairStatusResponse",
+        ),
+        (
+            "pairing/handshake.json",
+            "approved_roster_json",
+            "RosterBody",
+        ),
+        (
+            "pairing/handshake.json",
+            "respond_refusals/*/response",
+            "PairStatusResponse",
+        ),
+        (
+            "pairing/handshake.json",
+            "preview_refusals/*/body",
+            "PairStatusResponse",
+        ),
+        (
+            "pairing/handshake.json",
+            "finish_refusals/*/body",
             "PairStatusResponse",
         ),
         ("rotation/plan.json", "devices/*", "DevicePublicKeys"),
@@ -196,14 +220,17 @@ fn every_wire_body_in_the_shared_fixtures_meets_the_schema() {
 
 #[test]
 fn pairing_polls_meet_the_schema_for_their_status() {
-    let polls = fixture("pairing/handshake.json");
-    for poll in polls["polls"].as_array().expect("polls") {
-        let type_name = match poll["status"].as_u64() {
-            Some(200) => "PairStatusResponse",
-            _ => "ErrorBody",
-        };
-        let what = poll["what"].as_str().unwrap_or_default();
-        assert_valid(type_name, &at(poll, "body"), &format!("poll {what}"));
+    let fixture = fixture("pairing/handshake.json");
+    for side in ["join_polls", "approve_polls"] {
+        for poll in fixture[side].as_array().expect("polls") {
+            let type_name = match poll["status"].as_u64() {
+                Some(200) => "PairStatusResponse",
+                Some(_) => "ErrorBody",
+                None => continue,
+            };
+            let what = poll["what"].as_str().unwrap_or_default();
+            assert_valid(type_name, &at(poll, "body"), &format!("{side} {what}"));
+        }
     }
 }
 
