@@ -38,7 +38,18 @@ impl SealbookClient {
             &next.roster_transcript,
         )
         .map_err(|err| roster_error(&format!("core returned an unreadable pin: {err}")))?;
+        self.roster_key_committed = Some(!roster.key_commitment.is_empty());
         Ok(())
+    }
+
+    /// True when the roster this device last pinned predates key commitments.
+    ///
+    /// Such a roster vouches for the collection key by its MAC alone, which a
+    /// server that sealed a key of its own to this device can recompute. Only a
+    /// roster step adds a commitment, and the one a user can take at will is a
+    /// rotation, which also issues a new recovery phrase.
+    pub fn roster_lacks_key_commitment(&self) -> bool {
+        self.roster_key_committed == Some(false)
     }
 
     /// The account's current roster, verified from this device's pin.

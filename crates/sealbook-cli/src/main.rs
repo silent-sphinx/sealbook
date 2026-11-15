@@ -885,7 +885,8 @@ async fn main() -> Result<()> {
             let password = read_secret("Password: ", "SEALBOOK_PASSWORD")?;
             let mut client =
                 SealbookClient::with_state_and_tls(state, pinned.clone()).context("tls client")?;
-            sign_in(&mut client, &password).await?;
+            // Quietly: this rotation is what the legacy-roster warning asks for.
+            sign_in_quietly(&mut client, &password).await?;
             let new_phrase = client.change_phrase(&password).await.context("phrase")?;
             save_state(&cli.state, client.state.as_ref().unwrap())?;
             println!(
@@ -2368,8 +2369,23 @@ async fn connect(
 
 async fn sign_in(client: &mut SealbookClient, password: &str) -> Result<()> {
     sign_in_quietly(client, password).await?;
+    warn_if_roster_uncommitted(client);
     warn_if_feature_off(client).await;
     Ok(())
+}
+
+/// An account whose roster predates key commitments cannot tell its own vault
+/// key from one a malicious server sealed to this device. Rotating fixes it,
+/// but also replaces the recovery phrase, so it is the user's call.
+fn warn_if_roster_uncommitted(client: &SealbookClient) {
+    if client.roster_lacks_key_commitment() {
+        eprintln!(
+            "warning: this account's device roster predates key commitments, so this device \
+             cannot prove the vault key it was given is the account's own. Run `sealbook \
+             phrase` to rotate the key onto a roster that commits to it; that also issues a \
+             new recovery phrase."
+        );
+    }
 }
 
 async fn sign_in_quietly(client: &mut SealbookClient, password: &str) -> Result<()> {

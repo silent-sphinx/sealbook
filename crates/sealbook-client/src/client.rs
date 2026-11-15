@@ -28,6 +28,9 @@ pub struct SealbookClient {
     pub(crate) roster_cache: Option<sealbook_core::CoreRoster>,
     /// Rows the last full read could not open, for a caller of a typed listing.
     pub(crate) last_unreadable: u64,
+    /// Whether the last roster this device pinned commits to its epoch's key,
+    /// or `None` before any pin this session.
+    pub(crate) roster_key_committed: Option<bool>,
 }
 
 impl SealbookClient {
@@ -44,6 +47,7 @@ impl SealbookClient {
             recovery_pending: false,
             roster_cache: None,
             last_unreadable: 0,
+            roster_key_committed: None,
         })
     }
 
@@ -56,6 +60,7 @@ impl SealbookClient {
             recovery_pending: false,
             roster_cache: None,
             last_unreadable: 0,
+            roster_key_committed: None,
         }
     }
 
@@ -80,6 +85,7 @@ impl SealbookClient {
             recovery_pending: false,
             roster_cache: None,
             last_unreadable: 0,
+            roster_key_committed: None,
         })
     }
 

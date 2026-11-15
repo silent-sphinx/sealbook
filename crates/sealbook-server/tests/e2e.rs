@@ -8036,3 +8036,98 @@ async fn failed_logins_from_outsiders_do_not_lock_the_owner_out() {
         .expect("the owner must still be able to sign in");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// An account whose roster predates key commitments is reported as such, and a
+/// rotation, the step a user can take at will, upgrades it.
+///
+/// The legacy account is made by hand: the stored genesis roster is resealed
+/// under the v1 transcript, and the device is unpinned so it anchors on the MAC
+/// as a device enrolled before commitments existed would.
+#[tokio::test]
+async fn a_legacy_roster_is_reported_until_a_rotation_commits_to_the_key() {
+    let dir = std::env::temp_dir().join(format!("sealbook-legacy-roster-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let password = "correct horse battery";
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "legacyalice", password)
+        .await
+        .unwrap();
+    client
+        .put_contact(Uuid::new_v4(), r#"{"@type":"Card","name":{"full":"Ada"}}"#)
+        .await
+        .unwrap();
+    client.login(password).await.unwrap();
+    assert!(!client.roster_lacks_key_commitment());
+
+    let state = client.state.clone().unwrap();
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    let wrap =
+        sqlx::query("SELECT hpke_enc, wrapped_ck FROM key_wraps WHERE recipient_kind = 'device'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let key = sealbook_crypto::unwrap_for_device(
+        &DeviceHpkeSecret::from_bytes(state.hpke_sk.clone()),
+        &DeviceHpkeWrap {
+            enc: wrap.get("hpke_enc"),
+            ciphertext: wrap.get("wrapped_ck"),
+            ciphersuite: XWING_CIPHERSUITE,
+        },
+        &WrapBinding {
+            collection_id: state.collection_id,
+            key_epoch: 1,
+        },
+    )
+    .unwrap();
+    let stored: String = sqlx::query_scalar("SELECT body FROM device_rosters WHERE roster_seq = 1")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let mut legacy = serde_json::from_str::<sealbook_protocol::RosterBody>(&stored)
+        .unwrap()
+        .to_roster();
+    legacy.key_commitment.clear();
+    let transcript = legacy.transcript(state.collection_id);
+    legacy.signature = sign(
+        &DeviceSigningSecrets {
+            mldsa_seed: state.mldsa_seed.clone(),
+            ed25519_sk: state.ed25519_sk.clone(),
+        },
+        &transcript,
+    )
+    .unwrap();
+    legacy.mac = sealbook_crypto::roster_mac(&key, &transcript)
+        .unwrap()
+        .to_vec();
+    sqlx::query("UPDATE device_rosters SET body = ? WHERE roster_seq = 1")
+        .bind(serde_json::to_string(&sealbook_protocol::RosterBody::from_roster(legacy)).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    let mut unpinned = state;
+    unpinned.roster_seq = 0;
+    unpinned.roster_transcript = Vec::new();
+    let mut client = SealbookClient::with_state(unpinned);
+    client
+        .login(password)
+        .await
+        .expect("a legacy roster still verifies by MAC");
+    assert!(client.roster_lacks_key_commitment());
+    assert_eq!(client.list_contacts().await.unwrap().len(), 1);
+
+    client.change_phrase(password).await.expect("rotate");
+    assert!(!client.roster_lacks_key_commitment());
+    client.login(password).await.unwrap();
+    assert!(!client.roster_lacks_key_commitment());
+    assert_eq!(client.list_contacts().await.unwrap().len(), 1);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
