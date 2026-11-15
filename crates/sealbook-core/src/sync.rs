@@ -434,6 +434,40 @@ pub fn open_stored(key: &CollectionKey, collection_id: Uuid, row: &StoredRow<'_>
     }
 }
 
+/// How many rows of a full read this device could not open, refusing a read
+/// the collection key opened none of.
+///
+/// One row the key does not open is that row's problem, and the rest still
+/// count. A key that opens nothing is the key's problem: a server that served a
+/// device a key of its own would otherwise show the vault as empty. A row with
+/// an envelope or payload this build cannot read was still decrypted, so it
+/// vouches for the key. A delete and a malformed row say nothing either way.
+pub fn unreadable_rows<'a>(
+    outcomes: impl IntoIterator<Item = &'a RowOutcome>,
+) -> Result<u64, CoreError> {
+    let mut unreadable = 0;
+    let mut key_failures = 0;
+    let mut opened = false;
+    for outcome in outcomes {
+        match outcome {
+            RowOutcome::Object { .. } => opened = true,
+            RowOutcome::Deleted => {}
+            RowOutcome::Unreadable { reason } => {
+                unreadable += 1;
+                match reason {
+                    UnreadableReason::Key => key_failures += 1,
+                    UnreadableReason::Envelope | UnreadableReason::Payload => opened = true,
+                    UnreadableReason::Stored => {}
+                }
+            }
+        }
+    }
+    if key_failures > 0 && !opened {
+        return Err(CoreError::WrongCollectionKey { rows: key_failures });
+    }
+    Ok(unreadable)
+}
+
 /// The rule for a collection key that moved while a read was in flight.
 ///
 /// The caller has already refetched its wrap; this is what says the refetch

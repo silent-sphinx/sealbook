@@ -1129,6 +1129,7 @@ async fn main() -> Result<()> {
                         println!("{id} [{book_name}] {name}");
                     }
                 }
+                warn_unreadable(&client);
                 save_state(&cli.state, client.state.as_ref().unwrap())?;
             }
             ContactsCommand::Delete { id } => {
@@ -1178,6 +1179,7 @@ async fn main() -> Result<()> {
                     let book_name = book_name_for(&books, contact_book_id(&json));
                     println!("{id} [{book_name}] {json}");
                 }
+                warn_unreadable(&client);
                 save_state(&cli.state, client.state.as_ref().unwrap())?;
             }
             ContactsCommand::Import { file, book } => {
@@ -1532,6 +1534,7 @@ async fn main() -> Result<()> {
                     if shown == 0 {
                         println!("(no bookmarks)");
                     }
+                    warn_unreadable(&client);
                 }
                 BookmarksCommand::Show { id } => {
                     let bookmark = find_bookmark(&mut client, id).await?;
@@ -1581,6 +1584,7 @@ async fn main() -> Result<()> {
         Command::Search { query, kind, limit } => {
             let mut client = connect(&cli.state, pinned).await?;
             search::run(&mut client, &query, &kind, limit).await?;
+            warn_unreadable(&client);
             save_state(&cli.state, client.state.as_ref().unwrap())?;
         }
         Command::Attach { command } => {
@@ -1815,6 +1819,7 @@ async fn main() -> Result<()> {
                             }
                         }
                     }
+                    warn_unreadable(&client);
                 }
                 CalendarCommand::Update {
                     id,
@@ -2203,6 +2208,7 @@ async fn main() -> Result<()> {
                     if shown == 0 {
                         println!("(no notes)");
                     }
+                    warn_unreadable(&client);
                 }
                 NotesCommand::Show { id } => {
                     let note = find_note(&mut client, id).await?;
@@ -2324,6 +2330,18 @@ fn feature_of(command: &Command) -> Option<&'static str> {
 
 /// Reads the settings and says so when the command's feature is off. The
 /// command still runs: the data is the user's, and only the apps hide it.
+/// A listing leaves out rows this device could not open, so it says how many
+/// rather than letting a short list pass for the whole vault.
+pub(crate) fn warn_unreadable(client: &SealbookClient) {
+    let unreadable = client.unreadable_in_last_read();
+    if unreadable > 0 {
+        eprintln!(
+            "warning: {unreadable} object(s) in this vault could not be read by this device and \
+             are not listed"
+        );
+    }
+}
+
 async fn warn_if_feature_off(client: &mut SealbookClient) {
     let Some(Some(feature)) = WARN_IF_OFF.get() else {
         return;

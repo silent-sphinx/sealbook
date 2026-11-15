@@ -12,9 +12,10 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sealbook_core::{
-    changes_request, latest_revisions, manifest_sign, manifest_verify, open_row, walk_page,
-    walk_start, ChangesPage, CoreDevice, CoreManifestEntry, CoreSealedRow, ManifestContext,
-    ManifestPlan, Method, RowOutcome, RowRef, UnreadableReason, WalkOutcome, WalkStep,
+    changes_request, latest_revisions, manifest_sign, manifest_verify, open_row, unreadable_rows,
+    walk_page, walk_start, ChangesPage, CoreDevice, CoreError, CoreManifestEntry, CoreSealedRow,
+    ManifestContext, ManifestPlan, Method, RowOutcome, RowRef, UnreadableReason, WalkOutcome,
+    WalkStep,
 };
 use sealbook_crypto::{encrypt_object, object_aad, signing_from_seeds, CollectionKey};
 use sealbook_protocol::envelope::{seal_envelope, seal_tombstone_envelope};
@@ -288,6 +289,74 @@ fn a_row_this_key_does_not_open_is_reported_with_its_reason() {
         })
         .collect();
     assert_eq!(unreadable, fixture.unreadable);
+}
+
+fn outcomes(fixture: &Fixture, ck_b64: &str) -> Vec<RowOutcome> {
+    fixture
+        .current()
+        .iter()
+        .map(|row| open_row(ck_b64, fixture.collection_id, row).unwrap())
+        .collect()
+}
+
+/// The one row this key does not open is counted, and the rest of the read
+/// stands.
+#[test]
+fn one_row_the_key_does_not_open_is_counted_not_raised() {
+    let fixture = fixture();
+    let read = outcomes(&fixture, &fixture.collection_key);
+    assert_eq!(
+        unreadable_rows(&read).unwrap(),
+        fixture.unreadable.len() as u64
+    );
+}
+
+/// The audit's silent empty vault: a key the server sealed to this device
+/// itself opens nothing, and a listing that quietly dropped every row would
+/// show an emptied vault rather than a substituted key.
+#[test]
+fn a_key_that_opens_no_row_is_raised() {
+    let fixture = fixture();
+    let substitute = b64(&[7u8; 32]);
+    let read = outcomes(&fixture, &substitute);
+    let tried = read
+        .iter()
+        .filter(|outcome| **outcome != RowOutcome::Deleted)
+        .count() as u64;
+    assert!(
+        tried > 1,
+        "the fixture must hold rows for the key to fail on"
+    );
+    assert!(matches!(
+        unreadable_rows(&read),
+        Err(CoreError::WrongCollectionKey { rows }) if rows == tried
+    ));
+}
+
+/// A row with an envelope this build cannot read was still decrypted, so it
+/// shows the key is the right one even when nothing else opened.
+#[test]
+fn a_decrypted_row_vouches_for_the_key_even_when_nothing_else_opens() {
+    let key_failure = RowOutcome::Unreadable {
+        reason: UnreadableReason::Key,
+    };
+    let newer_envelope = RowOutcome::Unreadable {
+        reason: UnreadableReason::Envelope,
+    };
+    assert_eq!(
+        unreadable_rows(&[key_failure.clone(), newer_envelope]).unwrap(),
+        2
+    );
+    assert!(matches!(
+        unreadable_rows(&[key_failure, RowOutcome::Deleted]),
+        Err(CoreError::WrongCollectionKey { rows: 1 })
+    ));
+}
+
+#[test]
+fn an_empty_or_all_deleted_vault_is_not_a_wrong_key() {
+    assert_eq!(unreadable_rows(&[]).unwrap(), 0);
+    assert_eq!(unreadable_rows(&[RowOutcome::Deleted]).unwrap(), 0);
 }
 
 // ── The fixture itself ──

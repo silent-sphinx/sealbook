@@ -73,6 +73,15 @@ pub enum ClientError {
          issues a new recovery phrase"
     )]
     RecoveryRotationPending,
+    /// The collection key this device holds decrypted none of the vault's
+    /// rows. Never retried away: it is the server-substituted key the roster's
+    /// key commitment exists to catch, on an account that has no commitment
+    /// yet.
+    #[error(
+        "this device's collection key opens none of the {0} object(s) in the vault; it is not \
+         the key the vault is sealed under, so nothing was read"
+    )]
+    WrongCollectionKey(u64),
     #[error("tls: {0}")]
     Tls(String),
 }
@@ -113,6 +122,7 @@ impl From<sealbook_core::CoreError> for ClientError {
             CoreError::PairPending => ClientError::PairPending,
             CoreError::CollectionBusy => ClientError::CollectionBusy,
             CoreError::RecoveryRotationPending => ClientError::RecoveryRotationPending,
+            CoreError::WrongCollectionKey { rows } => ClientError::WrongCollectionKey(rows),
             // Each refusal states its own condition, and the CLI prints it as
             // the reason the rotation did not start.
             CoreError::Rotation { refusal } => ClientError::Server(refusal.to_string()),

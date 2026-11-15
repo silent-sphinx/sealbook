@@ -26,6 +26,8 @@ pub struct SealbookClient {
     /// device having been removed looks like from here, and a signer the cache
     /// does not hold is what a pairing elsewhere looks like. Either refetches.
     pub(crate) roster_cache: Option<sealbook_core::CoreRoster>,
+    /// Rows the last full read could not open, for a caller of a typed listing.
+    pub(crate) last_unreadable: u64,
 }
 
 impl SealbookClient {
@@ -41,6 +43,7 @@ impl SealbookClient {
             key_epoch: 0,
             recovery_pending: false,
             roster_cache: None,
+            last_unreadable: 0,
         })
     }
 
@@ -52,6 +55,7 @@ impl SealbookClient {
             key_epoch: 0,
             recovery_pending: false,
             roster_cache: None,
+            last_unreadable: 0,
         }
     }
 
@@ -75,6 +79,7 @@ impl SealbookClient {
             key_epoch: 0,
             recovery_pending: false,
             roster_cache: None,
+            last_unreadable: 0,
         })
     }
 

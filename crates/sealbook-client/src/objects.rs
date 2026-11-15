@@ -23,9 +23,9 @@ use sealbook_protocol::{
 use crate::{ClientError, SealbookClient};
 use sealbook_core::{
     device_entries, device_label_ensure, device_label_rename, manifest_apply, open_stored,
-    stale_device_labels, BucketedManifest, CoreAddressBookDraft, CoreCalendarDraft,
-    CoreCalendarEventDraft, CoreDeviceEntry, CoreDeviceKind, CoreDeviceLabelObject, ManifestPlan,
-    RowOutcome, StoredRow,
+    stale_device_labels, unreadable_rows, BucketedManifest, CoreAddressBookDraft,
+    CoreCalendarDraft, CoreCalendarEventDraft, CoreDeviceEntry, CoreDeviceKind,
+    CoreDeviceLabelObject, ManifestPlan, RowOutcome, StoredRow,
 };
 
 /// One object's encrypted bytes, waiting to be written.
@@ -697,6 +697,13 @@ impl SealbookClient {
         Ok(stale.len())
     }
 
+    /// How many rows the last read of the collection could not open, whatever
+    /// their type. A typed `list_*` result leaves them out, so a caller that
+    /// shows one says so from this.
+    pub fn unreadable_in_last_read(&self) -> u64 {
+        self.last_unreadable
+    }
+
     /// Every live object in the collection, whatever its content type.
     ///
     /// The typed `list_*` helpers each filter to one content type and so cannot
@@ -848,7 +855,8 @@ impl SealbookClient {
     /// A row the manifest vouched for that will not open is a local failure, a
     /// key epoch this device has not caught up to or a payload a newer build
     /// wrote, so it is counted rather than raised: raising it would lose every
-    /// readable object behind one unreadable one.
+    /// readable object behind one unreadable one. A key that opens none of the
+    /// rows is raised, as core's `unreadable_rows` decides.
     async fn list_objects(&mut self) -> Result<(Vec<PlainObject>, u64), ClientError> {
         let collection_id = self
             .state
@@ -860,40 +868,46 @@ impl SealbookClient {
             .collection_key
             .as_ref()
             .ok_or(ClientError::NoCollectionKey)?;
-        let mut out = Vec::new();
-        let mut unreadable = 0;
-        for obj in objects {
-            match open_stored(
-                key,
-                collection_id,
-                &StoredRow {
-                    id: obj.id,
-                    tombstone: obj.tombstone,
-                    nonce: &obj.nonce,
-                    ciphertext: &obj.ciphertext,
-                    padded_size: obj.padded_size,
-                },
-            ) {
+        let outcomes: Vec<(Uuid, RowOutcome)> = objects
+            .into_iter()
+            .map(|obj| {
+                let outcome = open_stored(
+                    key,
+                    collection_id,
+                    &StoredRow {
+                        id: obj.id,
+                        tombstone: obj.tombstone,
+                        nonce: &obj.nonce,
+                        ciphertext: &obj.ciphertext,
+                        padded_size: obj.padded_size,
+                    },
+                );
+                (obj.id, outcome)
+            })
+            .collect();
+        let unreadable = unreadable_rows(outcomes.iter().map(|(_, outcome)| outcome))?;
+        self.last_unreadable = unreadable;
+        let out = outcomes
+            .into_iter()
+            .filter_map(|(id, outcome)| match outcome {
                 RowOutcome::Object {
                     content_type,
                     payload,
-                } => out.push(PlainObject {
-                    id: obj.id,
+                } => Some(PlainObject {
+                    id,
                     content_type,
                     plaintext: payload,
                 }),
-                RowOutcome::Deleted => {}
-                RowOutcome::Unreadable { .. } => unreadable += 1,
-            }
-        }
+                RowOutcome::Deleted | RowOutcome::Unreadable { .. } => None,
+            })
+            .collect();
         Ok((out, unreadable))
     }
 
     /// [`Self::list_objects`] for a caller that filters to one content type.
     ///
-    /// The unreadable count is dropped deliberately: a typed listing already
-    /// leaves out every object of another type, so it is not where a row this
-    /// device could not read is reported. An export is.
+    /// A typed listing cannot say which type an unreadable row was, so it does
+    /// not return the count; [`Self::unreadable_in_last_read`] holds it.
     async fn listed_objects(&mut self) -> Result<Vec<PlainObject>, ClientError> {
         Ok(self.list_objects().await?.0)
     }

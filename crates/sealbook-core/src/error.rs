@@ -70,6 +70,14 @@ pub enum CoreError {
          issues a new recovery phrase"
     )]
     RecoveryRotationPending,
+    /// The key this device was served decrypted none of the collection's rows,
+    /// so it is not the key the vault is sealed under. Raised rather than
+    /// counted: a listing that came back empty would read as an emptied vault.
+    #[error(
+        "this device's collection key opens none of the {rows} object(s) in the vault; it is not \
+         the key the vault is sealed under, so nothing was read"
+    )]
+    WrongCollectionKey { rows: u64 },
     #[error("{refusal}")]
     Rotation {
         refusal: crate::rotation::RotationRefusal,
@@ -145,6 +153,7 @@ impl CoreError {
             CoreError::PairPending => "PairPending",
             CoreError::CollectionBusy => "CollectionBusy",
             CoreError::RecoveryRotationPending => "RecoveryRotationPending",
+            CoreError::WrongCollectionKey { .. } => "WrongCollectionKey",
             CoreError::Rotation { .. } => "Rotation",
             CoreError::Auth { .. } => "Auth",
             CoreError::Attachment { .. } => "Attachment",

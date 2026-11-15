@@ -1081,6 +1081,7 @@ pub async fn run_tasks(client: &mut SealbookClient, command: TasksCommand) -> Re
             for line in lines {
                 println!("{line}");
             }
+            crate::warn_unreadable(client);
         }
         TasksCommand::Show { id } => {
             let task = found(&tasks, id)?;
