@@ -19,9 +19,9 @@ const EVICTION_MEMORY_SLOTS: usize = 32_768;
 /// Most attempts on one endpoint for one username, from any address, per window.
 const USERNAME_ATTEMPTS_PER_WINDOW: usize = 30;
 const USERNAME_WINDOW: Duration = Duration::from_secs(300);
-/// Per-username ceiling on `recover/start`, kept small because each call adds
-/// a password guess on top of login's (audit finding 4) and a genuine recovery
-/// needs only a few.
+/// Per-username ceiling on `recover/start`. Small, because a genuine recovery
+/// needs only a few, and each start costs a phrase proof check and an OPRF
+/// evaluation.
 const RECOVERY_START_ATTEMPTS_PER_WINDOW: usize = 10;
 
 /// Most attempts on one endpoint from one IPv6 /64, and from one /48, per
@@ -339,10 +339,10 @@ impl RateLimiter {
                 .await
     }
 
-    /// `recover/start` evaluates the account's OPRF before any phrase proof, so
-    /// it is a second route for testing password guesses. It cannot share
-    /// login's ceiling, which anyone can then fill from here, so it has a
-    /// smaller one of its own.
+    /// `recover/start` has a ceiling of its own rather than sharing login's,
+    /// which anyone could then fill from here. It evaluates the password's OPRF
+    /// only for a start the phrase signed (audit finding 4), so it is no longer
+    /// a route for testing password guesses.
     pub async fn allow_recovery_start(&self, username: &str, ip: Option<IpAddr>) -> bool {
         self.allow_address("recover-start", username, ip).await
             && self
@@ -743,8 +743,8 @@ mod tests {
         assert!(!limiter.allow_proven_login("alice").await);
     }
 
-    /// Audit finding 4: `recover-start` adds only a small budget of password
-    /// guesses beside login's, and filling it leaves sign-in untouched.
+    /// `recover-start` has a small ceiling of its own, and filling it leaves
+    /// sign-in untouched.
     #[tokio::test]
     async fn recovery_start_has_a_small_ceiling_of_its_own() {
         let limiter = RateLimiter::new();

@@ -536,6 +536,40 @@ fn a_recovery_verifies_the_roster_under_the_key_the_phrase_opened() {
     assert_eq!(started.roster.phrase_mldsa_pk, b64(&phrase_public.mldsa_pk));
 }
 
+/// The server evaluates the password OPRF under the username only for a start
+/// the phrase signed, so the proof must cover what it is evaluated over.
+#[test]
+fn a_recovery_start_is_signed_by_the_phrase_over_its_request() {
+    let fixture = fixture();
+    let entropy = sealbook_crypto::entropy_from_phrase(&fixture.phrase).unwrap();
+    let request = recover_start_request("alice", &fixture.phrase, &b64(b"request")).unwrap();
+    let body: sealbook_protocol::RecoverStartRequest = serde_json::from_str(&request.body).unwrap();
+    let proof = sealbook_crypto::DualSignature {
+        mldsa: body.phrase_proof.mldsa.clone(),
+        ed25519: body.phrase_proof.ed25519.clone(),
+    };
+    let public = phrase_recovery_public(&entropy).unwrap();
+    let transcript = |username: &str, lookup: &[u8], opaque: &[u8]| {
+        sealbook_crypto::phrase_recovery_start_transcript(username, lookup, opaque)
+    };
+    sealbook_crypto::verify_phrase_recovery(
+        &public,
+        &transcript("alice", &body.lookup_id, b"request"),
+        &proof,
+    )
+    .expect("the phrase's key signed the start");
+    for (what, other) in [
+        ("username", transcript("bob", &body.lookup_id, b"request")),
+        ("lookup id", transcript("alice", &[0u8; 32], b"request")),
+        ("request", transcript("alice", &body.lookup_id, b"other")),
+    ] {
+        assert!(
+            sealbook_crypto::verify_phrase_recovery(&public, &other, &proof).is_err(),
+            "the proof does not cover the {what}"
+        );
+    }
+}
+
 /// A phrase that is not this account's is named as that, not reported as a key
 /// or roster failure. A lookup that matched nothing gets the same answer, which
 /// is what the decoy is for.

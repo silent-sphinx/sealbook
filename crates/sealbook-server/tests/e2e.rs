@@ -65,6 +65,31 @@ fn recovery_password(
     }
 }
 
+/// A `recover/start` body signed by the phrase `entropy` came from, as a
+/// recovering client sends it. The lookup id is passed separately so a test can
+/// send one that misses.
+fn signed_start(
+    username: &str,
+    entropy: &[u8; 32],
+    lookup_id: Vec<u8>,
+    opaque_request: Vec<u8>,
+) -> RecoverStartRequest {
+    let proof = sign_phrase_recovery(
+        entropy,
+        &sealbook_crypto::phrase_recovery_start_transcript(username, &lookup_id, &opaque_request),
+    )
+    .unwrap();
+    RecoverStartRequest {
+        username: username.into(),
+        lookup_id,
+        opaque_request,
+        phrase_proof: DualSignatureBody {
+            mldsa: proof.mldsa,
+            ed25519: proof.ed25519,
+        },
+    }
+}
+
 /// Signs and MACs the roster a hand-built request has to carry.
 #[allow(clippy::too_many_arguments)]
 fn hand_roster(
@@ -291,12 +316,14 @@ async fn recovery_challenge_cannot_be_replayed() {
     let (opaque_request, registration) = client_register_start(b"correct horse battery").unwrap();
     let response: RecoverStartResponse = reqwest::Client::new()
         .post(format!("{base}/v1/recover/start"))
-        .json(&RecoverStartRequest {
-            username: "replayalice".into(),
-            opaque_request,
-            lookup_id: phrase_lookup_id(&entropy_from_phrase(&phrase).unwrap())
-                .unwrap()
-                .to_vec(),
+        .json(&{
+            let entropy = entropy_from_phrase(&phrase).unwrap();
+            signed_start(
+                "replayalice",
+                &entropy,
+                phrase_lookup_id(&entropy).unwrap().to_vec(),
+                opaque_request,
+            )
         })
         .send()
         .await
@@ -1784,11 +1811,12 @@ async fn recovery_rejects_a_proof_with_a_foreign_mldsa_signature() {
     let (opaque_request, registration) = client_register_start(b"correct horse battery").unwrap();
     let start: RecoverStartResponse = http
         .post(format!("{base}/v1/recover/start"))
-        .json(&RecoverStartRequest {
-            username: "forgebob".into(),
-            lookup_id: phrase_lookup_id(&entropy).unwrap().to_vec(),
+        .json(&signed_start(
+            "forgebob",
+            &entropy,
+            phrase_lookup_id(&entropy).unwrap().to_vec(),
             opaque_request,
-        })
+        ))
         .send()
         .await
         .unwrap()
@@ -1908,11 +1936,12 @@ async fn recover_start_does_not_disclose_recovery_public_keys() {
 
     let body = reqwest::Client::new()
         .post(format!("{base}/v1/recover/start"))
-        .json(&RecoverStartRequest {
-            username: "lookupbob".into(),
-            lookup_id: phrase_lookup_id(&entropy).unwrap().to_vec(),
-            opaque_request: client_register_start(b"correct horse battery").unwrap().0,
-        })
+        .json(&signed_start(
+            "lookupbob",
+            &entropy,
+            phrase_lookup_id(&entropy).unwrap().to_vec(),
+            client_register_start(b"correct horse battery").unwrap().0,
+        ))
         .send()
         .await
         .unwrap()
@@ -1959,11 +1988,12 @@ async fn a_recovery_lookup_that_matched_nothing_is_answered_like_one_that_did() 
         let base = base.clone();
         async move {
             http.post(format!("{base}/v1/recover/start"))
-                .json(&RecoverStartRequest {
-                    username: username.into(),
+                .json(&signed_start(
+                    username,
+                    &entropy,
                     lookup_id,
-                    opaque_request: client_register_start(b"correct horse battery").unwrap().0,
-                })
+                    client_register_start(b"correct horse battery").unwrap().0,
+                ))
                 .send()
                 .await
                 .unwrap()
@@ -2143,13 +2173,15 @@ async fn a_pairing_join_for_an_unknown_username_is_answered_like_one_for_an_acco
     );
 }
 
-/// The OPAQUE evaluation must not depend on whether the lookup matched either.
-/// Evaluating a miss under a name of the server's own made the registration
-/// response differ from a hit's under the same request, so two lookups and one
-/// comparison answered the question the decoy exists to refuse: two misses
-/// agreed, a hit and a miss did not.
+/// The OPAQUE evaluation is under the account's username, the OPRF key its
+/// password is registered under, only for a start the phrase signed (audit
+/// finding 4). Without that, anyone could evaluate password guesses here.
+///
+/// Everything else is evaluated under a name of the server's own, so it also
+/// says nothing about the lookup: someone holding the account's lookup id but
+/// not its phrase gets exactly what a wrong lookup id gets.
 #[tokio::test]
-async fn a_recovery_lookup_does_not_change_the_opaque_response_when_it_misses() {
+async fn a_recovery_start_evaluates_the_password_oprf_only_for_the_phrase_holder() {
     let dir = std::env::temp_dir().join(format!("sealbook-recover-oprf-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let db = dir.join("sealbook.db");
@@ -2161,21 +2193,19 @@ async fn a_recovery_lookup_does_not_change_the_opaque_response_when_it_misses() 
         .await
         .expect("register");
     let entropy = entropy_from_phrase(&phrase).unwrap();
+    let (_, other_entropy) = sealbook_crypto::generate_phrase().unwrap();
+    let lookup_id = phrase_lookup_id(&entropy).unwrap().to_vec();
 
     // One registration request, reused: the response is a function of the
     // request and the name the server evaluates it under, so holding the request
     // still is what exposes the name.
     let (opaque_request, _) = client_register_start(b"correct horse battery").unwrap();
     let http = reqwest::Client::new();
-    let start = |lookup_id: Vec<u8>| {
+    let start = |signer: [u8; 32], lookup_id: Vec<u8>| {
         let (http, base, opaque_request) = (http.clone(), base.clone(), opaque_request.clone());
         async move {
             http.post(format!("{base}/v1/recover/start"))
-                .json(&RecoverStartRequest {
-                    username: "oprfbob".into(),
-                    lookup_id,
-                    opaque_request,
-                })
+                .json(&signed_start("oprfbob", &signer, lookup_id, opaque_request))
                 .send()
                 .await
                 .unwrap()
@@ -2184,18 +2214,26 @@ async fn a_recovery_lookup_does_not_change_the_opaque_response_when_it_misses() 
                 .json::<RecoverStartResponse>()
                 .await
                 .unwrap()
-                .opaque_response
         }
     };
 
-    let hit = start(phrase_lookup_id(&entropy).unwrap().to_vec()).await;
-    let miss = start(vec![1u8; 32]).await;
-    let other_miss = start(vec![2u8; 32]).await;
-    assert_eq!(
-        hit, miss,
-        "the OPAQUE response says whether the lookup matched"
+    let proven = start(entropy, lookup_id.clone()).await;
+    let unproven = start(other_entropy, lookup_id.clone()).await;
+    let miss = start(entropy, vec![1u8; 32]).await;
+    let other_miss = start(other_entropy, vec![2u8; 32]).await;
+    assert_ne!(
+        proven.opaque_response, unproven.opaque_response,
+        "a start without the phrase was evaluated under the username"
     );
-    assert_eq!(miss, other_miss);
+    assert_ne!(
+        unproven.collection_id, proven.collection_id,
+        "a start without the phrase was answered from the account"
+    );
+    assert_eq!(
+        unproven.opaque_response, miss.opaque_response,
+        "the account's lookup id without its phrase is told apart from a miss"
+    );
+    assert_eq!(miss.opaque_response, other_miss.opaque_response);
 }
 
 /// Splitting login into a challenge request plus a start request must not halve
@@ -5460,11 +5498,12 @@ async fn a_recovery_that_never_rotated_is_caught_at_the_next_login() {
     let (opaque_request, registration) = client_register_start(password.as_bytes()).unwrap();
     let start: RecoverStartResponse = http
         .post(format!("{base}/v1/recover/start"))
-        .json(&RecoverStartRequest {
-            username: "owedbob".into(),
-            lookup_id: phrase_lookup_id(&entropy).unwrap().to_vec(),
+        .json(&signed_start(
+            "owedbob",
+            &entropy,
+            phrase_lookup_id(&entropy).unwrap().to_vec(),
             opaque_request,
-        })
+        ))
         .send()
         .await
         .unwrap()
@@ -5680,11 +5719,12 @@ async fn a_recovery_whose_new_password_was_modified_after_signing_is_refused() {
     let (opaque_request, registration) = client_register_start(password.as_bytes()).unwrap();
     let start: RecoverStartResponse = http
         .post(format!("{base}/v1/recover/start"))
-        .json(&RecoverStartRequest {
-            username: "tamperbob".into(),
-            lookup_id: phrase_lookup_id(&entropy).unwrap().to_vec(),
+        .json(&signed_start(
+            "tamperbob",
+            &entropy,
+            phrase_lookup_id(&entropy).unwrap().to_vec(),
             opaque_request,
-        })
+        ))
         .send()
         .await
         .unwrap()
@@ -5793,11 +5833,12 @@ async fn a_recovery_whose_new_password_was_modified_after_signing_is_refused() {
     let (opaque_request, registration) = client_register_start(password.as_bytes()).unwrap();
     let start: RecoverStartResponse = http
         .post(format!("{base}/v1/recover/start"))
-        .json(&RecoverStartRequest {
-            username: "tamperbob".into(),
-            lookup_id: phrase_lookup_id(&entropy).unwrap().to_vec(),
+        .json(&signed_start(
+            "tamperbob",
+            &entropy,
+            phrase_lookup_id(&entropy).unwrap().to_vec(),
             opaque_request,
-        })
+        ))
         .send()
         .await
         .unwrap()
@@ -8026,6 +8067,10 @@ async fn failed_logins_from_outsiders_do_not_lock_the_owner_out() {
             username: "lockalice".into(),
             lookup_id: vec![0u8; 32],
             opaque_request: request,
+            phrase_proof: DualSignatureBody {
+                mldsa: vec![0u8; 3309],
+                ed25519: vec![0u8; 64],
+            },
         };
         post_as(&app, from, "/v1/recover/start", &recover).await;
     }

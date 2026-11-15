@@ -11,9 +11,10 @@ use uuid::Uuid;
 
 use sealbook_crypto::opaque::{server_register_finish, server_register_start};
 use sealbook_crypto::{
-    ct_eq, generate_login_challenge, is_supported_recovery_ciphersuite, phrase_recovery_transcript,
-    recovery_password_payload, verify_phrase_recovery, DeviceSigningPublic, DualSignature,
-    HPKE_AEAD_TAG_LEN, KDF_SALT_LEN, NONCE_LEN, PHRASE_LOOKUP_ID_LEN,
+    ct_eq, generate_login_challenge, is_supported_recovery_ciphersuite,
+    phrase_recovery_start_transcript, phrase_recovery_transcript, recovery_password_payload,
+    verify_phrase_recovery, DeviceSigningPublic, DualSignature, HPKE_AEAD_TAG_LEN, KDF_SALT_LEN,
+    NONCE_LEN, PHRASE_LOOKUP_ID_LEN,
 };
 use sealbook_protocol::{
     valid_username, ErrorBody, KeyWrapBody, RecoverFinishRequest, RecoverFinishResponse,
@@ -48,7 +49,8 @@ pub(crate) async fn recover_start(
         return Err(err(StatusCode::BAD_REQUEST, "invalid phrase lookup id"));
     }
     let row = sqlx::query(
-        "SELECT c.id, w.hpke_enc, w.wrapped_ck, w.ciphersuite
+        "SELECT c.id, w.hpke_enc, w.wrapped_ck, w.ciphersuite,
+                a.phrase_mldsa_pk, a.phrase_ed25519_pk
          FROM accounts a
          JOIN collections c ON c.account_id = a.id
          JOIN key_wraps w ON w.collection_id = c.id AND w.recipient_kind = 'phrase'
@@ -59,6 +61,29 @@ pub(crate) async fn recover_start(
     .fetch_optional(&state.db)
     .await
     .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    // Checked against a dummy key on a miss, so that the work done is the same.
+    // A start the phrase did not sign is answered as a miss: what it is after
+    // is the evaluation below, which is a password-guessing oracle (audit
+    // finding 4), and the phrase holder can reset the password anyway.
+    let phrase_pk = row
+        .as_ref()
+        .and_then(|row| {
+            Some(DeviceSigningPublic {
+                mldsa_pk: row.get::<Option<Vec<u8>>, _>("phrase_mldsa_pk")?,
+                ed25519_pk: row.get::<Option<Vec<u8>>, _>("phrase_ed25519_pk")?,
+            })
+        })
+        .unwrap_or_else(|| state.dummy_phrase_recovery_pk.clone());
+    let proven = verify_phrase_recovery(
+        &phrase_pk,
+        &phrase_recovery_start_transcript(&body.username, &body.lookup_id, &body.opaque_request),
+        &DualSignature {
+            mldsa: body.phrase_proof.mldsa.clone(),
+            ed25519: body.phrase_proof.ed25519.clone(),
+        },
+    )
+    .is_ok();
+    let row = row.filter(|_| proven);
     // Built whether or not the lookup matched, so that a miss costs what a hit
     // costs as well as looking like one. See `decoy`.
     let decoy = recovery_decoy(&state.decoy_key, &body.username, &body.lookup_id)
@@ -74,15 +99,20 @@ pub(crate) async fn recover_start(
     roster.phrase_mldsa_pk.clear();
     roster.phrase_ed25519_pk.clear();
     let collection_id = matched.and_then(|id| Uuid::parse_str(&id).ok());
-    // Begin the password reset. Evaluated against the username whether or not the
-    // lookup matched: the response is a function of the request and the name, so
-    // a name of the server's own for a miss would let one request be sent twice
-    // and the two answers compared. Nothing here is derived from the existing
-    // password, and the evaluation needs no account to exist.
+    // Begin the password reset. The evaluation is under the OPRF key the
+    // existing password is registered under, so only a proven start gets it.
+    // Every other start is evaluated under a name no username can be, the same
+    // one whether or not the lookup matched, so that only the phrase holder can
+    // tell a matching lookup id from one that is not.
+    let decoy_name = [b"\0recover-decoy\0".as_slice(), body.username.as_bytes()].concat();
     let opaque_response = server_register_start(
         &state.opaque,
         &body.opaque_request,
-        body.username.as_bytes(),
+        if proven {
+            body.username.as_bytes()
+        } else {
+            &decoy_name
+        },
     )
     .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid credentials"))?;
     let wrap = row

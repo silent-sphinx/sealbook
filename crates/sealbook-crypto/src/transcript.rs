@@ -447,6 +447,27 @@ pub fn recovery_password_payload(
     h.finalize().into()
 }
 
+/// Signed with the recovery phrase's key to begin a recovery.
+///
+/// `recover/start` evaluates the OPRF the account's password is registered
+/// under, which is a password-guessing oracle for anyone who can get the
+/// evaluation, so the server evaluates under the username only for a request
+/// carrying this proof (audit finding 4). The request is the blinded password
+/// itself, so a replayed proof buys an evaluation of somebody else's blinded
+/// element, which is useless without its blind.
+pub fn phrase_recovery_start_transcript(
+    username: &str,
+    lookup_id: &[u8],
+    opaque_request: &[u8],
+) -> [u8; 32] {
+    let mut h = Sha256::new();
+    h.update(b"sealbook-phrase-recovery-start-v1");
+    absorb(&mut h, username.as_bytes());
+    absorb(&mut h, lookup_id);
+    absorb(&mut h, opaque_request);
+    h.finalize().into()
+}
+
 /// Signed with the recovery phrase's key to enrol a device and reset the password.
 ///
 /// Fields are length-prefixed: `username` and `challenge` both vary in length, and

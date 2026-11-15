@@ -1236,13 +1236,17 @@
       "type": "object"
     },
     "RecoverStartRequest": {
-      "description": "Step 1 of recovery: fetch the phrase's key wrap and begin a password reset.\n\nA recovery exists for the case where the password is what was lost, so it\nreplaces the password rather than asking for it. That needs an OPAQUE\nregistration round trip, which is what `opaque_request` starts.\n\nUnauthenticated, like `login/challenge`, and it reveals nothing: an unknown\nusername, or a `lookup_id` that does not match, gets a dummy wrap and a\nregistration response of the same shape. The response carries no material\nderived from the existing password, so it cannot be harvested to attack it.",
+      "description": "Step 1 of recovery: fetch the phrase's key wrap and begin a password reset.\n\nA recovery exists for the case where the password is what was lost, so it\nreplaces the password rather than asking for it. That needs an OPAQUE\nregistration round trip, which is what `opaque_request` starts.\n\nUnauthenticated, like `login/challenge`, and it reveals nothing: an unknown\nusername, a `lookup_id` that does not match, or a `phrase_proof` that does\nnot verify gets a decoy wrap and a registration response of the same shape.\n\nThe registration response is evaluated under the OPRF key the existing\npassword is registered under, so it is a password-guessing oracle. Only a\nrequest whose `phrase_proof` verifies is evaluated under the username;\nanything else is evaluated under a name no account can hold.",
       "properties": {
         "lookup_id": {
           "$ref": "#/$defs/Base64Url"
         },
         "opaque_request": {
           "$ref": "#/$defs/Base64Url"
+        },
+        "phrase_proof": {
+          "$ref": "#/$defs/DualSignatureBody",
+          "description": "The phrase's recovery key over `phrase_recovery_start_transcript`."
         },
         "username": {
           "type": "string"
@@ -1251,7 +1255,8 @@
       "required": [
         "username",
         "lookup_id",
-        "opaque_request"
+        "opaque_request",
+        "phrase_proof"
       ],
       "type": "object"
     },

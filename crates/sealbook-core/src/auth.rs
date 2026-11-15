@@ -25,12 +25,12 @@ use sealbook_crypto::{
     account_op_transcript, delete_account_payload, enrollment_transcript, entropy_from_phrase,
     generate_device_hpke, generate_device_signing, generate_kdf_salt, generate_phrase,
     login_start_transcript, login_transcript, open_login_challenge, password_change_payload,
-    phrase_lookup_id, phrase_recovery_keys, phrase_recovery_public, phrase_recovery_transcript,
-    recovery_password_payload, sign, sign_phrase_recovery, unwrap_collection_key,
-    unwrap_for_device, unwrap_for_phrase, username_change_payload, wrap_collection_key,
-    wrap_for_device, wrap_for_phrase, CollectionKey, DeviceHpkePublic, DeviceHpkeSecret,
-    DeviceHpkeWrap, DeviceSigningSecrets, RecoveryWrap, WrapBinding, PHRASE_CIPHERSUITE,
-    PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
+    phrase_lookup_id, phrase_recovery_keys, phrase_recovery_public,
+    phrase_recovery_start_transcript, phrase_recovery_transcript, recovery_password_payload, sign,
+    sign_phrase_recovery, unwrap_collection_key, unwrap_for_device, unwrap_for_phrase,
+    username_change_payload, wrap_collection_key, wrap_for_device, wrap_for_phrase, CollectionKey,
+    DeviceHpkePublic, DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets, RecoveryWrap,
+    WrapBinding, PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
 };
 use sealbook_protocol::{
     valid_username, AccountChallengeResponse, ChangePasswordRequest, ChangePasswordStartRequest,
@@ -653,20 +653,30 @@ pub fn login_accept(
 /// Recovery step 1: look the account up by a value derived from the phrase, and
 /// begin registering the replacement password in the same round trip.
 ///
-/// The lookup id reveals nothing on its own, which is why the server can answer
-/// it before any proof. A lookup that matched nothing is answered with a decoy.
+/// Signed with the phrase, because the registration response is evaluated
+/// under the OPRF key the old password is registered under, and the server
+/// hands that evaluation only to the phrase holder. A lookup that matched
+/// nothing, or a proof that does not verify, is answered with a decoy.
 pub fn recover_start_request(
     username: &str,
     phrase: &str,
     opaque_request_b64: &str,
 ) -> Result<AuthRequest, CoreError> {
     let entropy = phrase_entropy(phrase)?;
+    let username = checked_username(username)?;
+    let lookup_id = phrase_lookup_id(&entropy)?.to_vec();
+    let opaque_request = decode(opaque_request_b64, "OPAQUE request")?;
+    let proof = sign_phrase_recovery(
+        &entropy,
+        &phrase_recovery_start_transcript(&username, &lookup_id, &opaque_request),
+    )?;
     Ok(AuthRequest {
         path: "/v1/recover/start".into(),
         body: serde_json::to_string(&RecoverStartRequest {
-            username: checked_username(username)?,
-            lookup_id: phrase_lookup_id(&entropy)?.to_vec(),
-            opaque_request: decode(opaque_request_b64, "OPAQUE request")?,
+            username,
+            lookup_id,
+            opaque_request,
+            phrase_proof: dual(proof),
         })?,
     })
 }
