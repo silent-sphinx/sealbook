@@ -506,6 +506,19 @@
           "expect": "plan"
         }
       ]
+    },
+    {
+      "file": "changes/unreadable-rows.json",
+      "tables": [
+        {
+          "table": "reads",
+          "op": "sealed.unreadable_rows",
+          "args": [
+            "outcomes"
+          ],
+          "expect": "result"
+        }
+      ]
     }
   ]
 }

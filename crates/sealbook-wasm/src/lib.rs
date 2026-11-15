@@ -1285,6 +1285,17 @@ pub fn core_open_row(
     )
 }
 
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct RowOutcomeList(pub Vec<RowOutcome>);
+
+/// How many rows of a full read did not open, refusing one the collection key
+/// opened none of with `WrongCollectionKey` rather than showing an empty vault.
+#[wasm_bindgen]
+pub fn core_unreadable_rows(outcomes: Ts<RowOutcomeList>) -> Result<u64, JsError> {
+    sealbook_core::unreadable_rows(&outcomes.to_rust()?.0).map_err(core_err)
+}
+
 /// The rule for a collection key that moved while a read was in flight.
 #[wasm_bindgen]
 pub fn core_require_key_epoch(expected: u64, held: u64) -> Result<(), JsError> {

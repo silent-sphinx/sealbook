@@ -948,4 +948,9 @@ pub mod ffi {
     pub fn require_key_epoch(expected: u64, held: u64) -> Result<(), CoreError> {
         super::require_key_epoch(expected, held)
     }
+
+    #[uniffi::export]
+    pub fn unreadable_rows(outcomes: Vec<RowOutcome>) -> Result<u64, CoreError> {
+        super::unreadable_rows(&outcomes)
+    }
 }

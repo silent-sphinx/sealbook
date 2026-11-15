@@ -33,6 +33,10 @@ fn call(op: &str, args: &[Value]) -> Value {
             arg::<uuid::Uuid>(args, 1),
             &arg::<CoreSealedRow>(args, 2),
         )),
+        "sealed.unreadable_rows" => match unreadable_rows(&arg::<Vec<RowOutcome>>(args, 0)) {
+            Ok(rows) => serde_json::json!({ "unreadable": rows }),
+            Err(error) => serde_json::json!({ "error": error.kind() }),
+        },
         "task.write" => out(task_write(&arg(args, 0), &arg::<String>(args, 1))),
         "task.parse" => out::<_, String>(Ok(task_parse(
             &arg::<String>(args, 0),

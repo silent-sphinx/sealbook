@@ -87,6 +87,12 @@ both builds already require for the wasm module and the JNI library.
   As with the roster fixture, the check compares the digests and the root rather
   than the bytes.
 
+- `changes/unreadable-rows.json` - the row outcomes of a full read and what
+  core's `unreadable_rows` makes of them: a count of the rows that did not
+  open, or `WrongCollectionKey` when the collection key opened none of them,
+  so that a key the server substituted reads as an error rather than an empty
+  vault. Part of `corpus.json`, so every host runs it.
+
 - `changes/paged-walk.json` — one collection served as two pages of the change
   feed, with the request path each page answers, and the signed manifest both
   pages carry. Holds every row kind a read has to tell apart: a superseded

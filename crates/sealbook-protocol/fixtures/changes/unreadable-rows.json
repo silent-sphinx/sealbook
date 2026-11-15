@@ -1,0 +1,153 @@
+{
+  "about": "How many rows of a full read did not open, and when the collection key itself is refused. A result is either {\"unreadable\": n} or {\"error\": kind}, kind being the CoreError kind.",
+  "reads": [
+    {
+      "case": "an empty vault",
+      "outcomes": [],
+      "result": {
+        "unreadable": 0
+      }
+    },
+    {
+      "case": "only deletes",
+      "outcomes": [
+        "Deleted",
+        "Deleted"
+      ],
+      "result": {
+        "unreadable": 0
+      }
+    },
+    {
+      "case": "every row opens",
+      "outcomes": [
+        {
+          "Object": {
+            "content_type": "application/vnd.sealbook.note+json",
+            "payload": "{}"
+          }
+        },
+        {
+          "Object": {
+            "content_type": "application/vnd.sealbook.note+json",
+            "payload": "{}"
+          }
+        }
+      ],
+      "result": {
+        "unreadable": 0
+      }
+    },
+    {
+      "case": "one row the key does not open among readable ones",
+      "outcomes": [
+        {
+          "Object": {
+            "content_type": "application/vnd.sealbook.note+json",
+            "payload": "{}"
+          }
+        },
+        {
+          "Unreadable": {
+            "reason": "Key"
+          }
+        },
+        {
+          "Object": {
+            "content_type": "application/vnd.sealbook.note+json",
+            "payload": "{}"
+          }
+        }
+      ],
+      "result": {
+        "unreadable": 1
+      }
+    },
+    {
+      "case": "a key that opens no row",
+      "outcomes": [
+        {
+          "Unreadable": {
+            "reason": "Key"
+          }
+        },
+        {
+          "Unreadable": {
+            "reason": "Key"
+          }
+        }
+      ],
+      "result": {
+        "error": "WrongCollectionKey"
+      }
+    },
+    {
+      "case": "a key that opens no row beside deletes and a malformed row",
+      "outcomes": [
+        {
+          "Unreadable": {
+            "reason": "Key"
+          }
+        },
+        "Deleted",
+        {
+          "Unreadable": {
+            "reason": "Stored"
+          }
+        }
+      ],
+      "result": {
+        "error": "WrongCollectionKey"
+      }
+    },
+    {
+      "case": "an envelope this build cannot read still vouches for the key",
+      "outcomes": [
+        {
+          "Unreadable": {
+            "reason": "Key"
+          }
+        },
+        {
+          "Unreadable": {
+            "reason": "Envelope"
+          }
+        }
+      ],
+      "result": {
+        "unreadable": 2
+      }
+    },
+    {
+      "case": "a payload that is not UTF-8 still vouches for the key",
+      "outcomes": [
+        {
+          "Unreadable": {
+            "reason": "Payload"
+          }
+        },
+        {
+          "Unreadable": {
+            "reason": "Key"
+          }
+        }
+      ],
+      "result": {
+        "unreadable": 2
+      }
+    },
+    {
+      "case": "only malformed rows say nothing about the key",
+      "outcomes": [
+        {
+          "Unreadable": {
+            "reason": "Stored"
+          }
+        }
+      ],
+      "result": {
+        "unreadable": 1
+      }
+    }
+  ]
+}

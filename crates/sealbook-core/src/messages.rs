@@ -118,6 +118,13 @@ pub fn recovery_pending_message() -> String {
         .into()
 }
 
+pub fn wrong_collection_key_message() -> String {
+    "This device's vault key opens nothing in the vault, so nothing was shown. Sign in again; \
+     if it keeps happening, pair this device again from another one or recover with your \
+     phrase."
+        .into()
+}
+
 /// The title a conflicted copy is saved under. `date` is the host's local
 /// `YYYY-MM-DD`.
 pub fn conflict_copy_title(title: &str, date: &str) -> String {
@@ -159,6 +166,7 @@ pub fn error_message(error: &CoreError) -> Option<String> {
         CoreError::RosterTooOld => Some(roster_too_old_message()),
         CoreError::CollectionBusy => Some(collection_busy_message()),
         CoreError::RecoveryRotationPending => Some(recovery_pending_message()),
+        CoreError::WrongCollectionKey { .. } => Some(wrong_collection_key_message()),
         _ => None,
     }
 }
@@ -193,6 +201,11 @@ pub mod ffi {
     #[uniffi::export(name = "roster_too_old_message")]
     pub fn roster_too_old_message() -> String {
         super::roster_too_old_message()
+    }
+
+    #[uniffi::export(name = "wrong_collection_key_message")]
+    pub fn wrong_collection_key_message() -> String {
+        super::wrong_collection_key_message()
     }
 
     #[uniffi::export(name = "collection_busy_message")]

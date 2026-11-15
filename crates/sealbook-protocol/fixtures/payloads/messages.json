@@ -253,6 +253,14 @@
       "message": "This account has an unfinished recovery. Replace the vault key to finish it, which issues a new recovery phrase. Nothing can be saved until then."
     },
     {
+      "name": "wrong collection key",
+      "error": {
+        "kind": "WrongCollectionKey",
+        "rows": 3
+      },
+      "message": "This device's vault key opens nothing in the vault, so nothing was shown. Sign in again; if it keeps happening, pair this device again from another one or recover with your phrase."
+    },
+    {
       "name": "no sentence",
       "error": {
         "kind": "Manifest",
