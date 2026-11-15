@@ -8131,3 +8131,97 @@ async fn a_legacy_roster_is_reported_until_a_rotation_commits_to_the_key() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A server that seals a key of its own to a device cannot get it adopted at
+/// sign-in. Swapping the wrap alone breaks the roster MAC; re-MACing the roster
+/// under the substituted key, which the server can do because the MAC sits
+/// outside the signature, is caught by the signed key commitment.
+#[tokio::test]
+async fn a_substituted_device_wrap_is_refused_at_login() {
+    let dir = std::env::temp_dir().join(format!("sealbook-swapped-wrap-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let password = "correct horse battery";
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "swappedalice", password)
+        .await
+        .unwrap();
+    client
+        .put_contact(Uuid::new_v4(), r#"{"@type":"Card","name":{"full":"Ada"}}"#)
+        .await
+        .unwrap();
+    client.login(password).await.unwrap();
+
+    let state = client.state.clone().unwrap();
+    let key_epoch = client.cached_key_epoch();
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    let device_hpke_pk: Vec<u8> =
+        sqlx::query_scalar("SELECT xwing_hpke_pk FROM devices WHERE id = ?")
+            .bind(state.device_id.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let server_ck = CollectionKey::generate();
+    let server_wrap = wrap_for_device(
+        &sealbook_crypto::DeviceHpkePublic(device_hpke_pk),
+        &server_ck,
+        &WrapBinding {
+            collection_id: state.collection_id,
+            key_epoch,
+        },
+    )
+    .unwrap();
+    sqlx::query(
+        "UPDATE key_wraps SET hpke_enc = ?, wrapped_ck = ?
+         WHERE recipient_kind = 'device' AND recipient_id = ?",
+    )
+    .bind(&server_wrap.enc)
+    .bind(&server_wrap.ciphertext)
+    .bind(state.device_id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    client
+        .login(password)
+        .await
+        .expect_err("a key the roster was not sealed for must not be adopted");
+
+    let stored: String =
+        sqlx::query_scalar("SELECT body FROM device_rosters ORDER BY roster_seq DESC LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let mut roster = serde_json::from_str::<sealbook_protocol::RosterBody>(&stored)
+        .unwrap()
+        .to_roster();
+    assert!(!roster.key_commitment.is_empty());
+    let seq = roster.roster_seq;
+    roster.mac = sealbook_crypto::roster_mac(&server_ck, &roster.transcript(state.collection_id))
+        .unwrap()
+        .to_vec();
+    sqlx::query("UPDATE device_rosters SET body = ? WHERE roster_seq = ?")
+        .bind(serde_json::to_string(&sealbook_protocol::RosterBody::from_roster(roster)).unwrap())
+        .bind(seq as i64)
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    let error = client
+        .login(password)
+        .await
+        .expect_err("a re-MACed roster must not vouch for the server's key")
+        .to_string();
+    assert!(
+        error.contains("commits to"),
+        "the refusal should come from the key commitment, got: {error}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
