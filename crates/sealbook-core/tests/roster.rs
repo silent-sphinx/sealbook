@@ -284,6 +284,22 @@ fn a_served_key_the_roster_does_not_commit_to_is_refused_even_with_a_matching_ma
     assert_eq!(err.kind(), "Roster", "{err:?}");
 }
 
+/// With no pin the chain is anchored on the very key being checked, so a server
+/// that sealed its own key could serve a roster committing to it. Refused even
+/// for the account's real key: nothing here can tell the two apart.
+#[test]
+fn a_served_key_is_refused_on_a_device_with_no_pin() {
+    let fixture = fixture();
+    let err = roster_accept_key(
+        &fixture.context(0),
+        &fixture.session(),
+        &fixture.served(1, 1),
+    )
+    .unwrap_err();
+    assert_eq!(err.kind(), "Roster", "{err:?}");
+    assert!(err.to_string().contains("no pinned roster"), "{err}");
+}
+
 #[test]
 fn a_served_key_labelled_with_an_older_epoch_than_the_roster_is_refused() {
     let fixture = fixture();

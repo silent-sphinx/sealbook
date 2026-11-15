@@ -8041,8 +8041,8 @@ async fn failed_logins_from_outsiders_do_not_lock_the_owner_out() {
 /// rotation, the step a user can take at will, upgrades it.
 ///
 /// The legacy account is made by hand: the stored genesis roster is resealed
-/// under the v1 transcript, and the device is unpinned so it anchors on the MAC
-/// as a device enrolled before commitments existed would.
+/// under the v1 transcript, and the device's pin moved onto it, as a device
+/// enrolled before commitments existed would hold.
 #[tokio::test]
 async fn a_legacy_roster_is_reported_until_a_rotation_commits_to_the_key() {
     let dir = std::env::temp_dir().join(format!("sealbook-legacy-roster-{}", Uuid::new_v4()));
@@ -8112,10 +8112,10 @@ async fn a_legacy_roster_is_reported_until_a_rotation_commits_to_the_key() {
         .unwrap();
     pool.close().await;
 
-    let mut unpinned = state;
-    unpinned.roster_seq = 0;
-    unpinned.roster_transcript = Vec::new();
-    let mut client = SealbookClient::with_state(unpinned);
+    let mut legacy_pinned = state;
+    legacy_pinned.roster_seq = 1;
+    legacy_pinned.roster_transcript = transcript.to_vec();
+    let mut client = SealbookClient::with_state(legacy_pinned);
     client
         .login(password)
         .await

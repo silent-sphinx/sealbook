@@ -161,6 +161,11 @@ pub fn roster_accept(
 /// holding the device's public key, the server included, can seal one. So the
 /// key has to be the one the verified roster commits to, at the roster's own
 /// epoch. The key is not to be used for anything if this fails.
+///
+/// Refused outright while unpinned: with no pin the chain is anchored on the
+/// key being checked, so a server that sealed its own key could also serve a
+/// roster that commits to it. Registration, pairing and recovery all pin before
+/// their first fetch, so only state written before pinning existed lands here.
 pub fn roster_accept_key(
     context: &RosterContext,
     session: &CoreSession,
@@ -168,6 +173,13 @@ pub fn roster_accept_key(
 ) -> Result<VerifiedRoster, CoreError> {
     if session.collection_key.is_none() {
         return Err(CoreError::roster("there is no collection key to check"));
+    }
+    if context.pin()?.is_none() {
+        return Err(CoreError::roster(
+            "this device has no pinned roster, so it cannot tell the vault key it was served \
+             from one the server sealed to it; enrol it again by pairing it from another device \
+             or recovering with the phrase",
+        ));
     }
     accept(context, session, response, true)
 }
