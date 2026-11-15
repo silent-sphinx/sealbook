@@ -125,6 +125,15 @@ pub fn wrong_collection_key_message() -> String {
         .into()
 }
 
+/// For an account whose roster has no key commitment; see
+/// [`VerifiedRoster::key_committed`](crate::VerifiedRoster::key_committed).
+pub fn legacy_roster_message() -> String {
+    "This account's device list predates vault key checks, so this device can't prove the \
+     vault key it was given is your own. Generate a new recovery phrase in Settings to fix \
+     this; it re-encrypts the vault under a new key."
+        .into()
+}
+
 /// The title a conflicted copy is saved under. `date` is the host's local
 /// `YYYY-MM-DD`.
 pub fn conflict_copy_title(title: &str, date: &str) -> String {
@@ -206,6 +215,11 @@ pub mod ffi {
     #[uniffi::export(name = "wrong_collection_key_message")]
     pub fn wrong_collection_key_message() -> String {
         super::wrong_collection_key_message()
+    }
+
+    #[uniffi::export(name = "legacy_roster_message")]
+    pub fn legacy_roster_message() -> String {
+        super::legacy_roster_message()
     }
 
     #[uniffi::export(name = "collection_busy_message")]

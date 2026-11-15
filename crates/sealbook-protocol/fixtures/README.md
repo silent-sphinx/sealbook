@@ -67,6 +67,15 @@ both builds already require for the wasm module and the JNI library.
   `the_checked_in_fixture_is_what_the_generator_builds` compares transcripts
   rather than bytes, because ML-DSA signing need not be deterministic.
 
+- `rosters/legacy.json` - alpha's genesis roster as a release before key
+  commitments sealed it: no `key_commitment`, signed under the v1 transcript,
+  and the pin a device enrolled then holds on it. Verifies by its MAC alone,
+  and core reports `key_committed: false` for it, which is what each client's
+  warning to rotate is driven by. Built from `chain-with-revoke.json` by the
+  ignored `regenerate_the_legacy_roster_fixture` test, with the same command.
+  Read by `sealbook-core`'s roster tests, `sealbook-web/src/lib/client.test.ts`
+  and Android's `KeyAdoptionTest`.
+
 - `manifests/one-write.json` — a five-object collection in four buckets, with
   its signed manifest served both ways (whole, and as the two buckets one write
   touches) and the root that write produces. Signed by the same alpha device as

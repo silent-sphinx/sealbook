@@ -3150,6 +3150,12 @@ pub fn core_order_by_recency(
     ))
 }
 
+/// The warning for an account whose roster predates key commitments.
+#[wasm_bindgen]
+pub fn core_legacy_roster_message() -> String {
+    sealbook_core::legacy_roster_message()
+}
+
 /// The sentence core words for an error, given the JSON it crossed in.
 ///
 /// `None` for text that is not a core error, and for one with no sentence.

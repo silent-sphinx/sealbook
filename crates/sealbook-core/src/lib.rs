@@ -227,9 +227,9 @@ pub use markdown::repair_pipe_tables;
 pub use merge::{conflict_copy, conflict_copy_id, merge_payload, MergeOutcome};
 pub use messages::{
     attachment_message, auth_message, collection_busy_message, conflict_copy_title, error_message,
-    offline_conflict_message, offline_delete_kept_message, offline_overwrote_message,
-    offline_restored_message, pair_message, recovery_pending_message, roster_too_old_message,
-    rotation_message,
+    legacy_roster_message, offline_conflict_message, offline_delete_kept_message,
+    offline_overwrote_message, offline_restored_message, pair_message, recovery_pending_message,
+    roster_too_old_message, rotation_message, wrong_collection_key_message,
 };
 pub use notes_file::{
     notes_import, notes_write_json, notes_write_markdown, CoreNoteFile, CoreNoteFileEntry,

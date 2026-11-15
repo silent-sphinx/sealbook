@@ -20,6 +20,23 @@ const FIXTURE: &str = concat!(
     "/../sealbook-protocol/fixtures/rosters/chain-with-revoke.json"
 );
 
+const LEGACY_FIXTURE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../sealbook-protocol/fixtures/rosters/legacy.json"
+);
+
+/// One roster sealed before key commitments existed, and the pin a device
+/// enrolled then holds on it.
+#[derive(Serialize, Deserialize)]
+struct LegacyFixture {
+    collection_id: Uuid,
+    collection_key: String,
+    key_epoch: u64,
+    device_id: Uuid,
+    pin: CoreRosterPin,
+    rosters: Vec<RosterBody>,
+}
+
 const COLLECTION: &str = "11111111-1111-1111-1111-111111111111";
 const ALPHA: &str = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 const BETA: &str = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
@@ -257,6 +274,74 @@ fn a_served_key_the_roster_commits_to_is_accepted() {
     )
     .expect("the account's own key verifies");
     assert_eq!(verified.pin.roster_seq, 3);
+}
+
+#[test]
+fn a_roster_with_a_key_commitment_is_reported_as_committed() {
+    let fixture = fixture();
+    let verified = roster_accept(
+        &fixture.context(1),
+        &fixture.session(),
+        &fixture.served(1, 1),
+    )
+    .expect("the chain verifies");
+    assert!(verified.key_committed);
+}
+
+/// A roster sealed before commitments existed still verifies, by its MAC, and
+/// is reported so the host can ask for the rotation that replaces it.
+#[test]
+fn a_roster_that_predates_key_commitments_is_reported_as_uncommitted() {
+    let legacy: LegacyFixture =
+        serde_json::from_str(&std::fs::read_to_string(LEGACY_FIXTURE).expect("legacy fixture"))
+            .unwrap();
+    assert!(legacy.rosters[0].key_commitment.is_empty());
+    let chain = fixture();
+    let mut state = chain.state(1);
+    state.roster_seq = legacy.pin.roster_seq;
+    state.roster_transcript = unb64(&legacy.pin.transcript);
+    let response = HttpResponse {
+        status: 200,
+        headers: Vec::new(),
+        body: serde_json::to_vec(&serde_json::json!({ "rosters": legacy.rosters, "floor": 1 }))
+            .unwrap(),
+    };
+
+    let verified = roster_accept_key(&state.roster_context(), &chain.session(), &response)
+        .expect("a legacy roster still verifies by its MAC");
+    assert!(!verified.key_committed);
+    assert_eq!(verified.pin, legacy.pin);
+}
+
+#[test]
+#[ignore = "writes the shared fixture; run with REGENERATE_ROSTER_FIXTURE=1"]
+fn regenerate_the_legacy_roster_fixture() {
+    assert!(
+        std::env::var("REGENERATE_ROSTER_FIXTURE").is_ok(),
+        "set REGENERATE_ROSTER_FIXTURE=1 to confirm overwriting the shared fixture"
+    );
+    let chain = fixture();
+    let (alpha, _) = signing_from_seeds(&[1u8; 32], &[2u8; 32]);
+    let key = CollectionKey(chain.key());
+    let mut legacy = chain.rosters[0].to_roster();
+    legacy.key_commitment.clear();
+    let transcript = legacy.transcript(chain.collection_id);
+    legacy.signature = sealbook_crypto::sign(&alpha, &transcript).unwrap();
+    legacy.mac = roster_mac(&key, &transcript).unwrap().to_vec();
+    let fixture = LegacyFixture {
+        collection_id: chain.collection_id,
+        collection_key: chain.collection_key.clone(),
+        key_epoch: legacy.key_epoch,
+        device_id: chain.alpha_device_id,
+        pin: CoreRosterPin {
+            roster_seq: legacy.roster_seq,
+            transcript: b64(&transcript),
+        },
+        rosters: vec![RosterBody::from_roster(legacy)],
+    };
+    let mut json = serde_json::to_string_pretty(&fixture).unwrap();
+    json.push('\n');
+    std::fs::write(LEGACY_FIXTURE, json).unwrap();
 }
 
 /// The server holds every device's public key and every roster, so it can seal

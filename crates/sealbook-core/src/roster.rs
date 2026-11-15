@@ -117,6 +117,11 @@ pub struct VerifiedRoster {
     /// The verified roster in wire form, for a host that must hand the same
     /// bytes on to a signature or cache them for the session.
     pub roster_json: String,
+    /// False for a roster that predates key commitments. It vouches for the
+    /// collection key by its MAC alone, which a server that sealed a key of its
+    /// own to the device can recompute; a rotation replaces it with one that
+    /// commits. A host shows [`legacy_roster_message`](crate::legacy_roster_message).
+    pub key_committed: bool,
 }
 
 /// The request that fetches the roster history this device can check.
@@ -326,6 +331,7 @@ fn verify(
             transcript: encode(&transcript),
         },
         roster_json: serde_json::to_string(&latest)?,
+        key_committed: !latest.key_commitment.is_empty(),
     })
 }
 

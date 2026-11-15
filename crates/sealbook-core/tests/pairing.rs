@@ -551,6 +551,7 @@ fn build() -> Fixture {
             transcript: b64(&anchor.transcript),
         },
         roster_json: roster_json.clone(),
+        key_committed: true,
     };
 
     let joining_keys = DevicePublicKeys::try_from(&joining.device).unwrap();
