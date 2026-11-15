@@ -1,4 +1,6 @@
+use std::collections::hash_map::RandomState;
 use std::collections::HashMap;
+use std::hash::BuildHasher;
 use std::net::{IpAddr, Ipv6Addr};
 use std::time::{Duration, Instant};
 
@@ -11,6 +13,8 @@ const MAX_KEYS: usize = 10_000;
 /// than call-count based, so a low-traffic server still sheds stale entries and
 /// a flood cannot outrun the sweep.
 const SWEEP_INTERVAL: Duration = Duration::from_secs(30);
+/// Slots in each row of a subject table's `EvictionMemory`.
+const EVICTION_MEMORY_SLOTS: usize = 32_768;
 
 /// Most attempts on one endpoint for one username, from any address, per window.
 const USERNAME_ATTEMPTS_PER_WINDOW: usize = 30;
@@ -65,18 +69,107 @@ enum Eviction {
     FewestCalls,
 }
 
+/// What a subject table remembers of the buckets it evicts, so that evicting
+/// one never resets its limit (audit finding 3).
+///
+/// Evicting the fewest-calls bucket alone only raised the price: anyone over
+/// enough addresses could still fill the table with fuller buckets and push a
+/// saturated username out. Each evicted bucket now leaves its call count and
+/// the time its last call expires in one slot of each of two rows, under
+/// independently keyed hashes, and a key that comes back starts from the least
+/// of its two slots. A slot keeps the larger of whatever lands in it, so it
+/// never holds less than any one key left there and a returning key is never
+/// let off. Two rows rather than one keep an innocent key from inheriting
+/// another's calls unless it collides in both, which takes the table
+/// overflowing and still lasts one window at most. The rows are fixed size, so
+/// remembering costs no memory an attacker can grow.
+struct EvictionMemory {
+    hashers: [RandomState; 2],
+    rows: [Vec<Remembered>; 2],
+}
+
+#[derive(Clone, Copy, Default)]
+struct Remembered {
+    calls: usize,
+    until: Option<Instant>,
+}
+
+impl EvictionMemory {
+    fn new() -> Self {
+        Self {
+            hashers: [RandomState::new(), RandomState::new()],
+            rows: [
+                vec![Remembered::default(); EVICTION_MEMORY_SLOTS],
+                vec![Remembered::default(); EVICTION_MEMORY_SLOTS],
+            ],
+        }
+    }
+
+    fn slot(&self, row: usize, key: &str) -> usize {
+        (self.hashers[row].hash_one(key) % EVICTION_MEMORY_SLOTS as u64) as usize
+    }
+
+    fn remember(&mut self, key: &str, bucket: &Bucket) {
+        let Some(until) = bucket.newest().map(|newest| newest + bucket.window) else {
+            return;
+        };
+        for row in 0..2 {
+            let slot = self.slot(row, key);
+            let remembered = &mut self.rows[row][slot];
+            // An expired record says nothing about the calls now landing here.
+            if remembered.until.is_none_or(|old| old <= Instant::now()) {
+                *remembered = Remembered::default();
+            }
+            remembered.calls = remembered.calls.max(bucket.stamps.len());
+            remembered.until = remembered.until.max(Some(until));
+        }
+    }
+
+    /// Stamps standing for the calls `key` had when it was evicted, all
+    /// counted until the latest of them expires.
+    fn recall(&self, key: &str, now: Instant, window: Duration) -> Vec<Instant> {
+        let mut calls = usize::MAX;
+        let mut until = None::<Instant>;
+        for row in 0..2 {
+            let remembered = self.rows[row][self.slot(row, key)];
+            match remembered.until {
+                Some(expiry) if expiry > now => {
+                    calls = calls.min(remembered.calls);
+                    until = Some(until.map_or(expiry, |u| u.min(expiry)));
+                }
+                _ => return Vec::new(),
+            }
+        }
+        let Some(until) = until else {
+            return Vec::new();
+        };
+        // A stamp counts for `window` after it, so this one lasts until `until`.
+        // A clock too young to go back that far gets `now`, which lasts longer.
+        let stamp = until.checked_sub(window).unwrap_or(now);
+        vec![stamp; calls]
+    }
+}
+
 struct Table {
     by_key: HashMap<String, Bucket>,
     last_sweep: Instant,
     eviction: Eviction,
+    /// Kept by subject tables only. An address table's buckets belong to the
+    /// caller, who gains nothing by evicting their own.
+    memory: Option<Box<EvictionMemory>>,
 }
 
 impl Table {
     fn new(eviction: Eviction) -> Self {
+        let memory = match eviction {
+            Eviction::LeastRecentlyUsed => None,
+            Eviction::FewestCalls => Some(Box::new(EvictionMemory::new())),
+        };
         Self {
             by_key: HashMap::new(),
             last_sweep: Instant::now(),
             eviction,
+            memory,
         }
     }
 
@@ -115,16 +208,24 @@ impl Table {
                 let Some(victim) = victim.map(|(key, _)| key.clone()) else {
                     break;
                 };
-                self.by_key.remove(&victim);
+                if let Some(bucket) = self.by_key.remove(&victim) {
+                    if let Some(memory) = &mut self.memory {
+                        memory.remember(&victim, &bucket);
+                    }
+                }
             }
         }
 
+        let memory = &self.memory;
         let bucket = self
             .by_key
             .entry(key.to_string())
             .or_insert_with(|| Bucket {
                 window,
-                stamps: Vec::new(),
+                stamps: memory
+                    .as_ref()
+                    .map(|memory| memory.recall(key, now, window))
+                    .unwrap_or_default(),
             });
         // The caller's window is this key's current one, so a limit changed in
         // configuration takes effect instead of staying pinned to whatever the
@@ -501,6 +602,81 @@ mod tests {
             !limiter.allow_endpoint("login", "alice", Some(fresh)).await,
             "the flood evicted alice's username bucket and reset her ceiling"
         );
+    }
+
+    /// Audit finding 3: filling the subject table with buckets that each hold
+    /// more calls than a saturated username bucket evicts it, and that must not
+    /// reset its ceiling.
+    #[tokio::test]
+    async fn evicting_a_saturated_username_bucket_does_not_reset_it() {
+        let limiter = RateLimiter::new();
+        for index in 0..RECOVERY_START_ATTEMPTS_PER_WINDOW {
+            assert!(
+                limiter
+                    .allow_recovery_start("alice", Some(spread_address(index)))
+                    .await
+            );
+        }
+        let heavy = RECOVERY_START_ATTEMPTS_PER_WINDOW + 1;
+        for index in 0..MAX_KEYS {
+            limiter
+                .allow_account_cost("flood", &index.to_string(), heavy, heavy, USERNAME_WINDOW)
+                .await;
+        }
+        {
+            let tables = limiter.inner.lock().await;
+            assert!(
+                !tables
+                    .by_subject
+                    .by_key
+                    .contains_key("name:recover-start:alice"),
+                "the flood should have evicted alice's bucket"
+            );
+        }
+        let fresh: IpAddr = "192.0.2.1".parse().unwrap();
+        assert!(
+            !limiter.allow_recovery_start("alice", Some(fresh)).await,
+            "evicting alice's bucket reset her ceiling"
+        );
+        assert!(limiter.allow_recovery_start("bob", Some(fresh)).await);
+    }
+
+    #[test]
+    fn remembered_calls_are_forgotten_once_they_expire() {
+        let mut memory = EvictionMemory::new();
+        let window = Duration::from_secs(300);
+        let now = Instant::now();
+        let aged = now
+            .checked_sub(Duration::from_secs(400))
+            .expect("the monotonic clock must be older than 400 seconds");
+        let recent = now
+            .checked_sub(Duration::from_secs(100))
+            .expect("the monotonic clock must be older than 100 seconds");
+        memory.remember(
+            "old",
+            &Bucket {
+                window,
+                stamps: vec![aged; 7],
+            },
+        );
+        memory.remember(
+            "live",
+            &Bucket {
+                window,
+                stamps: vec![recent; 7],
+            },
+        );
+        assert!(memory.recall("old", now, window).is_empty());
+        let recalled = memory.recall("live", now, window);
+        assert_eq!(recalled.len(), 7);
+        let mut bucket = Bucket {
+            window,
+            stamps: recalled,
+        };
+        bucket.prune(now);
+        assert_eq!(bucket.stamps.len(), 7, "recalled calls must still count");
+        bucket.prune(recent + window);
+        assert!(bucket.stamps.is_empty(), "and expire with the originals");
     }
 
     #[tokio::test]
