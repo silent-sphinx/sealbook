@@ -37,7 +37,8 @@ pub(crate) async fn recover_start(
     }
     if !state
         .limiter
-        .allow_recovery_start(
+        .allow_address(
+            "recover-start",
             &body.username,
             Some(state.trusted_proxies.client_ip(addr.ip(), &headers)),
         )
@@ -83,6 +84,14 @@ pub(crate) async fn recover_start(
         },
     )
     .is_ok();
+    if proven
+        && !state
+            .limiter
+            .allow_proven_recovery_start(&body.username)
+            .await
+    {
+        return Err(err(StatusCode::TOO_MANY_REQUESTS, "rate limited"));
+    }
     let row = row.filter(|_| proven);
     // Built whether or not the lookup matched, so that a miss costs what a hit
     // costs as well as looking like one. See `decoy`.
@@ -159,7 +168,7 @@ pub(crate) async fn recover_finish(
     }
     if !state
         .limiter
-        .allow_endpoint(
+        .allow_address(
             "recover-finish",
             &body.username,
             Some(state.trusted_proxies.client_ip(addr.ip(), &headers)),
@@ -237,6 +246,13 @@ pub(crate) async fn recover_finish(
     };
     if !proof_ok {
         return Err(err(StatusCode::UNAUTHORIZED, "invalid credentials"));
+    }
+    if !state
+        .limiter
+        .allow_proven_recovery_finish(&body.username)
+        .await
+    {
+        return Err(err(StatusCode::TOO_MANY_REQUESTS, "rate limited"));
     }
     let account_id: String = account.get("id");
     let collection = sqlx::query("SELECT id FROM collections WHERE account_id = ?")

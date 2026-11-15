@@ -213,9 +213,13 @@ pub(crate) async fn pair_join(
         return Err(err(StatusCode::BAD_REQUEST, "invalid username"));
     }
     let source = state.trusted_proxies.client_ip(addr.ip(), &headers);
+    // Per address only. No proof exists yet to charge a per-username ceiling
+    // after, and charged before one, it let anyone who knew a username hold
+    // pairing closed for it (audit finding 5). The confirmation code is what
+    // stops a stranger's device being approved.
     if !state
         .limiter
-        .allow_endpoint("pair", &body.username, Some(source))
+        .allow_address("pair", &body.username, Some(source))
         .await
     {
         return Err(err(StatusCode::TOO_MANY_REQUESTS, "rate limited"));

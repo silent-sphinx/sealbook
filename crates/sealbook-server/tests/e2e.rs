@@ -8082,6 +8082,114 @@ async fn failed_logins_from_outsiders_do_not_lock_the_owner_out() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Audit finding 5: someone who knows a username, but not its phrase, must not
+/// be able to hold recovery or pairing closed for it by sending unproven
+/// `recover/start`, `recover/finish` and `pair/join` requests from many
+/// addresses.
+#[tokio::test]
+async fn outsiders_cannot_hold_recovery_or_pairing_closed() {
+    let dir = std::env::temp_dir().join(format!("sealbook-recover-lockout-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let app = sealbook_server::app(db.to_str().unwrap()).await.unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let served = app.clone();
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            served.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        .unwrap();
+    });
+
+    let mut owner = SealbookClient::plaintext_http();
+    let phrase = owner
+        .register(&base, "holdalice", "correct horse battery")
+        .await
+        .expect("register");
+
+    let forged_proof = || DualSignatureBody {
+        mldsa: vec![0u8; 3309],
+        ed25519: vec![0u8; 64],
+    };
+    let (opaque_request, _) = client_register_start(b"guessed password").unwrap();
+    let start = RecoverStartRequest {
+        username: "holdalice".into(),
+        lookup_id: vec![0u8; 32],
+        opaque_request,
+        phrase_proof: forged_proof(),
+    };
+    // Any roster will do for the forged finishes, which never get as far as
+    // reading it.
+    let roster = reqwest::Client::new()
+        .post(format!("{base}/v1/recover/start"))
+        .json(&start)
+        .send()
+        .await
+        .unwrap()
+        .json::<RecoverStartResponse>()
+        .await
+        .unwrap()
+        .roster
+        .unwrap();
+    let device = sealbook_protocol::DevicePublicKeys {
+        device_id: Uuid::new_v4(),
+        mldsa_pk: vec![0u8; 1952],
+        ed25519_pk: vec![0u8; 32],
+        xwing_hpke_pk: vec![0u8; 1216],
+    };
+
+    for index in 0..40u8 {
+        let from = std::net::IpAddr::from([10, 0, 1, index]);
+        post_as(&app, from, "/v1/recover/start", &start).await;
+
+        let finish = RecoverFinishRequest {
+            username: "holdalice".into(),
+            recovery_id: Uuid::new_v4(),
+            challenge: vec![0u8; 32],
+            phrase_proof: forged_proof(),
+            device: device.clone(),
+            enrollment_signature: forged_proof(),
+            wrap: KeyWrapBody {
+                recipient_kind: "device".into(),
+                recipient_id: device.device_id.to_string(),
+                hpke_enc: vec![0u8; 32],
+                wrapped_ck: vec![0u8; 48],
+                ciphersuite: XWING_CIPHERSUITE.into(),
+            },
+            roster: roster.clone(),
+            upload: vec![0u8; 32],
+            kdf_salt: vec![0u8; 16],
+            recovery_nonce: vec![0u8; 12],
+            recovery_wrapped_ck: vec![0u8; 48],
+            recovery_ciphersuite: XWING_CIPHERSUITE.into(),
+        };
+        let status = post_as(&app, from, "/v1/recover/finish", &finish).await;
+        assert_eq!(status, 401, "forged recover/finish {index}");
+
+        let join = PairJoinRequest {
+            username: "holdalice".into(),
+            device: device.clone(),
+            enrollment_signature: forged_proof(),
+        };
+        post_as(&app, from, "/v1/pair/join", &join).await;
+    }
+
+    let mut joiner = SealbookClient::plaintext_http();
+    joiner
+        .pair_join(&base, "holdalice")
+        .await
+        .expect("the owner must still be able to start pairing");
+    let mut recovered = SealbookClient::plaintext_http();
+    recovered
+        .recover(&base, "holdalice", &phrase, "correct horse battery")
+        .await
+        .expect("the owner must still be able to recover");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// An account whose roster predates key commitments is reported as such, and a
 /// rotation, the step a user can take at will, upgrades it.
 ///

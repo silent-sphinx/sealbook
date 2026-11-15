@@ -19,9 +19,8 @@ const EVICTION_MEMORY_SLOTS: usize = 32_768;
 /// Most attempts on one endpoint for one username, from any address, per window.
 const USERNAME_ATTEMPTS_PER_WINDOW: usize = 30;
 const USERNAME_WINDOW: Duration = Duration::from_secs(300);
-/// Per-username ceiling on `recover/start`. Small, because a genuine recovery
-/// needs only a few, and each start costs a phrase proof check and an OPRF
-/// evaluation.
+/// Per-username ceiling on proven `recover/start` calls. Small, because a
+/// genuine recovery needs only a few.
 const RECOVERY_START_ATTEMPTS_PER_WINDOW: usize = 10;
 
 /// Most attempts on one endpoint from one IPv6 /64, and from one /48, per
@@ -339,19 +338,23 @@ impl RateLimiter {
                 .await
     }
 
-    /// `recover/start` has a ceiling of its own rather than sharing login's,
-    /// which anyone could then fill from here. It evaluates the password's OPRF
-    /// only for a start the phrase signed (audit finding 4), so it is no longer
-    /// a route for testing password guesses.
-    pub async fn allow_recovery_start(&self, username: &str, ip: Option<IpAddr>) -> bool {
-        self.allow_address("recover-start", username, ip).await
-            && self
-                .allow_username(
-                    "recover-start",
-                    username,
-                    RECOVERY_START_ATTEMPTS_PER_WINDOW,
-                )
-                .await
+    /// The per-username ceiling on `recover/start`, kept apart from login's and
+    /// charged only for a start the phrase signed. Charged before that, anyone
+    /// who knew a username could hold recovery closed for it (audit finding 5).
+    pub async fn allow_proven_recovery_start(&self, username: &str) -> bool {
+        self.allow_username(
+            "recover-start",
+            username,
+            RECOVERY_START_ATTEMPTS_PER_WINDOW,
+        )
+        .await
+    }
+
+    /// The per-username ceiling on `recover/finish`, charged once the phrase
+    /// proof has verified, for the same reason as `allow_proven_recovery_start`.
+    pub async fn allow_proven_recovery_finish(&self, username: &str) -> bool {
+        self.allow_username("recover-finish", username, USERNAME_ATTEMPTS_PER_WINDOW)
+            .await
     }
 
     /// The per-username ceiling on sign-in, charged only once the caller has
@@ -610,12 +613,8 @@ mod tests {
     #[tokio::test]
     async fn evicting_a_saturated_username_bucket_does_not_reset_it() {
         let limiter = RateLimiter::new();
-        for index in 0..RECOVERY_START_ATTEMPTS_PER_WINDOW {
-            assert!(
-                limiter
-                    .allow_recovery_start("alice", Some(spread_address(index)))
-                    .await
-            );
+        for _ in 0..RECOVERY_START_ATTEMPTS_PER_WINDOW {
+            assert!(limiter.allow_proven_recovery_start("alice").await);
         }
         let heavy = RECOVERY_START_ATTEMPTS_PER_WINDOW + 1;
         for index in 0..MAX_KEYS {
@@ -633,12 +632,11 @@ mod tests {
                 "the flood should have evicted alice's bucket"
             );
         }
-        let fresh: IpAddr = "192.0.2.1".parse().unwrap();
         assert!(
-            !limiter.allow_recovery_start("alice", Some(fresh)).await,
+            !limiter.allow_proven_recovery_start("alice").await,
             "evicting alice's bucket reset her ceiling"
         );
-        assert!(limiter.allow_recovery_start("bob", Some(fresh)).await);
+        assert!(limiter.allow_proven_recovery_start("bob").await);
     }
 
     #[test]
@@ -748,16 +746,11 @@ mod tests {
     #[tokio::test]
     async fn recovery_start_has_a_small_ceiling_of_its_own() {
         let limiter = RateLimiter::new();
-        for index in 0..RECOVERY_START_ATTEMPTS_PER_WINDOW {
-            assert!(
-                limiter
-                    .allow_recovery_start("alice", Some(spread_address(index)))
-                    .await
-            );
+        for _ in 0..RECOVERY_START_ATTEMPTS_PER_WINDOW {
+            assert!(limiter.allow_proven_recovery_start("alice").await);
         }
-        let fresh: IpAddr = "192.0.2.1".parse().unwrap();
-        assert!(!limiter.allow_recovery_start("alice", Some(fresh)).await);
-        assert!(limiter.allow_recovery_start("bob", Some(fresh)).await);
+        assert!(!limiter.allow_proven_recovery_start("alice").await);
+        assert!(limiter.allow_proven_recovery_start("bob").await);
         assert!(limiter.allow_proven_login("alice").await);
     }
 
