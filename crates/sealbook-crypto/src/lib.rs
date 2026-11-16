@@ -5,6 +5,7 @@ pub mod cpace;
 pub mod decoy;
 pub mod error;
 pub mod hpke_wrap;
+pub mod local_storage;
 pub mod opaque;
 pub mod pairing;
 pub mod phrase;
@@ -26,6 +27,9 @@ pub use hpke_wrap::{
     unwrap_for_device, validate_device_hpke_public, wrap_for_device, DeviceHpkePublic,
     DeviceHpkeSecret, DeviceHpkeWrap, WrapBinding, HPKE_AEAD_TAG_LEN, XWING_CIPHERSUITE,
     XWING_ENCAPSULATED_KEY_LEN, XWING_PUBLIC_KEY_LEN,
+};
+pub use local_storage::{
+    local_storage_key, LOCAL_STORAGE_KDF, LOCAL_STORAGE_KEY_LEN, SUPPORTED_LOCAL_STORAGE_KDFS,
 };
 pub use pairing::{
     pair_respond, PairCode, PairInitiator, PairKeys, PAIR_CODE_WORDS, PAIR_NAMEPLATE_WORDS,

@@ -171,6 +171,21 @@ pub fn create_enrollment(password: &str, collection_id: &str) -> Result<Ts<Enrol
     .into_ts()?)
 }
 
+/// The suite new at-rest records are keyed under; stored beside each one.
+#[wasm_bindgen]
+pub fn local_storage_kdf() -> String {
+    sealbook_crypto::LOCAL_STORAGE_KDF.to_string()
+}
+
+/// The base64 AES-256 key a host seals its at-rest records under, stretched
+/// from the password with the named suite.
+#[wasm_bindgen]
+pub fn local_storage_key(password: &str, salt_b64: &str, suite: &str) -> Result<String, JsError> {
+    let key = sealbook_crypto::local_storage_key(password.as_bytes(), &unb64(salt_b64)?, suite)
+        .map_err(js_err)?;
+    Ok(b64(&key))
+}
+
 #[wasm_bindgen]
 pub fn unwrap_ck(
     password: &str,
