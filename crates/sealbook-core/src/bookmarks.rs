@@ -292,7 +292,12 @@ pub fn bookmark_parse(id: &str, raw: &str) -> CoreBookmark {
             raw: raw.to_string(),
         };
     };
-    let url = trimmed(&object, "url").unwrap_or_default();
+    // Writes refuse anything but http(s), but this payload may come from another
+    // client, an older build or a device that did not check. A host puts the
+    // address in a link, so one that is not a web address is not handed on.
+    let url = trimmed(&object, "url")
+        .filter(|url| is_web_url(url))
+        .unwrap_or_default();
     let stored_title = trimmed(&object, "title");
     let derived_title = stored_title.is_none();
     let title = stored_title.unwrap_or_else(|| {
@@ -612,6 +617,35 @@ mod tests {
         assert_eq!(normalize_url("mailto:a@b.c"), "mailto:a@b.c");
         assert_eq!(normalize_url("1abc:x"), "https://1abc:x");
         assert_eq!(normalize_url("   "), "");
+    }
+
+    #[test]
+    fn a_stored_address_that_is_not_a_web_address_is_not_handed_on() {
+        for bad in [
+            "javascript:alert(1)",
+            "data:text/html,x",
+            "file:///etc/passwd",
+            "ms-msdt:/id PCWDiagnostic",
+            "mailto:a@b.c",
+        ] {
+            let raw = json!({"@type": "Bookmark", "url": bad, "title": "t"}).to_string();
+            let read = bookmark_parse("b1", &raw);
+            assert_eq!(read.url, "", "{bad}");
+            // Still listed, so the user can see it and delete it.
+            assert_eq!(read.title, "t");
+            assert!(read.readable);
+            assert_eq!(read.raw, raw);
+        }
+        let untitled = bookmark_parse("b1", r#"{"url":"javascript:alert(1)"}"#);
+        assert_eq!(untitled.title, UNTITLED_BOOKMARK_TITLE);
+    }
+
+    #[test]
+    fn a_stored_web_address_is_read_as_written() {
+        for ok in ["https://a.example/p?q=1", "HTTP://a.example", "a.example/p"] {
+            let raw = json!({"url": ok}).to_string();
+            assert_eq!(bookmark_parse("b1", &raw).url, ok);
+        }
     }
 
     #[test]
