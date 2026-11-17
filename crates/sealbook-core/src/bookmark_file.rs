@@ -327,6 +327,7 @@ pub fn bookmark_export(
             if !bookmark.tags.is_empty() {
                 entry.insert("tags".into(), json!(bookmark.tags));
             }
+            entry.insert("collectionId".into(), json!(bookmark.collection_id));
             entry.insert(
                 "collectionName".into(),
                 json!(bookmark_collection_name_by_id(
@@ -400,6 +401,7 @@ fn import_json(text: &str) -> Result<CoreBookmarkImport, CoreError> {
     if !parsed.is_array() && !parsed.is_object() {
         return Err(CoreError::malformed(BOOKMARK_NOT_JSON));
     }
+    let tree = export_collections(&parsed);
     let entries = match &parsed {
         Value::Array(entries) => entries,
         Value::Object(body) if body.get("@type") == Some(&json!(BOOKMARK_EXPORT_TYPE)) => body
@@ -442,6 +444,10 @@ fn import_json(text: &str) -> Result<CoreBookmarkImport, CoreError> {
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|name| !name.is_empty());
+        let by_id = fields
+            .get("collectionId")
+            .and_then(Value::as_str)
+            .and_then(|id| collection_path(&tree, id));
         bookmarks.push(CoreImportedBookmark {
             draft: CoreBookmarkDraft {
                 url: url.to_owned(),
@@ -459,10 +465,57 @@ fn import_json(text: &str) -> Result<CoreBookmarkImport, CoreError> {
                     .map(str::to_owned),
                 raw: None,
             },
-            folder: name.map(|name| vec![name.to_owned()]).unwrap_or_default(),
+            folder: by_id
+                .or_else(|| name.map(|name| vec![name.to_owned()]))
+                .unwrap_or_default(),
         });
     }
     Ok(CoreBookmarkImport { bookmarks, skipped })
+}
+
+type CollectionTree = std::collections::HashMap<String, (String, Option<String>)>;
+
+/// The `collections` of a Sealbook export as id to (name, parent id). Empty for
+/// a bare array and for an export from before collections were listed.
+fn export_collections(parsed: &Value) -> CollectionTree {
+    let mut tree = CollectionTree::new();
+    let listed = parsed.get("collections").and_then(Value::as_array);
+    for entry in listed.into_iter().flatten() {
+        let text = |key: &str| entry.get(key).and_then(Value::as_str);
+        let (Some(id), Some(name)) = (text("id"), text("name")) else {
+            continue;
+        };
+        let name = name.trim();
+        if !name.is_empty() {
+            tree.insert(
+                id.to_owned(),
+                (name.to_owned(), text("parentId").map(str::to_owned)),
+            );
+        }
+    }
+    tree
+}
+
+/// The folder path of collection `id`, outermost first, or `None` when the
+/// export does not list it. A parent that is missing ends the path there, and a
+/// cycle is cut rather than followed.
+fn collection_path(tree: &CollectionTree, id: &str) -> Option<Vec<String>> {
+    let (name, mut parent) = tree.get(id)?.clone();
+    let mut path = vec![name];
+    let mut seen = vec![id.to_owned()];
+    while let Some(next) = parent {
+        let Some((name, above)) = tree.get(&next) else {
+            break;
+        };
+        if seen.contains(&next) {
+            break;
+        }
+        seen.push(next);
+        path.push(name.clone());
+        parent = above.clone();
+    }
+    path.reverse();
+    Some(path)
 }
 
 // ---- Netscape HTML ----------------------------------------------------------
@@ -1261,6 +1314,57 @@ mod tests {
         bookmark_collection_parse(id, &payload.to_string())
     }
 
+    fn folders_of(text: &str) -> Vec<Vec<String>> {
+        bookmark_import(text)
+            .unwrap()
+            .bookmarks
+            .into_iter()
+            .map(|item| item.folder)
+            .collect()
+    }
+
+    #[test]
+    fn an_export_reads_back_into_the_tree_it_was_written_from() {
+        let collections = vec![
+            collection("a", "Work", None),
+            collection("b", "Reading", Some("a")),
+            collection("c", "Home", None),
+            collection("d", "Reading", Some("c")),
+        ];
+        let in_collection = |id: &str, url: &str| {
+            bookmark(
+                id,
+                json!({"@type":"Bookmark","url":url,"title":"t","collectionId":id}),
+            )
+        };
+        let bookmarks = vec![
+            in_collection("b", "https://one.example"),
+            in_collection("d", "https://two.example"),
+        ];
+        let text = bookmark_export(&bookmarks, &collections, "2026-11-11T00:00:00Z");
+        assert_eq!(
+            folders_of(&text),
+            [vec!["Work", "Reading"], vec!["Home", "Reading"]]
+        );
+    }
+
+    #[test]
+    fn an_export_without_ids_is_read_by_collection_name() {
+        let text = r#"{"@type":"sealbook-bookmark-export","version":1,"bookmarks":[
+            {"url":"https://a.example","title":"a","collectionName":"Reading"},
+            {"url":"https://b.example","title":"b","collectionId":"gone","collectionName":"Later"}],
+            "collections":[{"id":"c1","name":"Reading"}]}"#;
+        assert_eq!(folders_of(text), [vec!["Reading"], vec!["Later"]]);
+    }
+
+    #[test]
+    fn a_loop_in_an_exports_collections_ends_the_path() {
+        let text = r#"{"@type":"sealbook-bookmark-export","version":1,"bookmarks":[
+            {"url":"https://a.example","title":"a","collectionId":"x"}],
+            "collections":[{"id":"x","name":"X","parentId":"y"},{"id":"y","name":"Y","parentId":"x"}]}"#;
+        assert_eq!(folders_of(text), [vec!["Y", "X"]]);
+    }
+
     #[test]
     fn json_import_skips_non_web_addresses() {
         let text = r#"[{"url":"javascript:alert(1)","title":"x"},{"url":"data:text/html,x","title":"y"},{"url":"https://ok.example","title":"z"}]"#;
@@ -1292,14 +1396,14 @@ mod tests {
         assert_eq!(
             out["bookmarks"][0],
             json!({"url":"https://a.example","title":"A","notes":"n","tags":["x"],
-                   "collectionName":"Reading","createdAt":"2026-01-01T00:00:00Z"})
+                   "collectionId":"c1","collectionName":"Reading","createdAt":"2026-01-01T00:00:00Z"})
         );
         // No notes, tags or dates: none of those keys. An untitled bookmark
         // exports under its address, and a missing collection under the default.
         assert_eq!(
             out["bookmarks"][1],
             json!({"url":"https://b.example","title":"https://b.example",
-                   "collectionName":"Default Collection"})
+                   "collectionId":"00000000-0000-0000-0000-000000000005","collectionName":"Default Collection"})
         );
         assert_eq!(out["collections"], json!([{"id":"c1","name":"Reading"}]));
     }
