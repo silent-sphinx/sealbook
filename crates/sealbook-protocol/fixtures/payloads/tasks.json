@@ -26,7 +26,8 @@
       "version",
       "name",
       "parentId",
-      "color"
+      "color",
+      "archived"
     ],
     "default_list_id": "00000000-0000-0000-0000-000000000006",
     "default_list_name": "Default Task List",
@@ -754,7 +755,8 @@
     {
       "case": "a list created from scratch",
       "draft": {
-        "name": "Home"
+        "name": "Home",
+        "archived": false
       },
       "payload": "{\"@type\":\"TaskList\",\"name\":\"Home\",\"version\":\"1.0\"}"
     },
@@ -762,7 +764,8 @@
       "case": "a name with surrounding space, under another list",
       "draft": {
         "name": "  Home  ",
-        "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "archived": false
       },
       "payload": "{\"@type\":\"TaskList\",\"name\":\"Home\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"version\":\"1.0\"}"
     },
@@ -770,7 +773,8 @@
       "case": "a coloured top-level list",
       "draft": {
         "name": "Home",
-        "color": "#112233"
+        "color": "#112233",
+        "archived": false
       },
       "payload": "{\"@type\":\"TaskList\",\"color\":\"#112233\",\"name\":\"Home\",\"version\":\"1.0\"}"
     },
@@ -780,6 +784,7 @@
         "name": "Renamed",
         "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "color": "#112233",
+        "archived": false,
         "raw": "{\"@type\":\"TaskList\",\"color\":\"#112233\",\"name\":\"Home\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sortKey\":\"from a later build\",\"version\":\"1.0\"}"
       },
       "payload": "{\"@type\":\"TaskList\",\"color\":\"#112233\",\"name\":\"Renamed\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sortKey\":\"from a later build\",\"version\":\"1.0\"}"
@@ -789,9 +794,27 @@
       "draft": {
         "name": "Home",
         "color": "#112233",
+        "archived": false,
         "raw": "{\"@type\":\"TaskList\",\"color\":\"#112233\",\"name\":\"Home\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sortKey\":\"from a later build\",\"version\":\"1.0\"}"
       },
       "payload": "{\"@type\":\"TaskList\",\"color\":\"#112233\",\"name\":\"Home\",\"sortKey\":\"from a later build\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "an archived list",
+      "draft": {
+        "name": "Home",
+        "archived": true
+      },
+      "payload": "{\"@type\":\"TaskList\",\"archived\":true,\"name\":\"Home\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "restoring a list drops the archived flag",
+      "draft": {
+        "name": "Home",
+        "archived": false,
+        "raw": "{\"name\":\"Home\",\"archived\":true}"
+      },
+      "payload": "{\"@type\":\"TaskList\",\"name\":\"Home\",\"version\":\"1.0\"}"
     }
   ],
   "list_parses": [
@@ -804,8 +827,33 @@
         "name": "Home",
         "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "color": "#112233",
+        "archived": false,
         "readable": true,
         "raw": "{\"name\":\"  Home  \",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"color\":\"#112233\"}"
+      }
+    },
+    {
+      "case": "an archived list",
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "raw": "{\"name\":\"Home\",\"archived\":true}",
+      "list": {
+        "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "name": "Home",
+        "archived": true,
+        "readable": true,
+        "raw": "{\"name\":\"Home\",\"archived\":true}"
+      }
+    },
+    {
+      "case": "a non-boolean archived reads as live",
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "raw": "{\"name\":\"Home\",\"archived\":\"yes\"}",
+      "list": {
+        "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "name": "Home",
+        "archived": false,
+        "readable": true,
+        "raw": "{\"name\":\"Home\",\"archived\":\"yes\"}"
       }
     },
     {
@@ -815,6 +863,7 @@
       "list": {
         "id": "00000000-0000-0000-0000-000000000006",
         "name": "Default Task List",
+        "archived": false,
         "readable": true,
         "raw": "{}"
       }
@@ -826,6 +875,7 @@
       "list": {
         "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
         "name": "Untitled",
+        "archived": false,
         "readable": true,
         "raw": "not json"
       }
@@ -837,6 +887,7 @@
       "list": {
         "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
         "name": "Home",
+        "archived": false,
         "readable": true,
         "raw": "{\"name\":\"Home\",\"parentId\":\"  \",\"color\":\"\"}"
       }
@@ -850,6 +901,7 @@
           "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
           "name": "Root",
           "color": "#112233",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"Root\",\"color\":\"#112233\"}"
         },
@@ -857,12 +909,14 @@
           "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
           "name": "Child",
           "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"Child\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"
         },
         {
           "id": "plain",
           "name": "Plain",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"Plain\"}"
         },
@@ -870,6 +924,7 @@
           "id": "orphan",
           "name": "Orphan",
           "parent_id": "missing",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"Orphan\",\"parentId\":\"missing\"}"
         },
@@ -877,6 +932,7 @@
           "id": "loop-a",
           "name": "A",
           "parent_id": "loop-b",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"A\",\"parentId\":\"loop-b\"}"
         },
@@ -884,6 +940,7 @@
           "id": "loop-b",
           "name": "B",
           "parent_id": "loop-a",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"B\",\"parentId\":\"loop-a\"}"
         }
@@ -898,6 +955,7 @@
           "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
           "name": "Root",
           "color": "#112233",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"Root\",\"color\":\"#112233\"}"
         },
@@ -905,12 +963,14 @@
           "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
           "name": "Child",
           "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"Child\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"
         },
         {
           "id": "plain",
           "name": "Plain",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"Plain\"}"
         },
@@ -918,6 +978,7 @@
           "id": "orphan",
           "name": "Orphan",
           "parent_id": "missing",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"Orphan\",\"parentId\":\"missing\"}"
         },
@@ -925,6 +986,7 @@
           "id": "loop-a",
           "name": "A",
           "parent_id": "loop-b",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"A\",\"parentId\":\"loop-b\"}"
         },
@@ -932,6 +994,7 @@
           "id": "loop-b",
           "name": "B",
           "parent_id": "loop-a",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"B\",\"parentId\":\"loop-a\"}"
         }
@@ -946,6 +1009,7 @@
           "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
           "name": "Root",
           "color": "#112233",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"Root\",\"color\":\"#112233\"}"
         },
@@ -953,12 +1017,14 @@
           "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
           "name": "Child",
           "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"Child\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"
         },
         {
           "id": "plain",
           "name": "Plain",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"Plain\"}"
         },
@@ -966,6 +1032,7 @@
           "id": "orphan",
           "name": "Orphan",
           "parent_id": "missing",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"Orphan\",\"parentId\":\"missing\"}"
         },
@@ -973,6 +1040,7 @@
           "id": "loop-a",
           "name": "A",
           "parent_id": "loop-b",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"A\",\"parentId\":\"loop-b\"}"
         },
@@ -980,6 +1048,7 @@
           "id": "loop-b",
           "name": "B",
           "parent_id": "loop-a",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"B\",\"parentId\":\"loop-a\"}"
         }
@@ -994,6 +1063,7 @@
           "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
           "name": "Root",
           "color": "#112233",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"Root\",\"color\":\"#112233\"}"
         },
@@ -1001,12 +1071,14 @@
           "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
           "name": "Child",
           "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"Child\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"
         },
         {
           "id": "plain",
           "name": "Plain",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"Plain\"}"
         },
@@ -1014,6 +1086,7 @@
           "id": "orphan",
           "name": "Orphan",
           "parent_id": "missing",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"Orphan\",\"parentId\":\"missing\"}"
         },
@@ -1021,6 +1094,7 @@
           "id": "loop-a",
           "name": "A",
           "parent_id": "loop-b",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"A\",\"parentId\":\"loop-b\"}"
         },
@@ -1028,6 +1102,7 @@
           "id": "loop-b",
           "name": "B",
           "parent_id": "loop-a",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"B\",\"parentId\":\"loop-a\"}"
         }
@@ -1042,6 +1117,7 @@
           "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
           "name": "Root",
           "color": "#112233",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"Root\",\"color\":\"#112233\"}"
         },
@@ -1049,12 +1125,14 @@
           "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
           "name": "Child",
           "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"Child\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"
         },
         {
           "id": "plain",
           "name": "Plain",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"Plain\"}"
         },
@@ -1062,6 +1140,7 @@
           "id": "orphan",
           "name": "Orphan",
           "parent_id": "missing",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"Orphan\",\"parentId\":\"missing\"}"
         },
@@ -1069,6 +1148,7 @@
           "id": "loop-a",
           "name": "A",
           "parent_id": "loop-b",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"A\",\"parentId\":\"loop-b\"}"
         },
@@ -1076,6 +1156,7 @@
           "id": "loop-b",
           "name": "B",
           "parent_id": "loop-a",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"B\",\"parentId\":\"loop-a\"}"
         }
@@ -1090,6 +1171,7 @@
           "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
           "name": "Root",
           "color": "#112233",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"Root\",\"color\":\"#112233\"}"
         },
@@ -1097,12 +1179,14 @@
           "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
           "name": "Child",
           "parent_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"Child\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"
         },
         {
           "id": "plain",
           "name": "Plain",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"Plain\"}"
         },
@@ -1110,6 +1194,7 @@
           "id": "orphan",
           "name": "Orphan",
           "parent_id": "missing",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"Orphan\",\"parentId\":\"missing\"}"
         },
@@ -1117,6 +1202,7 @@
           "id": "loop-a",
           "name": "A",
           "parent_id": "loop-b",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"A\",\"parentId\":\"loop-b\"}"
         },
@@ -1124,6 +1210,7 @@
           "id": "loop-b",
           "name": "B",
           "parent_id": "loop-a",
+          "archived": false,
           "readable": true,
           "raw": "{\"name\":\"B\",\"parentId\":\"loop-a\"}"
         }

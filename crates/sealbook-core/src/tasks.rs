@@ -73,7 +73,7 @@ pub const TASK_KEYS: &[&str] = &[
     "updatedAt",
 ];
 
-pub const TASK_LIST_KEYS: &[&str] = &["@type", "version", "name", "parentId", "color"];
+pub const TASK_LIST_KEYS: &[&str] = &["@type", "version", "name", "parentId", "color", "archived"];
 
 /// The default task list's id, as a string, since that is how every host holds a
 /// task's `taskListId`.
@@ -343,6 +343,9 @@ pub struct CoreTaskListDraft {
     /// Only a top-level list carries one; see [`task_list_tone`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// Written only when true.
+    #[serde(default)]
+    pub archived: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<String>,
 }
@@ -357,6 +360,8 @@ pub struct CoreTaskList {
     pub parent_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    #[serde(default)]
+    pub archived: bool,
     pub readable: bool,
     pub raw: String,
 }
@@ -367,6 +372,7 @@ impl CoreTaskList {
             name: self.name.clone(),
             parent_id: self.parent_id.clone(),
             color: self.color.clone(),
+            archived: self.archived,
             raw: Some(self.raw.clone()),
         }
     }
@@ -512,6 +518,11 @@ pub fn task_list_parse(id: &str, raw: &str) -> CoreTaskList {
         name: read("name").unwrap_or_else(|| fallback_list_name(id)),
         parent_id: read("parentId"),
         color: read("color"),
+        archived: object
+            .as_ref()
+            .and_then(|object| object.get("archived"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         readable: object.as_ref().map(declared_readable).unwrap_or(true),
         raw: raw.to_string(),
     }
@@ -529,6 +540,9 @@ pub fn task_list_write(draft: &CoreTaskListDraft) -> Result<String, CoreError> {
     }
     if let Some(color) = present(&draft.color) {
         fields.insert("color".into(), json!(color));
+    }
+    if draft.archived {
+        fields.insert("archived".into(), json!(true));
     }
     Ok(write_payload(
         draft.raw.as_deref(),

@@ -244,6 +244,10 @@
         "@type": {
           "const": "BookmarkCollection"
         },
+        "archived": {
+          "description": "Written only when true.",
+          "type": "boolean"
+        },
         "color": {
           "description": "An accent key or a CSS colour.",
           "type": "string"
@@ -875,6 +879,10 @@
         "@type": {
           "const": "Notebook"
         },
+        "archived": {
+          "description": "Written only when true.",
+          "type": "boolean"
+        },
         "color": {
           "description": "An accent key or a CSS colour.",
           "type": "string"
@@ -1266,6 +1274,10 @@
       "properties": {
         "@type": {
           "const": "TaskList"
+        },
+        "archived": {
+          "description": "Written only when true.",
+          "type": "boolean"
         },
         "color": {
           "description": "An accent key or a CSS colour.",

@@ -92,6 +92,7 @@ fn a_notes_backup_meets_the_schema() {
         id: default_notebook_id(),
         name: "Journal".into(),
         color: None,
+        archived: false,
         readable: true,
         raw: String::new(),
     }];

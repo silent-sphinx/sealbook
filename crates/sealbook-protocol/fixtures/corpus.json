@@ -134,6 +134,7 @@
           "args": [
             "name",
             "color",
+            "archived",
             "previous"
           ],
           "expect": "payload"

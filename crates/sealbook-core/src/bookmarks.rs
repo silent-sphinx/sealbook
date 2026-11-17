@@ -65,6 +65,7 @@ pub const BOOKMARK_COLLECTION_KEYS: &[&str] = &[
     "parentId",
     "color",
     "hideFromAll",
+    "archived",
 ];
 
 /// Tones for a collection that has never been given a colour.
@@ -239,6 +240,9 @@ pub struct CoreBookmarkCollectionDraft {
     /// Written only when true.
     #[serde(default)]
     pub hide_from_all: bool,
+    /// Written only when true.
+    #[serde(default)]
+    pub archived: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<String>,
 }
@@ -255,6 +259,8 @@ pub struct CoreBookmarkCollection {
     pub color: Option<String>,
     #[serde(default)]
     pub hide_from_all: bool,
+    #[serde(default)]
+    pub archived: bool,
     pub readable: bool,
     pub raw: String,
 }
@@ -266,6 +272,7 @@ impl CoreBookmarkCollection {
             parent_id: self.parent_id.clone(),
             color: self.color.clone(),
             hide_from_all: self.hide_from_all,
+            archived: self.archived,
             raw: Some(self.raw.clone()),
         }
     }
@@ -388,6 +395,11 @@ pub fn bookmark_collection_parse(id: &str, raw: &str) -> CoreBookmarkCollection 
             .and_then(|object| object.get("hideFromAll"))
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        archived: object
+            .as_ref()
+            .and_then(|object| object.get("archived"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         readable: object.as_ref().map(declared_readable).unwrap_or(true),
         raw: raw.to_string(),
     }
@@ -415,6 +427,9 @@ pub fn bookmark_collection_write(draft: &CoreBookmarkCollectionDraft) -> Result<
     }
     if draft.hide_from_all {
         fields.insert("hideFromAll".into(), json!(true));
+    }
+    if draft.archived {
+        fields.insert("archived".into(), json!(true));
     }
     Ok(write_payload(
         draft.raw.as_deref(),

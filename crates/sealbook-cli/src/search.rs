@@ -4,7 +4,8 @@
 //! What this file decides is what is put into it, which is what the web's
 //! search palette puts in: what each tab lists by default. Archived contacts
 //! and books, finished tasks, bookmarks in a collection kept out of "All",
-//! events in an archived calendar and any feature switched off are left out.
+//! events in an archived calendar, notes, tasks and bookmarks in an archived
+//! notebook, list or collection, and any feature switched off are left out.
 
 use std::collections::{HashMap, HashSet};
 
@@ -12,9 +13,10 @@ use anyhow::{Context, Result};
 use clap::ValueEnum;
 use sealbook_client::{
     address_book_parse, bookmark_collection_parse, bookmark_parse, calendar_parse, contact_parse,
-    event_parse, notebook_parse, resolve_address_book_id, resolve_collection_id, task_list_parse,
-    task_parse, CoreAccountSettings, CoreBookName, CoreContactSource, CoreSearchContainer,
-    CoreSearchHit, CoreSearchKind, CoreSearchSource, SealbookClient, VaultIndex,
+    event_parse, note_parse, notebook_parse, resolve_address_book_id, resolve_collection_id,
+    task_list_parse, task_parse, CoreAccountSettings, CoreBookName, CoreContactSource,
+    CoreSearchContainer, CoreSearchHit, CoreSearchKind, CoreSearchSource, SealbookClient,
+    VaultIndex,
 };
 use uuid::Uuid;
 
@@ -163,15 +165,33 @@ pub fn inputs(stored: &Stored, settings: &CoreAccountSettings) -> Inputs {
     }
 
     if settings.is_enabled("notes") {
-        sources.extend(stored.notes.iter().map(|n| source(CoreSearchKind::Note, n)));
+        let parsed: Vec<_> = stored
+            .notebooks
+            .iter()
+            .map(|(id, raw)| notebook_parse(&id.to_string(), raw))
+            .collect();
+        let archived: HashSet<&str> = parsed
+            .iter()
+            .filter(|notebook| notebook.archived)
+            .map(|notebook| notebook.id.as_str())
+            .collect();
+        for entry in &stored.notes {
+            if !archived.contains(
+                note_parse(&entry.0.to_string(), &entry.1)
+                    .notebook_id
+                    .as_str(),
+            ) {
+                sources.push(source(CoreSearchKind::Note, entry));
+            }
+        }
         containers.extend(
-            stored
-                .notebooks
+            parsed
                 .iter()
-                .map(|(id, raw)| CoreSearchContainer {
+                .filter(|notebook| !notebook.archived)
+                .map(|notebook| CoreSearchContainer {
                     kind: CoreSearchKind::Note,
-                    id: id.to_string(),
-                    name: notebook_parse(&id.to_string(), raw).name,
+                    id: notebook.id.clone(),
+                    name: notebook.name.clone(),
                 }),
         );
     }
@@ -182,7 +202,16 @@ pub fn inputs(stored: &Stored, settings: &CoreAccountSettings) -> Inputs {
             .iter()
             .map(|(id, raw)| bookmark_collection_parse(&id.to_string(), raw))
             .collect();
-        let hidden = hidden_from_all(&parsed);
+        let mut hidden = flagged_with_descendants(
+            parsed
+                .iter()
+                .map(|c| (c.id.as_str(), c.parent_id.as_deref(), c.hide_from_all)),
+        );
+        hidden.extend(flagged_with_descendants(
+            parsed
+                .iter()
+                .map(|c| (c.id.as_str(), c.parent_id.as_deref(), c.archived)),
+        ));
         for entry in &stored.bookmarks {
             let bookmark = bookmark_parse(&entry.0.to_string(), &entry.1);
             let holder = resolve_collection_id(Some(bookmark.collection_id));
@@ -190,27 +219,43 @@ pub fn inputs(stored: &Stored, settings: &CoreAccountSettings) -> Inputs {
                 sources.push(source(CoreSearchKind::Bookmark, entry));
             }
         }
-        containers.extend(parsed.iter().map(|collection| CoreSearchContainer {
-            kind: CoreSearchKind::Bookmark,
-            id: collection.id.clone(),
-            name: collection.name.clone(),
-        }));
+        containers.extend(
+            parsed
+                .iter()
+                .filter(|c| !hidden.contains(&c.id))
+                .map(|collection| CoreSearchContainer {
+                    kind: CoreSearchKind::Bookmark,
+                    id: collection.id.clone(),
+                    name: collection.name.clone(),
+                }),
+        );
     }
 
     if settings.is_enabled("tasks") {
+        let parsed: Vec<_> = stored
+            .task_lists
+            .iter()
+            .map(|(id, raw)| task_list_parse(&id.to_string(), raw))
+            .collect();
+        let archived = flagged_with_descendants(
+            parsed
+                .iter()
+                .map(|l| (l.id.as_str(), l.parent_id.as_deref(), l.archived)),
+        );
         for entry in &stored.tasks {
-            if !task_parse(&entry.0.to_string(), &entry.1).done {
+            let task = task_parse(&entry.0.to_string(), &entry.1);
+            if !task.done && !archived.contains(&task.task_list_id) {
                 sources.push(source(CoreSearchKind::Task, entry));
             }
         }
         containers.extend(
-            stored
-                .task_lists
+            parsed
                 .iter()
-                .map(|(id, raw)| CoreSearchContainer {
+                .filter(|list| !archived.contains(&list.id))
+                .map(|list| CoreSearchContainer {
                     kind: CoreSearchKind::Task,
-                    id: id.to_string(),
-                    name: task_list_parse(&id.to_string(), raw).name,
+                    id: list.id.clone(),
+                    name: list.name.clone(),
                 }),
         );
     }
@@ -218,30 +263,36 @@ pub fn inputs(stored: &Stored, settings: &CoreAccountSettings) -> Inputs {
     (contacts, books, sources, containers)
 }
 
-/// Collections marked "hide from All", and every one nested under one. A cycle
-/// in stored parents ends the walk instead of looping.
-fn hidden_from_all(collections: &[sealbook_client::CoreBookmarkCollection]) -> HashSet<String> {
-    let by_id: HashMap<&str, &sealbook_client::CoreBookmarkCollection> =
-        collections.iter().map(|c| (c.id.as_str(), c)).collect();
-    let mut hidden = HashSet::new();
-    for collection in collections {
+/// The ids of items that are flagged, and of every one nested under a flagged
+/// one. Each item is `(id, parent, flagged)`. A cycle in stored parents ends the
+/// walk instead of looping.
+fn flagged_with_descendants<'a>(
+    items: impl Iterator<Item = (&'a str, Option<&'a str>, bool)>,
+) -> HashSet<String> {
+    let items: Vec<_> = items.collect();
+    let by_id: HashMap<&str, (Option<&str>, bool)> = items
+        .iter()
+        .map(|(id, parent, flagged)| (*id, (*parent, *flagged)))
+        .collect();
+    let mut out = HashSet::new();
+    for (id, _, _) in &items {
         let mut seen = HashSet::new();
-        let mut at = Some(collection);
+        let mut at = Some(*id);
         while let Some(current) = at {
-            if !seen.insert(current.id.as_str()) {
+            if !seen.insert(current) {
                 break;
             }
-            if current.hide_from_all {
-                hidden.insert(collection.id.clone());
+            let Some((parent, flagged)) = by_id.get(current) else {
+                break;
+            };
+            if *flagged {
+                out.insert((*id).to_string());
                 break;
             }
-            at = current
-                .parent_id
-                .as_deref()
-                .and_then(|parent| by_id.get(parent).copied());
+            at = *parent;
         }
     }
-    hidden
+    out
 }
 
 pub fn search(
@@ -313,12 +364,24 @@ mod tests {
 
     fn stored() -> Stored {
         Stored {
-            notes: vec![(
-                id(1),
-                json!({"@type":"Note","title":"Basil pesto","body":"garlic"}).to_string(),
-            )],
+            notes: vec![
+                (
+                    id(1),
+                    json!({"@type":"Note","title":"Basil pesto","body":"garlic"}).to_string(),
+                ),
+                (
+                    id(16),
+                    json!({"@type":"Note","title":"Basil shelved","notebookId":id(11).to_string()})
+                        .to_string(),
+                ),
+            ],
             tasks: vec![
                 (id(2), json!({"@type":"Task","title":"Buy basil"}).to_string()),
+                (
+                    id(15),
+                    json!({"@type":"Task","title":"Basil shelved","taskListId":id(13).to_string()})
+                        .to_string(),
+                ),
                 (
                     id(3),
                     json!({"@type":"Task","title":"Basil done","done":true}).to_string(),
@@ -336,12 +399,38 @@ mod tests {
             collections: vec![(
                 id(6),
                 json!({"@type":"BookmarkCollection","name":"Later","hideFromAll":true}).to_string(),
+            ),
+            (
+                id(10),
+                json!({"@type":"BookmarkCollection","name":"Put away","archived":true}).to_string(),
             )],
-            bookmarks: vec![(
-                id(7),
-                json!({"@type":"Bookmark","title":"Basil site","url":"https://b.example","collectionId":id(6).to_string()})
-                    .to_string(),
+            notebooks: vec![(
+                id(11),
+                json!({"@type":"Notebook","name":"Shelved","archived":true}).to_string(),
             )],
+            task_lists: vec![
+                (
+                    id(12),
+                    json!({"@type":"TaskList","name":"Shelved","archived":true}).to_string(),
+                ),
+                (
+                    id(13),
+                    json!({"@type":"TaskList","name":"Inside","parentId":id(12).to_string()})
+                        .to_string(),
+                ),
+            ],
+            bookmarks: vec![
+                (
+                    id(7),
+                    json!({"@type":"Bookmark","title":"Basil site","url":"https://b.example","collectionId":id(6).to_string()})
+                        .to_string(),
+                ),
+                (
+                    id(14),
+                    json!({"@type":"Bookmark","title":"Basil shelf","url":"https://c.example","collectionId":id(10).to_string()})
+                        .to_string(),
+                ),
+            ],
             ..Stored::default()
         }
     }
@@ -354,7 +443,7 @@ mod tests {
     }
 
     #[test]
-    fn finished_tasks_hidden_bookmarks_and_archived_calendars_are_left_out() {
+    fn finished_tasks_hidden_bookmarks_and_archived_content_are_left_out() {
         let hits = found(&default_account_settings(), &[]);
         assert_eq!(hits.len(), 2, "{hits:?}");
         assert!(hits.contains(&id(1).to_string()));

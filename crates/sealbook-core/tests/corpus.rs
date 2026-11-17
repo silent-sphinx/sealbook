@@ -78,7 +78,8 @@ fn call(op: &str, args: &[Value]) -> Value {
         "notebook.write" => out(notebook_write(
             &arg::<String>(args, 0),
             arg::<Option<String>>(args, 1).as_deref(),
-            arg::<Option<String>>(args, 2).as_deref(),
+            arg::<bool>(args, 2),
+            arg::<Option<String>>(args, 3).as_deref(),
         )),
         "notebook.parse" => out::<_, String>(Ok(notebook_parse(
             &arg::<String>(args, 0),

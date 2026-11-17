@@ -71,7 +71,7 @@ pub const NOTE_KEYS: &[&str] = &[
     "attachments",
 ];
 
-pub const NOTEBOOK_KEYS: &[&str] = &["@type", "version", "name", "color"];
+pub const NOTEBOOK_KEYS: &[&str] = &["@type", "version", "name", "color", "archived"];
 
 /// The owned set for a write that has an opinion about `pinned`.
 ///
@@ -202,6 +202,9 @@ pub struct CoreNotebook {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// Put away: out of the notebook list, its notes left as they are.
+    #[serde(default)]
+    pub archived: bool,
     pub readable: bool,
     pub raw: String,
 }
@@ -311,16 +314,23 @@ pub fn notebook_parse(id: &str, raw: &str) -> CoreNotebook {
         id: id.to_string(),
         name: stored.unwrap_or_else(|| fallback_notebook_name(id)),
         color: object.as_ref().and_then(|object| trimmed(object, "color")),
+        archived: object
+            .as_ref()
+            .and_then(|object| object.get("archived"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         readable: object.as_ref().map(declared_readable).unwrap_or(true),
         raw: raw.to_string(),
     }
 }
 
-/// `color` is owned: a caller renaming a notebook passes the stored one back,
-/// and `None` clears it.
+/// `color` and `archived` are owned: a caller renaming a notebook passes the
+/// stored ones back, and `None` / `false` clears them. `archived` is written
+/// only when true.
 pub fn notebook_write(
     name: &str,
     color: Option<&str>,
+    archived: bool,
     previous_raw: Option<&str>,
 ) -> Result<String, CoreError> {
     refuse_newer_major(previous_raw)?;
@@ -331,6 +341,9 @@ pub fn notebook_write(
     });
     if let Some(color) = color.map(str::trim).filter(|color| !color.is_empty()) {
         fields["color"] = json!(color);
+    }
+    if archived {
+        fields["archived"] = json!(true);
     }
     Ok(write_payload(previous_raw, fields, NOTEBOOK_KEYS))
 }
@@ -507,9 +520,10 @@ pub mod ffi {
     pub fn notebook_write(
         name: String,
         color: Option<String>,
+        archived: bool,
         previous_raw: Option<String>,
     ) -> Result<String, CoreError> {
-        super::notebook_write(&name, color.as_deref(), previous_raw.as_deref())
+        super::notebook_write(&name, color.as_deref(), archived, previous_raw.as_deref())
     }
 
     #[uniffi::export(name = "notebook_name_by_id")]
@@ -742,19 +756,20 @@ mod tests {
     #[test]
     fn a_notebook_rename_carries_what_it_does_not_own() {
         let stored = r#"{"@type":"Notebook","version":"1.0","name":"old","colour":"blue"}"#;
-        let renamed = as_object(&notebook_write("  new  ", None, Some(stored)).unwrap()).unwrap();
+        let renamed =
+            as_object(&notebook_write("  new  ", None, false, Some(stored)).unwrap()).unwrap();
         assert_eq!(renamed["name"], "new");
         assert_eq!(renamed["colour"], "blue");
     }
 
     #[test]
     fn a_notebook_colour_is_written_and_cleared() {
-        let coloured = notebook_write("Work", Some(" #123456 "), None).unwrap();
+        let coloured = notebook_write("Work", Some(" #123456 "), false, None).unwrap();
         assert_eq!(
             notebook_parse("n", &coloured).color.as_deref(),
             Some("#123456")
         );
-        let cleared = notebook_write("Work", None, Some(&coloured)).unwrap();
+        let cleared = notebook_write("Work", None, false, Some(&coloured)).unwrap();
         assert_eq!(notebook_parse("n", &cleared).color, None);
         assert!(!cleared.contains("color"));
     }

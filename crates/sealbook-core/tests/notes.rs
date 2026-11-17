@@ -73,6 +73,7 @@ struct NotebookWriteCase {
     name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     color: Option<String>,
+    archived: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     previous: Option<String>,
     payload: String,
@@ -284,31 +285,38 @@ fn parse_cases() -> Vec<(String, String, String)> {
     ]
 }
 
-fn notebook_write_cases() -> Vec<(String, String, Option<String>, Option<String>)> {
+/// A case name, the notebook name, colour, previous payload and archived flag.
+type NotebookWriteRow = (String, String, Option<String>, Option<String>, bool);
+
+fn notebook_write_cases() -> Vec<NotebookWriteRow> {
     vec![
         (
             "a notebook created from scratch".into(),
             "Work".into(),
             None,
             None,
+            false,
         ),
         (
             "a name with surrounding space".into(),
             "  Work  ".into(),
             None,
             None,
+            false,
         ),
         (
             "a rename that keeps what this build does not own".into(),
             "Renamed".into(),
             None,
             Some(r#"{"@type":"Notebook","version":"1.0","name":"Work","colour":"amber"}"#.into()),
+            false,
         ),
         (
             "a notebook with a colour".into(),
             "Work".into(),
             Some("  #7aa2f7  ".into()),
             None,
+            false,
         ),
         (
             "a rename that passes the stored colour back".into(),
@@ -317,6 +325,7 @@ fn notebook_write_cases() -> Vec<(String, String, Option<String>, Option<String>
             Some(
                 r##"{"@type":"Notebook","version":"1.0","name":"Work","color":"#7aa2f7"}"##.into(),
             ),
+            false,
         ),
         (
             "a write without a colour clears the stored one".into(),
@@ -325,6 +334,28 @@ fn notebook_write_cases() -> Vec<(String, String, Option<String>, Option<String>
             Some(
                 r##"{"@type":"Notebook","version":"1.0","name":"Work","color":"#7aa2f7"}"##.into(),
             ),
+            false,
+        ),
+        (
+            "an archived notebook".into(),
+            "Work".into(),
+            None,
+            None,
+            true,
+        ),
+        (
+            "a rename that passes the archived flag back".into(),
+            "Renamed".into(),
+            None,
+            Some(r#"{"@type":"Notebook","version":"1.0","name":"Work","archived":true}"#.into()),
+            true,
+        ),
+        (
+            "a write that is not archived clears the stored flag".into(),
+            "Work".into(),
+            None,
+            Some(r#"{"@type":"Notebook","version":"1.0","name":"Work","archived":true}"#.into()),
+            false,
         ),
     ]
 }
@@ -350,6 +381,16 @@ fn notebook_parse_cases() -> Vec<(String, String, String)> {
             "a notebook with a colour".into(),
             OTHER_NOTEBOOK.into(),
             r##"{"@type":"Notebook","version":"1.0","name":"Work","color":" #7aa2f7 "}"##.into(),
+        ),
+        (
+            "an archived notebook".into(),
+            OTHER_NOTEBOOK.into(),
+            r#"{"@type":"Notebook","version":"1.0","name":"Work","archived":true}"#.into(),
+        ),
+        (
+            "a non-boolean archived reads as live".into(),
+            OTHER_NOTEBOOK.into(),
+            r#"{"@type":"Notebook","version":"1.0","name":"Work","archived":"yes"}"#.into(),
         ),
     ]
 }
@@ -388,12 +429,12 @@ fn every_payload_reads_back_as_the_record_the_fixture_holds() {
 
 #[test]
 fn every_notebook_payload_is_the_one_spelling_the_fixture_holds() {
-    for (expected, (case, name, color, previous)) in
+    for (expected, (case, name, color, previous, archived)) in
         fixture().notebook_writes.iter().zip(notebook_write_cases())
     {
         assert_eq!(expected.case, case);
         assert_eq!(
-            notebook_write(&name, color.as_deref(), previous.as_deref()).expect("writes"),
+            notebook_write(&name, color.as_deref(), archived, previous.as_deref()).expect("writes"),
             expected.payload,
             "{case}"
         );
@@ -494,7 +535,7 @@ fn a_payload_from_a_newer_schema_major_is_read_but_never_written_over() {
 
     let notebook = r#"{"@type":"Notebook","version":"3.1","name":"future"}"#;
     assert!(!notebook_parse(&default_notebook_id(), notebook).readable);
-    let refused = notebook_write("edited", None, Some(notebook)).expect_err("refuses");
+    let refused = notebook_write("edited", None, false, Some(notebook)).expect_err("refuses");
     assert_eq!(error_name(&refused), refusals[1].error);
 }
 
@@ -552,14 +593,17 @@ fn regenerate() {
             .collect(),
         notebook_writes: notebook_write_cases()
             .into_iter()
-            .map(|(case, name, color, previous)| NotebookWriteCase {
-                case,
-                payload: notebook_write(&name, color.as_deref(), previous.as_deref())
-                    .expect("writes"),
-                name,
-                color,
-                previous,
-            })
+            .map(
+                |(case, name, color, previous, archived)| NotebookWriteCase {
+                    case,
+                    payload: notebook_write(&name, color.as_deref(), archived, previous.as_deref())
+                        .expect("writes"),
+                    name,
+                    color,
+                    archived,
+                    previous,
+                },
+            )
             .collect(),
         notebook_parses: notebook_parse_cases()
             .into_iter()

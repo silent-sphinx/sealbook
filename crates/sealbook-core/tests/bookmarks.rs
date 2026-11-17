@@ -295,6 +295,21 @@ fn collection_write_cases() -> Vec<(String, CoreBookmarkCollectionDraft)> {
                 ..parsed.draft()
             },
         ),
+        (
+            "an archived collection".into(),
+            CoreBookmarkCollectionDraft {
+                name: "Work".into(),
+                archived: true,
+                ..Default::default()
+            },
+        ),
+        (
+            "restoring a collection drops the archived flag".into(),
+            CoreBookmarkCollectionDraft {
+                archived: false,
+                ..bookmark_collection_parse(CHILD, r#"{"name":"Work","archived":true}"#).draft()
+            },
+        ),
     ]
 }
 
@@ -329,6 +344,16 @@ fn collection_parse_cases() -> Vec<(String, String, String)> {
             "an empty parent and colour read as none".into(),
             CHILD.into(),
             r#"{"name":"Work","parentId":"  ","color":""}"#.into(),
+        ),
+        (
+            "an archived collection".into(),
+            CHILD.into(),
+            r#"{"name":"Work","archived":true}"#.into(),
+        ),
+        (
+            "a non-boolean archived reads as live".into(),
+            CHILD.into(),
+            r#"{"name":"Work","archived":"yes"}"#.into(),
         ),
     ]
 }

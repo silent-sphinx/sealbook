@@ -433,6 +433,21 @@ fn list_write_cases() -> Vec<(String, CoreTaskListDraft)> {
                 ..parsed.draft()
             },
         ),
+        (
+            "an archived list".into(),
+            CoreTaskListDraft {
+                name: "Home".into(),
+                archived: true,
+                ..Default::default()
+            },
+        ),
+        (
+            "restoring a list drops the archived flag".into(),
+            CoreTaskListDraft {
+                archived: false,
+                ..task_list_parse(CHILD, r#"{"name":"Home","archived":true}"#).draft()
+            },
+        ),
     ]
 }
 
@@ -442,6 +457,16 @@ fn list_parse_cases() -> Vec<(String, String, String)> {
             "a named, nested, coloured list".into(),
             CHILD.into(),
             format!(r##"{{"name":"  Home  ","parentId":"{ROOT}","color":"#112233"}}"##),
+        ),
+        (
+            "an archived list".into(),
+            CHILD.into(),
+            r#"{"name":"Home","archived":true}"#.into(),
+        ),
+        (
+            "a non-boolean archived reads as live".into(),
+            CHILD.into(),
+            r#"{"name":"Home","archived":"yes"}"#.into(),
         ),
         (
             "the default list, unnamed".into(),

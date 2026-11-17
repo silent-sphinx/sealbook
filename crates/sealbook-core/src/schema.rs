@@ -240,6 +240,7 @@ fn notebook() -> Value {
         json!({
             "name": string(),
             "color": text("An accent key or a CSS colour."),
+            "archived": { "type": "boolean", "description": "Written only when true." },
         }),
         &["name"],
     )
@@ -264,6 +265,7 @@ fn nested_container(type_name: &str) -> Value {
             "name": string(),
             "parentId": id("The container this one sits under."),
             "color": text("An accent key or a CSS colour."),
+            "archived": { "type": "boolean", "description": "Written only when true." },
         }),
         &["name"],
     )
@@ -277,6 +279,7 @@ fn bookmark_collection() -> Value {
             "parentId": id("The container this one sits under."),
             "color": text("An accent key or a CSS colour."),
             "hideFromAll": { "type": "boolean", "description": "Written only when true." },
+            "archived": { "type": "boolean", "description": "Written only when true." },
         }),
         &["name"],
     )

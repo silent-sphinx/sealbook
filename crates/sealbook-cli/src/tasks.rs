@@ -869,6 +869,7 @@ pub async fn run_lists(client: &mut SealbookClient, command: TasklistCommand) ->
                 name: name.clone(),
                 parent_id,
                 color,
+                archived: false,
                 raw: None,
             })?;
             client
