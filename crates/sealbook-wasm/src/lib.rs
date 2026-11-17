@@ -2341,6 +2341,55 @@ pub fn core_bookmark_parse(id: &str, raw: &str) -> Result<Ts<CoreBookmark>, JsEr
     Ok(sealbook_core::bookmark_parse(id, raw).into_ts()?)
 }
 
+/// Where an import's bookmarks go, by the folder options: all in one
+/// collection, or in collections mirroring folders, reusing those that exist.
+#[wasm_bindgen]
+pub fn core_bookmark_import_plan(
+    import: Ts<sealbook_core::CoreBookmarkImport>,
+    existing: Ts<CoreBookmarkCollectionList>,
+    target: Option<String>,
+    options: Ts<sealbook_core::CoreBookmarkImportOptions>,
+) -> Result<Ts<sealbook_core::CoreBookmarkImportPlan>, JsError> {
+    Ok(sealbook_core::bookmark_import_plan(
+        &import.to_rust()?,
+        &existing.to_rust()?.0,
+        target.as_deref(),
+        &options.to_rust()?,
+    )
+    .into_ts()?)
+}
+
+/// The options with one folder's action set; a rule that only restates the
+/// depth's default is dropped.
+#[wasm_bindgen]
+pub fn core_bookmark_import_with_folder(
+    options: Ts<sealbook_core::CoreBookmarkImportOptions>,
+    path: Vec<String>,
+    action: Ts<sealbook_core::CoreFolderAction>,
+) -> Result<Ts<sealbook_core::CoreBookmarkImportOptions>, JsError> {
+    Ok(
+        sealbook_core::bookmark_import_with_folder(&options.to_rust()?, &path, action.to_rust()?)
+            .into_ts()?,
+    )
+}
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct CoreImportFolderList(pub Vec<sealbook_core::CoreImportFolder>);
+
+/// The folders of an import file, with sizes and what the options do with each.
+#[wasm_bindgen]
+pub fn core_bookmark_import_folders(
+    import: Ts<sealbook_core::CoreBookmarkImport>,
+    options: Ts<sealbook_core::CoreBookmarkImportOptions>,
+) -> Result<Ts<CoreImportFolderList>, JsError> {
+    Ok(CoreImportFolderList(sealbook_core::bookmark_import_folders(
+        &import.to_rust()?,
+        &options.to_rust()?,
+    ))
+    .into_ts()?)
+}
+
 /// Serialises a bookmark onto `draft.raw`. `now` is the caller's clock. Throws on
 /// a payload from a newer schema major.
 #[wasm_bindgen]

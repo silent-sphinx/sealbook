@@ -13,9 +13,9 @@ use anyhow::{bail, Context, Result};
 use clap::{Subcommand, ValueEnum};
 use sealbook_client::{
     bookmark_collection_parse, bookmark_export, bookmark_export_html, bookmark_import,
-    bookmark_parse, bookmark_write, resolve_collection_id, write_batches, CoreBookmark,
-    CoreBookmarkCollection, CoreBookmarkCollectionDraft, CoreBookmarkDraft, CoreBookmarkImport,
-    SealbookClient, DEFAULT_BOOKMARK_COLLECTION_ID,
+    bookmark_import_plan, bookmark_parse, bookmark_write, resolve_collection_id, write_batches,
+    CoreBookmark, CoreBookmarkCollection, CoreBookmarkCollectionDraft, CoreBookmarkImportOptions,
+    CoreFolderAction, CoreFolderRule, SealbookClient, DEFAULT_BOOKMARK_COLLECTION_ID,
 };
 use uuid::Uuid;
 
@@ -48,6 +48,10 @@ pub enum BookmarkFileCommand {
     /// default collection. With --keep-folders the file's folders become
     /// collections instead, nested under --collection if one is given and
     /// reusing a collection of the same name that is already there.
+    /// --folder-depth N keeps only the first N levels of folders, and what is
+    /// deeper goes in the folder above. --skip-folder and --merge-folder take a
+    /// folder path such as "Bookmarks Toolbar/News" and leave that folder out,
+    /// or file its bookmarks in the folder above.
     Import {
         #[arg(long)]
         file: PathBuf,
@@ -56,9 +60,36 @@ pub enum BookmarkFileCommand {
         /// Put them in a new collection with this name.
         #[arg(long, conflicts_with = "collection")]
         new_collection: Option<String>,
-        #[arg(long)]
+        #[arg(long, conflicts_with = "folder_depth")]
         keep_folders: bool,
+        #[arg(long)]
+        folder_depth: Option<u32>,
+        #[arg(long = "skip-folder")]
+        skip_folders: Vec<String>,
+        #[arg(long = "merge-folder")]
+        merge_folders: Vec<String>,
     },
+}
+
+/// The folder options the flags describe. A folder path is its names joined by `/`.
+fn folder_options(
+    keep_folders: bool,
+    depth: Option<u32>,
+    skip: &[String],
+    merge: &[String],
+) -> CoreBookmarkImportOptions {
+    let rule = |path: &String, action: CoreFolderAction| CoreFolderRule {
+        path: path.split('/').map(|name| name.trim().to_owned()).collect(),
+        action,
+    };
+    CoreBookmarkImportOptions {
+        depth: depth.unwrap_or(if keep_folders { u32::MAX } else { 0 }),
+        rules: skip
+            .iter()
+            .map(|path| rule(path, CoreFolderAction::Skip))
+            .chain(merge.iter().map(|path| rule(path, CoreFolderAction::Merge)))
+            .collect(),
+    }
 }
 
 /// An import file core refused, as the sentence it carries. Core's own wording
@@ -68,71 +99,6 @@ pub fn file_refusal(error: sealbook_client::CoreError) -> anyhow::Error {
         sealbook_client::CoreError::Malformed { detail } => anyhow::anyhow!(detail),
         other => other.into(),
     }
-}
-
-/// What an import will write.
-#[derive(Debug, Default)]
-pub struct ImportPlan {
-    pub collections: Vec<(Uuid, CoreBookmarkCollectionDraft)>,
-    pub bookmarks: Vec<(Uuid, CoreBookmarkDraft)>,
-}
-
-/// Where each imported bookmark goes, and the collections that must be made.
-///
-/// `target` is the collection everything goes in, or the one the folders nest
-/// under. A folder is matched to an existing collection of the same name under
-/// the same parent, ignoring case, so importing twice does not double the tree.
-pub fn plan_import(
-    import: &CoreBookmarkImport,
-    existing: &[CoreBookmarkCollection],
-    target: Option<Uuid>,
-    keep_folders: bool,
-) -> ImportPlan {
-    let mut plan = ImportPlan::default();
-    let home = target.unwrap_or(DEFAULT_BOOKMARK_COLLECTION_ID);
-    // (parent, lowercase name) -> id, for what exists and what this plan adds.
-    let mut folders: Vec<(Option<String>, String, String)> = existing
-        .iter()
-        .map(|c| (c.parent_id.clone(), c.name.to_lowercase(), c.id.clone()))
-        .collect();
-    let mut seen_ids: HashSet<String> = existing.iter().map(|c| c.id.clone()).collect();
-    for item in &import.bookmarks {
-        let mut collection = home.to_string();
-        if keep_folders && !item.folder.is_empty() {
-            let mut parent = target.map(|t| t.to_string());
-            for name in &item.folder {
-                let key = name.trim().to_lowercase();
-                let found = folders
-                    .iter()
-                    .find(|(p, n, id)| *p == parent && *n == key && seen_ids.contains(id))
-                    .map(|(_, _, id)| id.clone());
-                let id = found.unwrap_or_else(|| {
-                    let id = Uuid::new_v4();
-                    plan.collections.push((
-                        id,
-                        CoreBookmarkCollectionDraft {
-                            name: name.trim().to_owned(),
-                            parent_id: parent.clone(),
-                            ..Default::default()
-                        },
-                    ));
-                    folders.push((parent.clone(), key, id.to_string()));
-                    seen_ids.insert(id.to_string());
-                    id.to_string()
-                });
-                parent = Some(id);
-            }
-            collection = parent.unwrap_or(collection);
-        }
-        plan.bookmarks.push((
-            Uuid::new_v4(),
-            CoreBookmarkDraft {
-                collection_id: collection,
-                ..item.draft.clone()
-            },
-        ));
-    }
-    plan
 }
 
 /// The collection and every one nested under it.
@@ -215,6 +181,9 @@ pub async fn run(
             collection,
             new_collection,
             keep_folders,
+            folder_depth,
+            skip_folders,
+            merge_folders,
         } => {
             let text = std::fs::read_to_string(&file)
                 .with_context(|| format!("read {}", file.display()))?;
@@ -251,8 +220,18 @@ pub async fn run(
                 }
                 (None, None) => None,
             };
-            let mut plan = plan_import(&import, &collections, target, keep_folders);
-            made.append(&mut plan.collections);
+            let plan = bookmark_import_plan(
+                &import,
+                &collections,
+                target.map(|id| id.to_string()).as_deref(),
+                &folder_options(keep_folders, folder_depth, &skip_folders, &merge_folders),
+            );
+            for new in plan.collections {
+                made.push((
+                    Uuid::parse_str(&new.id).context("collection id")?,
+                    new.draft,
+                ));
+            }
             for (id, draft) in &made {
                 client
                     .put_bookmark_collection_draft(*id, draft)
@@ -260,8 +239,8 @@ pub async fn run(
                     .context("write collection")?;
             }
             let mut encoded: Vec<(Uuid, String)> = Vec::with_capacity(plan.bookmarks.len());
-            for (id, draft) in &plan.bookmarks {
-                encoded.push((*id, bookmark_write(draft, now)?));
+            for draft in &plan.bookmarks {
+                encoded.push((Uuid::new_v4(), bookmark_write(draft, now)?));
             }
             let lengths: Vec<u64> = encoded.iter().map(|(_, b)| b.len() as u64).collect();
             let mut rest = encoded.as_slice();
@@ -285,8 +264,8 @@ pub async fn run(
                 } else {
                     format!(" into {} new collection(s)", made.len())
                 },
-                if import.skipped > 0 {
-                    format!(", skipped {}", import.skipped)
+                if import.skipped + plan.excluded > 0 {
+                    format!(", skipped {}", import.skipped + plan.excluded)
                 } else {
                     String::new()
                 }
@@ -299,19 +278,7 @@ pub async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sealbook_client::CoreImportedBookmark;
     use serde_json::json;
-
-    fn item(url: &str, folder: &[&str]) -> CoreImportedBookmark {
-        CoreImportedBookmark {
-            draft: CoreBookmarkDraft {
-                url: url.into(),
-                title: url.into(),
-                ..Default::default()
-            },
-            folder: folder.iter().map(|s| s.to_string()).collect(),
-        }
-    }
 
     fn existing(id: Uuid, name: &str, parent: Option<Uuid>) -> CoreBookmarkCollection {
         let mut payload = json!({"@type":"BookmarkCollection","name":name});
@@ -321,95 +288,15 @@ mod tests {
         bookmark_collection_parse(&id.to_string(), &payload.to_string())
     }
 
-    fn import(items: Vec<CoreImportedBookmark>) -> CoreBookmarkImport {
-        CoreBookmarkImport {
-            bookmarks: items,
-            skipped: 0,
-        }
-    }
-
     #[test]
-    fn without_keep_folders_everything_goes_in_one_collection() {
-        let target = Uuid::from_u128(40);
-        let plan = plan_import(
-            &import(vec![item("a", &["F"]), item("b", &[])]),
-            &[],
-            Some(target),
-            false,
-        );
-        assert!(plan.collections.is_empty());
-        assert!(plan
-            .bookmarks
-            .iter()
-            .all(|(_, d)| d.collection_id == target.to_string()));
-        let plan = plan_import(&import(vec![item("a", &["F"])]), &[], None, false);
-        assert_eq!(
-            plan.bookmarks[0].1.collection_id,
-            DEFAULT_BOOKMARK_COLLECTION_ID.to_string()
-        );
-    }
-
-    #[test]
-    fn keep_folders_makes_each_folder_once_and_nests_them() {
-        let plan = plan_import(
-            &import(vec![
-                item("a", &["Reading", "Deep"]),
-                item("b", &["Reading"]),
-                item("c", &["reading", "deep"]),
-                item("d", &[]),
-            ]),
-            &[],
-            None,
-            true,
-        );
-        assert_eq!(plan.collections.len(), 2);
-        let (reading_id, reading) = &plan.collections[0];
-        let (deep_id, deep) = &plan.collections[1];
-        assert_eq!(
-            (reading.name.as_str(), reading.parent_id.clone()),
-            ("Reading", None)
-        );
-        assert_eq!(deep.parent_id, Some(reading_id.to_string()));
-        let homes: Vec<&str> = plan
-            .bookmarks
-            .iter()
-            .map(|(_, d)| d.collection_id.as_str())
-            .collect();
-        assert_eq!(homes[0], deep_id.to_string());
-        assert_eq!(homes[1], reading_id.to_string());
-        assert_eq!(homes[2], deep_id.to_string());
-        assert_eq!(homes[3], DEFAULT_BOOKMARK_COLLECTION_ID.to_string());
-    }
-
-    #[test]
-    fn a_folder_that_already_exists_is_reused_not_doubled() {
-        let reading = Uuid::from_u128(50);
-        let deep = Uuid::from_u128(51);
-        let stored = [
-            existing(reading, "Reading", None),
-            existing(deep, "Deep", Some(reading)),
-        ];
-        let plan = plan_import(
-            &import(vec![item("a", &["READING", "Deep", "New"])]),
-            &stored,
-            None,
-            true,
-        );
-        assert_eq!(plan.collections.len(), 1);
-        assert_eq!(plan.collections[0].1.name, "New");
-        assert_eq!(plan.collections[0].1.parent_id, Some(deep.to_string()));
-    }
-
-    #[test]
-    fn folders_nest_under_the_chosen_collection() {
-        let target = Uuid::from_u128(60);
-        let plan = plan_import(
-            &import(vec![item("a", &["F"])]),
-            &[existing(target, "T", None)],
-            Some(target),
-            true,
-        );
-        assert_eq!(plan.collections[0].1.parent_id, Some(target.to_string()));
+    fn the_folder_flags_become_core_options() {
+        assert_eq!(folder_options(false, None, &[], &[]).depth, 0);
+        assert_eq!(folder_options(true, None, &[], &[]).depth, u32::MAX);
+        assert_eq!(folder_options(false, Some(1), &[], &[]).depth, 1);
+        let options = folder_options(false, Some(1), &["Bar / Old".into()], &["Bar".into()]);
+        assert_eq!(options.rules[0].path, ["Bar", "Old"]);
+        assert_eq!(options.rules[0].action, CoreFolderAction::Skip);
+        assert_eq!(options.rules[1].action, CoreFolderAction::Merge);
     }
 
     #[test]

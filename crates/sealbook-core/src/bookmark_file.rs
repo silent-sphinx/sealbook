@@ -20,7 +20,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use crate::bookmarks::{
-    bookmark_collection_name_by_id, CoreBookmark, CoreBookmarkCollection, CoreBookmarkDraft,
+    bookmark_collection_name_by_id, default_bookmark_collection_id, CoreBookmark,
+    CoreBookmarkCollection, CoreBookmarkCollectionDraft, CoreBookmarkDraft,
 };
 use crate::CoreError;
 
@@ -52,6 +53,260 @@ pub struct CoreBookmarkImport {
     pub bookmarks: Vec<CoreImportedBookmark>,
     /// Entries with neither a URL nor a title, or that are not web pages.
     pub skipped: u32,
+}
+
+/// A collection an import has to make, with the id it will be written under.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct CoreNewBookmarkCollection {
+    pub id: String,
+    pub draft: CoreBookmarkCollectionDraft,
+}
+
+/// What happens to one folder of an imported file.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CoreFolderAction {
+    /// The folder becomes a collection, named `name` or else as in the file.
+    /// One that already exists under the same parent is reused.
+    Collection { name: Option<String> },
+    /// The folder's bookmarks go where its parent's go.
+    Merge,
+    /// The folder's bookmarks, and its subfolders', are not imported.
+    Skip,
+    /// The folder's bookmarks go in a collection that already exists.
+    Existing { collection_id: String },
+}
+
+/// What to do with the folder at `path`, outermost first, matched ignoring case.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct CoreFolderRule {
+    pub path: Vec<String>,
+    pub action: CoreFolderAction,
+}
+
+/// How an import treats the folders of a file.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct CoreBookmarkImportOptions {
+    /// Folders this many levels down or fewer become collections unless a rule
+    /// says otherwise, and deeper ones merge into the folder above. 0 imports
+    /// everything flat; [`u32::MAX`] keeps every folder.
+    pub depth: u32,
+    pub rules: Vec<CoreFolderRule>,
+}
+
+/// One folder of an imported file, as the options would treat it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct CoreImportFolder {
+    /// Outermost first. A parent is listed before the folders in it.
+    pub path: Vec<String>,
+    /// Bookmarks filed directly in the folder.
+    pub direct: u32,
+    /// Bookmarks in the folder and every folder below it.
+    pub total: u32,
+    /// The rule for this folder, or the default for its depth.
+    pub action: CoreFolderAction,
+    /// This folder or one above it is skipped, so nothing in it is imported.
+    pub excluded: bool,
+}
+
+/// Where an import's bookmarks go.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct CoreBookmarkImportPlan {
+    /// Parents before the collections nested in them.
+    pub collections: Vec<CoreNewBookmarkCollection>,
+    /// In file order, each with its `collection_id` set.
+    pub bookmarks: Vec<CoreBookmarkDraft>,
+    /// Bookmarks left out because their folder is skipped.
+    pub excluded: u32,
+}
+
+fn folder_key(path: &[String]) -> Vec<String> {
+    path.iter().map(|name| name.trim().to_lowercase()).collect()
+}
+
+/// What a folder `level` deep gets when no rule names it.
+fn default_action(depth: u32, level: usize) -> CoreFolderAction {
+    if level as u64 <= u64::from(depth) {
+        CoreFolderAction::Collection { name: None }
+    } else {
+        CoreFolderAction::Merge
+    }
+}
+
+fn folder_action(options: &CoreBookmarkImportOptions, path: &[String]) -> CoreFolderAction {
+    let key = folder_key(path);
+    options
+        .rules
+        .iter()
+        .rev()
+        .find(|rule| folder_key(&rule.path) == key)
+        .map(|rule| rule.action.clone())
+        .unwrap_or_else(|| default_action(options.depth, path.len()))
+}
+
+/// The options with the folder at `path` set to `action`. A rule that only
+/// restates what the depth already does is dropped, so the options stay
+/// recognisable as a preset until a folder really differs.
+pub fn bookmark_import_with_folder(
+    options: &CoreBookmarkImportOptions,
+    path: &[String],
+    action: CoreFolderAction,
+) -> CoreBookmarkImportOptions {
+    let key = folder_key(path);
+    let mut rules: Vec<CoreFolderRule> = options
+        .rules
+        .iter()
+        .filter(|rule| folder_key(&rule.path) != key)
+        .cloned()
+        .collect();
+    let unnamed = |action: &CoreFolderAction| match action {
+        CoreFolderAction::Collection { name } => CoreFolderAction::Collection {
+            name: name
+                .as_deref()
+                .map(str::trim)
+                .filter(|n| !n.is_empty())
+                .map(str::to_owned),
+        },
+        other => other.clone(),
+    };
+    if unnamed(&action) != default_action(options.depth, path.len()) {
+        rules.push(CoreFolderRule {
+            path: path.to_vec(),
+            action,
+        });
+    }
+    CoreBookmarkImportOptions {
+        depth: options.depth,
+        rules,
+    }
+}
+
+/// The folders of a file with their sizes and what `options` does with each,
+/// for an editor to show before anything is written.
+pub fn bookmark_import_folders(
+    import: &CoreBookmarkImport,
+    options: &CoreBookmarkImportOptions,
+) -> Vec<CoreImportFolder> {
+    let mut folders: Vec<CoreImportFolder> = Vec::new();
+    let mut at: std::collections::HashMap<Vec<String>, usize> = std::collections::HashMap::new();
+    for item in &import.bookmarks {
+        for depth in 1..=item.folder.len() {
+            let path = &item.folder[..depth];
+            let index = *at.entry(folder_key(path)).or_insert_with(|| {
+                let excluded = (1..=depth).any(|n| {
+                    matches!(
+                        folder_action(options, &item.folder[..n]),
+                        CoreFolderAction::Skip
+                    )
+                });
+                folders.push(CoreImportFolder {
+                    path: path.to_vec(),
+                    direct: 0,
+                    total: 0,
+                    action: folder_action(options, path),
+                    excluded,
+                });
+                folders.len() - 1
+            });
+            folders[index].total += 1;
+            if depth == item.folder.len() {
+                folders[index].direct += 1;
+            }
+        }
+    }
+    folders
+}
+
+/// Decides where an import's bookmarks go.
+///
+/// `target` is the collection everything goes in (the default collection when
+/// `None`), or the one the file's folders nest under. A folder made a collection
+/// is matched to an existing collection of the same name under the same parent,
+/// ignoring case, so importing twice does not double the tree. A target that is
+/// the default collection, which is not a real parent, nests folders at the top
+/// level.
+pub fn bookmark_import_plan(
+    import: &CoreBookmarkImport,
+    existing: &[CoreBookmarkCollection],
+    target: Option<&str>,
+    options: &CoreBookmarkImportOptions,
+) -> CoreBookmarkImportPlan {
+    let default_id = default_bookmark_collection_id();
+    let home = target.unwrap_or(&default_id).to_owned();
+    let root = target.filter(|id| *id != default_id).map(str::to_owned);
+    // (parent, lowercase name, id), for what exists and what this plan adds.
+    let mut folders: Vec<(Option<String>, String, String)> = existing
+        .iter()
+        .map(|c| (c.parent_id.clone(), c.name.to_lowercase(), c.id.clone()))
+        .collect();
+    let mut made = Vec::new();
+    let mut bookmarks = Vec::with_capacity(import.bookmarks.len());
+    let mut excluded = 0;
+    'bookmarks: for item in &import.bookmarks {
+        let mut parent = root.clone();
+        let mut collection = home.clone();
+        for depth in 1..=item.folder.len() {
+            match folder_action(options, &item.folder[..depth]) {
+                CoreFolderAction::Skip => {
+                    excluded += 1;
+                    continue 'bookmarks;
+                }
+                CoreFolderAction::Merge => {}
+                CoreFolderAction::Existing { collection_id } => {
+                    parent = Some(collection_id.clone());
+                    collection = collection_id;
+                }
+                CoreFolderAction::Collection { name } => {
+                    let name = name
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|name| !name.is_empty())
+                        .unwrap_or_else(|| item.folder[depth - 1].trim());
+                    let key = name.to_lowercase();
+                    let found = folders
+                        .iter()
+                        .find(|(p, n, _)| *p == parent && *n == key)
+                        .map(|(_, _, id)| id.clone());
+                    let id = found.unwrap_or_else(|| {
+                        let id = uuid::Uuid::new_v4().to_string();
+                        made.push(CoreNewBookmarkCollection {
+                            id: id.clone(),
+                            draft: CoreBookmarkCollectionDraft {
+                                name: name.to_owned(),
+                                parent_id: parent.clone(),
+                                ..Default::default()
+                            },
+                        });
+                        folders.push((parent.clone(), key, id.clone()));
+                        id
+                    });
+                    parent = Some(id.clone());
+                    collection = id;
+                }
+            }
+        }
+        bookmarks.push(CoreBookmarkDraft {
+            collection_id: collection,
+            ..item.draft.clone()
+        });
+    }
+    CoreBookmarkImportPlan {
+        collections: made,
+        bookmarks,
+        excluded,
+    }
 }
 
 /// The Sealbook JSON export.
@@ -653,7 +908,37 @@ fn write_entry(out: &mut String, bookmark: &CoreBookmark, depth: usize) {
 /// Everything above, in the shapes the bindings can carry.
 #[cfg(feature = "uniffi")]
 pub mod ffi {
-    use super::{CoreBookmark, CoreBookmarkCollection, CoreBookmarkImport, CoreError};
+    use super::{
+        CoreBookmark, CoreBookmarkCollection, CoreBookmarkImport, CoreBookmarkImportOptions,
+        CoreBookmarkImportPlan, CoreError, CoreFolderAction, CoreImportFolder,
+    };
+
+    #[uniffi::export(name = "bookmark_import_plan")]
+    pub fn bookmark_import_plan(
+        import: CoreBookmarkImport,
+        existing: Vec<CoreBookmarkCollection>,
+        target: Option<String>,
+        options: CoreBookmarkImportOptions,
+    ) -> CoreBookmarkImportPlan {
+        super::bookmark_import_plan(&import, &existing, target.as_deref(), &options)
+    }
+
+    #[uniffi::export(name = "bookmark_import_with_folder")]
+    pub fn bookmark_import_with_folder(
+        options: CoreBookmarkImportOptions,
+        path: Vec<String>,
+        action: CoreFolderAction,
+    ) -> CoreBookmarkImportOptions {
+        super::bookmark_import_with_folder(&options, &path, action)
+    }
+
+    #[uniffi::export(name = "bookmark_import_folders")]
+    pub fn bookmark_import_folders(
+        import: CoreBookmarkImport,
+        options: CoreBookmarkImportOptions,
+    ) -> Vec<CoreImportFolder> {
+        super::bookmark_import_folders(&import, &options)
+    }
 
     #[uniffi::export(name = "bookmark_export")]
     pub fn bookmark_export(
@@ -682,6 +967,275 @@ pub mod ffi {
 mod tests {
     use super::*;
     use crate::bookmarks::{bookmark_collection_parse, bookmark_parse};
+
+    fn imported(url: &str, folder: &[&str]) -> CoreImportedBookmark {
+        CoreImportedBookmark {
+            draft: CoreBookmarkDraft {
+                url: url.into(),
+                title: url.into(),
+                ..Default::default()
+            },
+            folder: folder.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    fn file(items: Vec<CoreImportedBookmark>) -> CoreBookmarkImport {
+        CoreBookmarkImport {
+            bookmarks: items,
+            skipped: 0,
+        }
+    }
+
+    fn stored(id: &str, name: &str, parent: Option<&str>) -> CoreBookmarkCollection {
+        let mut payload = json!({"@type":"BookmarkCollection","name":name});
+        if let Some(parent) = parent {
+            payload["parentId"] = json!(parent);
+        }
+        bookmark_collection_parse(id, &payload.to_string())
+    }
+
+    fn depth(depth: u32) -> CoreBookmarkImportOptions {
+        CoreBookmarkImportOptions {
+            depth,
+            rules: Vec::new(),
+        }
+    }
+
+    fn rule(path: &[&str], action: CoreFolderAction) -> CoreFolderRule {
+        CoreFolderRule {
+            path: path.iter().map(|s| s.to_string()).collect(),
+            action,
+        }
+    }
+
+    fn homes(plan: &CoreBookmarkImportPlan) -> Vec<&str> {
+        plan.bookmarks
+            .iter()
+            .map(|b| b.collection_id.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn at_depth_zero_everything_goes_in_one_collection() {
+        let plan = bookmark_import_plan(
+            &file(vec![imported("a", &["F"]), imported("b", &[])]),
+            &[],
+            Some("target"),
+            &depth(0),
+        );
+        assert!(plan.collections.is_empty());
+        assert_eq!(homes(&plan), ["target", "target"]);
+        let plan = bookmark_import_plan(&file(vec![imported("a", &["F"])]), &[], None, &depth(0));
+        assert_eq!(
+            plan.bookmarks[0].collection_id,
+            default_bookmark_collection_id()
+        );
+    }
+
+    #[test]
+    fn every_folder_is_kept_once_and_nested_at_full_depth() {
+        let plan = bookmark_import_plan(
+            &file(vec![
+                imported("a", &["Reading", "Deep"]),
+                imported("b", &["Reading"]),
+                imported("c", &["reading", "deep"]),
+                imported("d", &[]),
+            ]),
+            &[],
+            None,
+            &depth(u32::MAX),
+        );
+        assert_eq!(plan.collections.len(), 2);
+        let (reading, deep) = (&plan.collections[0], &plan.collections[1]);
+        assert_eq!(reading.draft.name, "Reading");
+        assert_eq!(reading.draft.parent_id, None);
+        assert_eq!(deep.draft.parent_id.as_deref(), Some(reading.id.as_str()));
+        assert_eq!(
+            homes(&plan),
+            [
+                deep.id.as_str(),
+                reading.id.as_str(),
+                deep.id.as_str(),
+                &default_bookmark_collection_id()
+            ]
+        );
+    }
+
+    #[test]
+    fn depth_one_makes_the_top_folders_and_merges_what_is_below() {
+        let plan = bookmark_import_plan(
+            &file(vec![
+                imported("a", &["Reading", "Deep"]),
+                imported("b", &["Work"]),
+                imported("c", &[]),
+            ]),
+            &[],
+            None,
+            &depth(1),
+        );
+        let names: Vec<&str> = plan
+            .collections
+            .iter()
+            .map(|c| c.draft.name.as_str())
+            .collect();
+        assert_eq!(names, ["Reading", "Work"]);
+        assert_eq!(
+            homes(&plan),
+            [
+                plan.collections[0].id.as_str(),
+                plan.collections[1].id.as_str(),
+                &default_bookmark_collection_id()
+            ]
+        );
+    }
+
+    #[test]
+    fn a_rule_overrides_the_depth_for_its_folder() {
+        let import = file(vec![
+            imported("a", &["Bar", "News"]),
+            imported("b", &["Bar", "Old"]),
+            imported("c", &["Other"]),
+        ]);
+        let options = CoreBookmarkImportOptions {
+            depth: 1,
+            rules: vec![
+                rule(&["bar"], CoreFolderAction::Merge),
+                rule(
+                    &["Bar", "News"],
+                    CoreFolderAction::Collection {
+                        name: Some(" Headlines ".into()),
+                    },
+                ),
+                rule(&["Bar", "Old"], CoreFolderAction::Skip),
+                rule(
+                    &["Other"],
+                    CoreFolderAction::Existing {
+                        collection_id: "mine".into(),
+                    },
+                ),
+            ],
+        };
+        let plan = bookmark_import_plan(&import, &[], Some("target"), &options);
+        assert_eq!(plan.excluded, 1);
+        assert_eq!(plan.collections.len(), 1);
+        assert_eq!(plan.collections[0].draft.name, "Headlines");
+        assert_eq!(
+            plan.collections[0].draft.parent_id.as_deref(),
+            Some("target")
+        );
+        assert_eq!(homes(&plan), [plan.collections[0].id.as_str(), "mine"]);
+    }
+
+    #[test]
+    fn setting_a_folder_keeps_a_rule_only_when_it_differs_from_the_depth() {
+        let path = ["Reading".to_string(), "Deep".to_string()];
+        let base = depth(1);
+        let own =
+            bookmark_import_with_folder(&base, &path, CoreFolderAction::Collection { name: None });
+        assert_eq!(own.rules.len(), 1);
+        let renamed = bookmark_import_with_folder(
+            &own,
+            &["reading".to_string(), "DEEP".to_string()],
+            CoreFolderAction::Collection {
+                name: Some("Later".into()),
+            },
+        );
+        assert_eq!(renamed.rules.len(), 1);
+        let blank = bookmark_import_with_folder(
+            &renamed,
+            &path,
+            CoreFolderAction::Collection {
+                name: Some("  ".into()),
+            },
+        );
+        assert_eq!(
+            blank.rules.len(),
+            1,
+            "a collection at depth 2 is not the default of depth 1"
+        );
+        let merged = bookmark_import_with_folder(&blank, &path, CoreFolderAction::Merge);
+        assert_eq!(merged, base);
+    }
+
+    #[test]
+    fn a_skipped_folder_skips_everything_below_it() {
+        let options = CoreBookmarkImportOptions {
+            depth: u32::MAX,
+            rules: vec![rule(&["A"], CoreFolderAction::Skip)],
+        };
+        let import = file(vec![imported("a", &["A", "B"]), imported("b", &["C"])]);
+        let plan = bookmark_import_plan(&import, &[], None, &options);
+        assert_eq!(
+            (plan.excluded, plan.bookmarks.len(), plan.collections.len()),
+            (1, 1, 1)
+        );
+        let folders = bookmark_import_folders(&import, &options);
+        let excluded: Vec<(Vec<String>, bool)> = folders
+            .iter()
+            .map(|f| (f.path.clone(), f.excluded))
+            .collect();
+        assert_eq!(
+            excluded,
+            [
+                (vec!["A".to_string()], true),
+                (vec!["A".to_string(), "B".to_string()], true),
+                (vec!["C".to_string()], false),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_folder_list_counts_and_shows_the_effective_action() {
+        let import = file(vec![
+            imported("a", &["Reading", "Deep"]),
+            imported("b", &["Reading"]),
+            imported("c", &[]),
+        ]);
+        let folders = bookmark_import_folders(&import, &depth(1));
+        assert_eq!(folders.len(), 2);
+        assert_eq!(folders[0].path, ["Reading"]);
+        assert_eq!((folders[0].direct, folders[0].total), (1, 2));
+        assert_eq!(
+            folders[0].action,
+            CoreFolderAction::Collection { name: None }
+        );
+        assert_eq!(folders[1].path, ["Reading", "Deep"]);
+        assert_eq!((folders[1].direct, folders[1].total), (1, 1));
+        assert_eq!(folders[1].action, CoreFolderAction::Merge);
+    }
+
+    #[test]
+    fn a_folder_that_already_exists_is_reused_not_doubled() {
+        let existing = [stored("r", "Reading", None), stored("d", "Deep", Some("r"))];
+        let plan = bookmark_import_plan(
+            &file(vec![imported("a", &["READING", "Deep", "New"])]),
+            &existing,
+            None,
+            &depth(u32::MAX),
+        );
+        assert_eq!(plan.collections.len(), 1);
+        assert_eq!(plan.collections[0].draft.name, "New");
+        assert_eq!(plan.collections[0].draft.parent_id.as_deref(), Some("d"));
+    }
+
+    #[test]
+    fn folders_nest_under_the_chosen_collection_but_not_under_the_default_one() {
+        let under = bookmark_import_plan(
+            &file(vec![imported("a", &["F"])]),
+            &[],
+            Some("t"),
+            &depth(1),
+        );
+        assert_eq!(under.collections[0].draft.parent_id.as_deref(), Some("t"));
+        let default_id = default_bookmark_collection_id();
+        let top = bookmark_import_plan(
+            &file(vec![imported("a", &["F"])]),
+            &[],
+            Some(&default_id),
+            &depth(1),
+        );
+        assert_eq!(top.collections[0].draft.parent_id, None);
+    }
 
     #[test]
     fn oversized_imports_are_refused() {

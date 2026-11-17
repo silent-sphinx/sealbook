@@ -52,11 +52,14 @@ pub use sealbook_core::{
     PairJoinPoll, MAX_ALERT_MINUTES_BEFORE, MIN_ALERT_MINUTES_BEFORE, PAIR_POLL_INTERVAL_MS,
 };
 pub use sealbook_core::{
-    attachment_limits, bookmark_export, bookmark_export_html, bookmark_import, can_disable_feature,
-    default_account_settings, resolve_address_book_id, resolve_collection_id, settings_parse,
-    settings_with_feature, settings_write, sweep_orphans, AttachmentRow, CoreAccountSettings,
-    CoreAccountSettingsDraft, CoreBookmarkImport, CoreImportedBookmark, CoreSearchContainer,
-    CoreSearchHit, CoreSearchKind, CoreSearchSource, VaultIndex, FEATURES,
+    attachment_limits, bookmark_export, bookmark_export_html, bookmark_import,
+    bookmark_import_folders, bookmark_import_plan, bookmark_import_with_folder,
+    can_disable_feature, default_account_settings, resolve_address_book_id, resolve_collection_id,
+    settings_parse, settings_with_feature, settings_write, sweep_orphans, AttachmentRow,
+    CoreAccountSettings, CoreAccountSettingsDraft, CoreBookmarkImport, CoreBookmarkImportOptions,
+    CoreBookmarkImportPlan, CoreFolderAction, CoreFolderRule, CoreImportFolder,
+    CoreImportedBookmark, CoreNewBookmarkCollection, CoreSearchContainer, CoreSearchHit,
+    CoreSearchKind, CoreSearchSource, VaultIndex, FEATURES,
 };
 pub use sealbook_core::{
     default_task_list_id, normalize_due_date, order_tasks, resolve_task_list_id, task_agenda,

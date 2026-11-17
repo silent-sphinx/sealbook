@@ -100,8 +100,11 @@ pub use auth::{
 };
 pub use batch::write_batches;
 pub use bookmark_file::{
-    bookmark_export, bookmark_export_html, bookmark_import, CoreBookmarkImport,
-    CoreImportedBookmark, BOOKMARK_EXPORT_TYPE, BOOKMARK_NOT_JSON, BOOKMARK_UNRECOGNISED,
+    bookmark_export, bookmark_export_html, bookmark_import, bookmark_import_folders,
+    bookmark_import_plan, bookmark_import_with_folder, CoreBookmarkImport,
+    CoreBookmarkImportOptions, CoreBookmarkImportPlan, CoreFolderAction, CoreFolderRule,
+    CoreImportFolder, CoreImportedBookmark, CoreNewBookmarkCollection, BOOKMARK_EXPORT_TYPE,
+    BOOKMARK_NOT_JSON, BOOKMARK_UNRECOGNISED,
 };
 pub use bookmarks::{
     bookmark_collection_name_by_id, bookmark_collection_parse, bookmark_collection_tone,
