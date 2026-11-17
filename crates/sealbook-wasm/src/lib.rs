@@ -3242,6 +3242,22 @@ pub fn core_order_by_recency(
     ))
 }
 
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct CoreBookmarkOrderItemList(pub Vec<sealbook_core::CoreBookmarkOrderItem>);
+
+/// Bookmark ids in the order `sort` names, ties kept in the default order.
+#[wasm_bindgen]
+pub fn core_order_bookmarks(
+    items: Ts<CoreBookmarkOrderItemList>,
+    sort: Ts<sealbook_core::CoreBookmarkSort>,
+) -> Result<Vec<String>, JsError> {
+    Ok(sealbook_core::order_bookmarks(
+        &items.to_rust()?.0,
+        sort.to_rust()?,
+    ))
+}
+
 /// The warning for an account whose roster predates key commitments.
 #[wasm_bindgen]
 pub fn core_legacy_roster_message() -> String {

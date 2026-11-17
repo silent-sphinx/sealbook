@@ -245,7 +245,10 @@ pub use offline::{
     outbox_read, outbox_settle, outbox_write, FailedWrite, LocalObject, LocalVault, Outbox,
     PendingWrite, LOCAL_VAULT_VERSION, OUTBOX_VERSION,
 };
-pub use order::{name_key, order_by_name, order_by_recency, order_containers, CoreOrderItem};
+pub use order::{
+    name_key, order_bookmarks, order_by_name, order_by_recency, order_containers,
+    CoreBookmarkOrderItem, CoreBookmarkSort, CoreOrderItem,
+};
 pub use sealbook_protocol::{PAYLOAD_SCHEMA_VERSION, PROTOCOL_VERSION};
 pub use vault_search::{
     CoreSearchContainer, CoreSearchHit, CoreSearchKind, CoreSearchSource, VaultIndex,
