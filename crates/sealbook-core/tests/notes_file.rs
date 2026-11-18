@@ -17,6 +17,7 @@ fn notebooks() -> Vec<CoreNotebook> {
         name: "Journal".into(),
         color: None,
         archived: false,
+        hide_from_all: false,
         readable: true,
         raw: String::new(),
     }]

@@ -870,6 +870,7 @@ pub async fn run_lists(client: &mut SealbookClient, command: TasklistCommand) ->
                 parent_id,
                 color,
                 archived: false,
+                hide_from_all: false,
                 raw: None,
             })?;
             client

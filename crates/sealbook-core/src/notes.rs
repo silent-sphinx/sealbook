@@ -71,7 +71,14 @@ pub const NOTE_KEYS: &[&str] = &[
     "attachments",
 ];
 
-pub const NOTEBOOK_KEYS: &[&str] = &["@type", "version", "name", "color", "archived"];
+pub const NOTEBOOK_KEYS: &[&str] = &[
+    "@type",
+    "version",
+    "name",
+    "color",
+    "archived",
+    "hideFromAll",
+];
 
 /// The owned set for a write that has an opinion about `pinned`.
 ///
@@ -205,6 +212,9 @@ pub struct CoreNotebook {
     /// Put away: out of the notebook list, its notes left as they are.
     #[serde(default)]
     pub archived: bool,
+    /// Left out of the notes overview, still listed and searchable.
+    #[serde(default)]
+    pub hide_from_all: bool,
     pub readable: bool,
     pub raw: String,
 }
@@ -319,18 +329,24 @@ pub fn notebook_parse(id: &str, raw: &str) -> CoreNotebook {
             .and_then(|object| object.get("archived"))
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        hide_from_all: object
+            .as_ref()
+            .and_then(|object| object.get("hideFromAll"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         readable: object.as_ref().map(declared_readable).unwrap_or(true),
         raw: raw.to_string(),
     }
 }
 
-/// `color` and `archived` are owned: a caller renaming a notebook passes the
-/// stored ones back, and `None` / `false` clears them. `archived` is written
-/// only when true.
+/// `color`, `archived` and `hide_from_all` are owned: a caller renaming a
+/// notebook passes the stored ones back, and `None` / `false` clears them. The
+/// flags are written only when true.
 pub fn notebook_write(
     name: &str,
     color: Option<&str>,
     archived: bool,
+    hide_from_all: bool,
     previous_raw: Option<&str>,
 ) -> Result<String, CoreError> {
     refuse_newer_major(previous_raw)?;
@@ -344,6 +360,9 @@ pub fn notebook_write(
     }
     if archived {
         fields["archived"] = json!(true);
+    }
+    if hide_from_all {
+        fields["hideFromAll"] = json!(true);
     }
     Ok(write_payload(previous_raw, fields, NOTEBOOK_KEYS))
 }
@@ -521,9 +540,16 @@ pub mod ffi {
         name: String,
         color: Option<String>,
         archived: bool,
+        hide_from_all: bool,
         previous_raw: Option<String>,
     ) -> Result<String, CoreError> {
-        super::notebook_write(&name, color.as_deref(), archived, previous_raw.as_deref())
+        super::notebook_write(
+            &name,
+            color.as_deref(),
+            archived,
+            hide_from_all,
+            previous_raw.as_deref(),
+        )
     }
 
     #[uniffi::export(name = "notebook_name_by_id")]
@@ -757,19 +783,20 @@ mod tests {
     fn a_notebook_rename_carries_what_it_does_not_own() {
         let stored = r#"{"@type":"Notebook","version":"1.0","name":"old","colour":"blue"}"#;
         let renamed =
-            as_object(&notebook_write("  new  ", None, false, Some(stored)).unwrap()).unwrap();
+            as_object(&notebook_write("  new  ", None, false, false, Some(stored)).unwrap())
+                .unwrap();
         assert_eq!(renamed["name"], "new");
         assert_eq!(renamed["colour"], "blue");
     }
 
     #[test]
     fn a_notebook_colour_is_written_and_cleared() {
-        let coloured = notebook_write("Work", Some(" #123456 "), false, None).unwrap();
+        let coloured = notebook_write("Work", Some(" #123456 "), false, false, None).unwrap();
         assert_eq!(
             notebook_parse("n", &coloured).color.as_deref(),
             Some("#123456")
         );
-        let cleared = notebook_write("Work", None, false, Some(&coloured)).unwrap();
+        let cleared = notebook_write("Work", None, false, false, Some(&coloured)).unwrap();
         assert_eq!(notebook_parse("n", &cleared).color, None);
         assert!(!cleared.contains("color"));
     }

@@ -59,7 +59,15 @@ pub fn default_calendar_id() -> String {
 }
 
 /// Every key a calendar writer owns.
-pub const CALENDAR_KEYS: &[&str] = &["@type", "version", "name", "color", "favorite", "archived"];
+pub const CALENDAR_KEYS: &[&str] = &[
+    "@type",
+    "version",
+    "name",
+    "color",
+    "favorite",
+    "archived",
+    "hideFromAll",
+];
 
 /// Every key an event writer owns.
 pub const CALENDAR_EVENT_KEYS: &[&str] = &[
@@ -214,6 +222,8 @@ pub struct CoreCalendarDraft {
     /// vault untouched. Written only when set, so a calendar that has never been
     /// archived is byte-identical to one from a build predating the field.
     pub archived: bool,
+    /// Left out of the combined calendar, still listed. Written only when set.
+    pub hide_from_all: bool,
     /// The payload this draft came from, when it came from one. The write merges
     /// onto it. `None` for a calendar written from scratch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -230,6 +240,7 @@ pub struct CoreCalendar {
     pub color: String,
     pub favorite: bool,
     pub archived: bool,
+    pub hide_from_all: bool,
     /// Whether this build reads the schema major the payload declares. False
     /// means the fields above were still read, because a lenient parse beats a
     /// blank row, but [`calendar_write`] will refuse to write over it.
@@ -342,6 +353,7 @@ pub fn calendar_parse(id: &str, raw: &str) -> CoreCalendar {
         color: field("color").unwrap_or_else(|| DEFAULT_CALENDAR_COLOR.to_string()),
         favorite: flag("favorite"),
         archived: flag("archived"),
+        hide_from_all: flag("hideFromAll"),
         readable: object.as_ref().map(declared_readable).unwrap_or(true),
         raw: raw.to_string(),
     }
@@ -359,6 +371,9 @@ pub fn calendar_write(draft: &CoreCalendarDraft) -> Result<String, CoreError> {
     fields.insert("favorite".into(), json!(draft.favorite));
     if draft.archived {
         fields.insert("archived".into(), json!(true));
+    }
+    if draft.hide_from_all {
+        fields.insert("hideFromAll".into(), json!(true));
     }
     Ok(write_payload(
         draft.raw.as_deref(),
@@ -866,6 +881,7 @@ mod tests {
         let stored = calendar_write(&CoreCalendarDraft {
             favorite: true,
             archived: true,
+            hide_from_all: true,
             color: "#9ece6a".into(),
             ..draft()
         })
@@ -881,6 +897,7 @@ mod tests {
                 color: calendar.color,
                 favorite: calendar.favorite,
                 archived: calendar.archived,
+                hide_from_all: calendar.hide_from_all,
                 raw: Some(stored),
             })
             .unwrap(),
@@ -889,6 +906,7 @@ mod tests {
         assert_eq!(renamed["color"], "#9ece6a");
         assert_eq!(renamed["favorite"], true);
         assert_eq!(renamed["archived"], true);
+        assert_eq!(renamed["hideFromAll"], true);
         assert_eq!(renamed["shared"], json!({ "with": "someone" }));
     }
 

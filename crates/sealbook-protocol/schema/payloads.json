@@ -113,6 +113,10 @@
           "description": "An accent key or a CSS colour.",
           "type": "string"
         },
+        "hideFromAll": {
+          "description": "Written only when true.",
+          "type": "boolean"
+        },
         "name": {
           "type": "string"
         },
@@ -290,6 +294,10 @@
           "type": "string"
         },
         "favorite": {
+          "type": "boolean"
+        },
+        "hideFromAll": {
+          "description": "Written only when true.",
           "type": "boolean"
         },
         "name": {
@@ -887,6 +895,10 @@
           "description": "An accent key or a CSS colour.",
           "type": "string"
         },
+        "hideFromAll": {
+          "description": "Written only when true.",
+          "type": "boolean"
+        },
         "name": {
           "type": "string"
         },
@@ -1282,6 +1294,10 @@
         "color": {
           "description": "An accent key or a CSS colour.",
           "type": "string"
+        },
+        "hideFromAll": {
+          "description": "Written only when true.",
+          "type": "boolean"
         },
         "name": {
           "type": "string"

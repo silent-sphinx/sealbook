@@ -135,6 +135,7 @@
             "name",
             "color",
             "archived",
+            "hide_from_all",
             "previous"
           ],
           "expect": "payload"

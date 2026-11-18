@@ -79,7 +79,8 @@ fn call(op: &str, args: &[Value]) -> Value {
             &arg::<String>(args, 0),
             arg::<Option<String>>(args, 1).as_deref(),
             arg::<bool>(args, 2),
-            arg::<Option<String>>(args, 3).as_deref(),
+            arg::<bool>(args, 3),
+            arg::<Option<String>>(args, 4).as_deref(),
         )),
         "notebook.parse" => out::<_, String>(Ok(notebook_parse(
             &arg::<String>(args, 0),

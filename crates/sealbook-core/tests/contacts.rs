@@ -661,6 +661,7 @@ fn book_write_cases() -> Vec<(String, CoreAddressBookDraft)> {
             CoreAddressBookDraft {
                 name: "  Family  ".into(),
                 archived: false,
+                hide_from_all: false,
                 color: None,
                 raw: None,
             },
@@ -670,6 +671,7 @@ fn book_write_cases() -> Vec<(String, CoreAddressBookDraft)> {
             CoreAddressBookDraft {
                 name: "Relatives".into(),
                 archived: false,
+                hide_from_all: false,
                 color: None,
                 raw: Some(stored.clone()),
             },
@@ -679,8 +681,19 @@ fn book_write_cases() -> Vec<(String, CoreAddressBookDraft)> {
             CoreAddressBookDraft {
                 name: "Relatives".into(),
                 archived: true,
+                hide_from_all: false,
                 color: None,
                 raw: Some(stored.clone()),
+            },
+        ),
+        (
+            "a book hidden from the all list".into(),
+            CoreAddressBookDraft {
+                name: "Relatives".into(),
+                archived: false,
+                hide_from_all: true,
+                color: None,
+                raw: None,
             },
         ),
         (
@@ -688,6 +701,7 @@ fn book_write_cases() -> Vec<(String, CoreAddressBookDraft)> {
             CoreAddressBookDraft {
                 name: "Relatives".into(),
                 archived: false,
+                hide_from_all: false,
                 color: Some("  #9ece6a  ".into()),
                 raw: Some(stored),
             },
@@ -714,6 +728,11 @@ fn book_parse_cases() -> Vec<(String, String, String)> {
             "an archived book",
             BOOK.into(),
             r#"{"@type":"AddressBook","name":"Family","archived":true}"#,
+        ),
+        case(
+            "a book hidden from the all list",
+            BOOK.into(),
+            r#"{"@type":"AddressBook","name":"Family","hideFromAll":true}"#,
         ),
         case("a payload that is not JSON at all", BOOK.into(), "garbage"),
         case(
@@ -842,6 +861,7 @@ fn a_payload_from_a_newer_schema_major_is_read_but_never_written_over() {
     let refused = address_book_write(&CoreAddressBookDraft {
         name: "edited".into(),
         archived: false,
+        hide_from_all: false,
         color: None,
         raw: Some(future.into()),
     })

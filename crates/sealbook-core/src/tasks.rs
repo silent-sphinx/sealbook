@@ -73,7 +73,15 @@ pub const TASK_KEYS: &[&str] = &[
     "updatedAt",
 ];
 
-pub const TASK_LIST_KEYS: &[&str] = &["@type", "version", "name", "parentId", "color", "archived"];
+pub const TASK_LIST_KEYS: &[&str] = &[
+    "@type",
+    "version",
+    "name",
+    "parentId",
+    "color",
+    "archived",
+    "hideFromAll",
+];
 
 /// The default task list's id, as a string, since that is how every host holds a
 /// task's `taskListId`.
@@ -346,6 +354,9 @@ pub struct CoreTaskListDraft {
     /// Written only when true.
     #[serde(default)]
     pub archived: bool,
+    /// Written only when true.
+    #[serde(default)]
+    pub hide_from_all: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<String>,
 }
@@ -362,6 +373,8 @@ pub struct CoreTaskList {
     pub color: Option<String>,
     #[serde(default)]
     pub archived: bool,
+    #[serde(default)]
+    pub hide_from_all: bool,
     pub readable: bool,
     pub raw: String,
 }
@@ -373,6 +386,7 @@ impl CoreTaskList {
             parent_id: self.parent_id.clone(),
             color: self.color.clone(),
             archived: self.archived,
+            hide_from_all: self.hide_from_all,
             raw: Some(self.raw.clone()),
         }
     }
@@ -523,6 +537,11 @@ pub fn task_list_parse(id: &str, raw: &str) -> CoreTaskList {
             .and_then(|object| object.get("archived"))
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        hide_from_all: object
+            .as_ref()
+            .and_then(|object| object.get("hideFromAll"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         readable: object.as_ref().map(declared_readable).unwrap_or(true),
         raw: raw.to_string(),
     }
@@ -543,6 +562,9 @@ pub fn task_list_write(draft: &CoreTaskListDraft) -> Result<String, CoreError> {
     }
     if draft.archived {
         fields.insert("archived".into(), json!(true));
+    }
+    if draft.hide_from_all {
+        fields.insert("hideFromAll".into(), json!(true));
     }
     Ok(write_payload(
         draft.raw.as_deref(),

@@ -1315,6 +1315,7 @@ async fn main() -> Result<()> {
                             &CoreAddressBookDraft {
                                 name: name.unwrap_or(parsed.name),
                                 archived: parsed.archived,
+                                hide_from_all: parsed.hide_from_all,
                                 color: color.or(parsed.color),
                                 raw: Some(stored),
                             },
@@ -2716,6 +2717,7 @@ fn calendar_rename_draft(
         color: color.unwrap_or(calendar.color),
         favorite: calendar.favorite,
         archived: calendar.archived,
+        hide_from_all: calendar.hide_from_all,
         raw: Some(calendar.raw),
     }
 }
@@ -2955,6 +2957,7 @@ fn write_contacts(
                     id: id.to_string(),
                     name: name.clone(),
                     archived: false,
+                    hide_from_all: false,
                     color: None,
                     readable: true,
                     raw: String::new(),

@@ -333,8 +333,13 @@ impl SealbookClient {
         color: Option<&str>,
         previous: Option<&str>,
     ) -> Result<u64, ClientError> {
-        let archived = previous.is_some_and(|raw| sealbook_core::notebook_parse("", raw).archived);
-        let plaintext = sealbook_core::notebook_write(name, color, archived, previous)?;
+        let stored = previous.map(|raw| sealbook_core::notebook_parse("", raw));
+        let archived = stored.as_ref().is_some_and(|notebook| notebook.archived);
+        let hide_from_all = stored
+            .as_ref()
+            .is_some_and(|notebook| notebook.hide_from_all);
+        let plaintext =
+            sealbook_core::notebook_write(name, color, archived, hide_from_all, previous)?;
         self.put_sealed(object_id, plaintext.as_bytes(), NOTEBOOK_CONTENT_TYPE)
             .await
     }

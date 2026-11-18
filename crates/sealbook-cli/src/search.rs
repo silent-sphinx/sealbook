@@ -3,11 +3,12 @@
 //! Ranking, folding, snippets and the per-kind cap are core's `VaultIndex`.
 //! What this file decides is what is put into it, which is what the web's
 //! search palette puts in: what each tab lists by default. Archived contacts
-//! and books, finished tasks, bookmarks in a collection kept out of "All",
-//! events in an archived calendar, notes, tasks and bookmarks in an archived
-//! notebook, list or collection, and any feature switched off are left out.
+//! and books, finished tasks, events in an archived calendar, notes, tasks and
+//! bookmarks in an archived notebook, list or collection, and any feature
+//! switched off are left out. Hiding a container from the overviews does not
+//! leave its contents out: hidden content stays searchable.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use anyhow::{Context, Result};
 use clap::ValueEnum;
@@ -202,27 +203,22 @@ pub fn inputs(stored: &Stored, settings: &CoreAccountSettings) -> Inputs {
             .iter()
             .map(|(id, raw)| bookmark_collection_parse(&id.to_string(), raw))
             .collect();
-        let mut hidden = flagged_with_descendants(
+        let archived = flagged(
             parsed
                 .iter()
-                .map(|c| (c.id.as_str(), c.parent_id.as_deref(), c.hide_from_all)),
+                .map(|c| (&c.id, c.parent_id.as_ref(), c.archived)),
         );
-        hidden.extend(flagged_with_descendants(
-            parsed
-                .iter()
-                .map(|c| (c.id.as_str(), c.parent_id.as_deref(), c.archived)),
-        ));
         for entry in &stored.bookmarks {
             let bookmark = bookmark_parse(&entry.0.to_string(), &entry.1);
             let holder = resolve_collection_id(Some(bookmark.collection_id));
-            if !hidden.contains(holder.as_str()) {
+            if !archived.contains(holder.as_str()) {
                 sources.push(source(CoreSearchKind::Bookmark, entry));
             }
         }
         containers.extend(
             parsed
                 .iter()
-                .filter(|c| !hidden.contains(&c.id))
+                .filter(|c| !archived.contains(&c.id))
                 .map(|collection| CoreSearchContainer {
                     kind: CoreSearchKind::Bookmark,
                     id: collection.id.clone(),
@@ -237,10 +233,10 @@ pub fn inputs(stored: &Stored, settings: &CoreAccountSettings) -> Inputs {
             .iter()
             .map(|(id, raw)| task_list_parse(&id.to_string(), raw))
             .collect();
-        let archived = flagged_with_descendants(
+        let archived = flagged(
             parsed
                 .iter()
-                .map(|l| (l.id.as_str(), l.parent_id.as_deref(), l.archived)),
+                .map(|l| (&l.id, l.parent_id.as_ref(), l.archived)),
         );
         for entry in &stored.tasks {
             let task = task_parse(&entry.0.to_string(), &entry.1);
@@ -263,36 +259,14 @@ pub fn inputs(stored: &Stored, settings: &CoreAccountSettings) -> Inputs {
     (contacts, books, sources, containers)
 }
 
-/// The ids of items that are flagged, and of every one nested under a flagged
-/// one. Each item is `(id, parent, flagged)`. A cycle in stored parents ends the
-/// walk instead of looping.
-fn flagged_with_descendants<'a>(
-    items: impl Iterator<Item = (&'a str, Option<&'a str>, bool)>,
+/// The flagged items, and everything nested under one, from `(id, parent, flag)`.
+fn flagged<'a>(
+    items: impl Iterator<Item = (&'a String, Option<&'a String>, bool)>,
 ) -> HashSet<String> {
-    let items: Vec<_> = items.collect();
-    let by_id: HashMap<&str, (Option<&str>, bool)> = items
-        .iter()
-        .map(|(id, parent, flagged)| (*id, (*parent, *flagged)))
+    let owned: Vec<_> = items
+        .map(|(id, parent, flag)| (id.clone(), parent.cloned(), flag))
         .collect();
-    let mut out = HashSet::new();
-    for (id, _, _) in &items {
-        let mut seen = HashSet::new();
-        let mut at = Some(*id);
-        while let Some(current) = at {
-            if !seen.insert(current) {
-                break;
-            }
-            let Some((parent, flagged)) = by_id.get(current) else {
-                break;
-            };
-            if *flagged {
-                out.insert((*id).to_string());
-                break;
-            }
-            at = *parent;
-        }
-    }
-    out
+    sealbook_client::flagged_with_descendants(&owned)
 }
 
 pub fn search(
@@ -443,11 +417,15 @@ mod tests {
     }
 
     #[test]
-    fn finished_tasks_hidden_bookmarks_and_archived_content_are_left_out() {
+    fn finished_tasks_and_archived_content_are_left_out_but_hidden_content_is_not() {
         let hits = found(&default_account_settings(), &[]);
-        assert_eq!(hits.len(), 2, "{hits:?}");
+        assert_eq!(hits.len(), 3, "{hits:?}");
         assert!(hits.contains(&id(1).to_string()));
         assert!(hits.contains(&id(2).to_string()));
+        assert!(
+            hits.contains(&id(7).to_string()),
+            "a hidden collection's bookmark"
+        );
     }
 
     #[test]
@@ -455,7 +433,11 @@ mod tests {
         let off = sealbook_client::settings_parse(
             r#"{"@type":"AccountSettings","version":"1.0","features":{"tasks":false}}"#,
         );
-        assert_eq!(found(&off, &[]), vec![id(1).to_string()]);
+        let hits = found(&off, &[]);
+        assert_eq!(hits.len(), 2, "{hits:?}");
+        assert!(hits.contains(&id(1).to_string()));
+        assert!(hits.contains(&id(7).to_string()));
+        assert!(!hits.contains(&id(2).to_string()), "tasks are off");
     }
 
     #[test]

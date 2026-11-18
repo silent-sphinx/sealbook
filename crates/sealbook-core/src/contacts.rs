@@ -118,7 +118,14 @@ pub const CONTACT_KEYS: &[&str] = &[
 ];
 
 /// Every key an address book writer owns.
-pub const ADDRESS_BOOK_KEYS: &[&str] = &["@type", "version", "name", "archived", "color"];
+pub const ADDRESS_BOOK_KEYS: &[&str] = &[
+    "@type",
+    "version",
+    "name",
+    "archived",
+    "color",
+    "hideFromAll",
+];
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -374,6 +381,9 @@ pub struct CoreAddressBookDraft {
     /// from a build predating the field.
     #[serde(default)]
     pub archived: bool,
+    /// Left out of the "All" contacts list, still listed. Written only when set.
+    #[serde(default)]
+    pub hide_from_all: bool,
     /// Owned: a rename passes the stored colour back, and `None` clears it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
@@ -388,6 +398,8 @@ pub struct CoreAddressBook {
     pub id: String,
     pub name: String,
     pub archived: bool,
+    #[serde(default)]
+    pub hide_from_all: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
     pub readable: bool,
@@ -1258,6 +1270,11 @@ pub fn address_book_parse(id: &str, raw: &str) -> CoreAddressBook {
             .and_then(|object| object.get("archived"))
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        hide_from_all: object
+            .as_ref()
+            .and_then(|object| object.get("hideFromAll"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         color: object.as_ref().and_then(|object| trimmed(object, "color")),
         readable: object.as_ref().map(declared_readable).unwrap_or(true),
         raw: raw.to_string(),
@@ -1273,6 +1290,9 @@ pub fn address_book_write(draft: &CoreAddressBookDraft) -> Result<String, CoreEr
     fields.insert("name".into(), json!(draft.name.trim()));
     if draft.archived {
         fields.insert("archived".into(), json!(true));
+    }
+    if draft.hide_from_all {
+        fields.insert("hideFromAll".into(), json!(true));
     }
     if let Some(color) = present(&draft.color) {
         fields.insert("color".into(), json!(color));

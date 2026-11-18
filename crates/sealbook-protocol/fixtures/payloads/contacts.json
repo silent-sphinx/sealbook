@@ -38,7 +38,8 @@
       "version",
       "name",
       "archived",
-      "color"
+      "color",
+      "hideFromAll"
     ],
     "profile_keys": [
       "@type",
@@ -1934,7 +1935,8 @@
       "case": "an address book created from scratch",
       "draft": {
         "name": "  Family  ",
-        "archived": false
+        "archived": false,
+        "hide_from_all": false
       },
       "payload": "{\"@type\":\"AddressBook\",\"name\":\"Family\",\"version\":\"1.0\"}"
     },
@@ -1943,6 +1945,7 @@
       "draft": {
         "name": "Relatives",
         "archived": false,
+        "hide_from_all": false,
         "raw": "{\"@type\":\"AddressBook\",\"name\":\"Family\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
       },
       "payload": "{\"@type\":\"AddressBook\",\"name\":\"Relatives\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
@@ -1952,15 +1955,26 @@
       "draft": {
         "name": "Relatives",
         "archived": true,
+        "hide_from_all": false,
         "raw": "{\"@type\":\"AddressBook\",\"name\":\"Family\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
       },
       "payload": "{\"@type\":\"AddressBook\",\"archived\":true,\"name\":\"Relatives\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a book hidden from the all list",
+      "draft": {
+        "name": "Relatives",
+        "archived": false,
+        "hide_from_all": true
+      },
+      "payload": "{\"@type\":\"AddressBook\",\"hideFromAll\":true,\"name\":\"Relatives\",\"version\":\"1.0\"}"
     },
     {
       "case": "a colour given on a rename",
       "draft": {
         "name": "Relatives",
         "archived": false,
+        "hide_from_all": false,
         "color": "  #9ece6a  ",
         "raw": "{\"@type\":\"AddressBook\",\"name\":\"Family\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
       },
@@ -1976,6 +1990,7 @@
         "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "name": "Family",
         "archived": false,
+        "hide_from_all": false,
         "readable": true,
         "raw": "{\"@type\":\"AddressBook\",\"name\":\"Family\"}"
       }
@@ -1988,6 +2003,7 @@
         "id": "00000000-0000-0000-0000-000000000001",
         "name": "Default Address Book",
         "archived": false,
+        "hide_from_all": false,
         "readable": true,
         "raw": "{}"
       }
@@ -2000,6 +2016,7 @@
         "id": "00000000-0000-0000-0000-000000000001",
         "name": "Mine",
         "archived": false,
+        "hide_from_all": false,
         "readable": true,
         "raw": "{\"name\":\"Mine\"}"
       }
@@ -2012,6 +2029,7 @@
         "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "name": "Untitled Address Book",
         "archived": false,
+        "hide_from_all": false,
         "readable": true,
         "raw": "{\"name\":\"  \"}"
       }
@@ -2024,8 +2042,22 @@
         "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "name": "Family",
         "archived": true,
+        "hide_from_all": false,
         "readable": true,
         "raw": "{\"@type\":\"AddressBook\",\"name\":\"Family\",\"archived\":true}"
+      }
+    },
+    {
+      "case": "a book hidden from the all list",
+      "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "raw": "{\"@type\":\"AddressBook\",\"name\":\"Family\",\"hideFromAll\":true}",
+      "address_book": {
+        "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "name": "Family",
+        "archived": false,
+        "hide_from_all": true,
+        "readable": true,
+        "raw": "{\"@type\":\"AddressBook\",\"name\":\"Family\",\"hideFromAll\":true}"
       }
     },
     {
@@ -2036,6 +2068,7 @@
         "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "name": "Untitled Address Book",
         "archived": false,
+        "hide_from_all": false,
         "readable": true,
         "raw": "garbage"
       }
@@ -2048,6 +2081,7 @@
         "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "name": "future",
         "archived": false,
+        "hide_from_all": false,
         "readable": false,
         "raw": "{\"@type\":\"AddressBook\",\"version\":\"2.0\",\"name\":\"future\"}"
       }

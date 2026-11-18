@@ -83,6 +83,25 @@ pub fn may_reparent(items: &[(String, Option<String>)], id: &str, parent_id: Opt
     can_reparent(&refs, id, parent_id)
 }
 
+/// The ids of items that are flagged, and of everything nested under a flagged
+/// one, for a view that leaves archived or hidden containers out. Each item is
+/// `(id, parent id, flagged)`. A parent that is missing or sits in a cycle reads
+/// as no parent, as in every other walk.
+pub fn flagged_with_descendants(items: &[(String, Option<String>, bool)]) -> HashSet<String> {
+    let refs: Vec<TreeRef> = items
+        .iter()
+        .map(|(id, parent, _)| TreeRef {
+            id,
+            parent_id: parent.as_deref(),
+        })
+        .collect();
+    items
+        .iter()
+        .filter(|(_, _, flagged)| *flagged)
+        .flat_map(|(id, _, _)| subtree(&refs, id))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -114,5 +133,43 @@ mod tests {
         assert!(!can_reparent(&items, "a", Some("c")));
         assert!(!can_reparent(&items, "a", Some("a")));
         assert!(!can_reparent(&items, "a", Some("gone")));
+    }
+
+    fn flagged(items: &[(&str, Option<&str>, bool)]) -> Vec<String> {
+        let owned: Vec<_> = items
+            .iter()
+            .map(|(id, parent, flag)| (id.to_string(), parent.map(str::to_string), *flag))
+            .collect();
+        let mut out: Vec<_> = flagged_with_descendants(&owned).into_iter().collect();
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn a_flag_takes_the_whole_subtree_with_it() {
+        let out = flagged(&[
+            ("a", None, true),
+            ("b", Some("a"), false),
+            ("c", Some("b"), false),
+            ("d", None, false),
+            ("e", Some("d"), false),
+        ]);
+        assert_eq!(out, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn a_flag_on_a_child_leaves_its_parent_alone() {
+        let out = flagged(&[("a", None, false), ("b", Some("a"), true)]);
+        assert_eq!(out, vec!["b"]);
+    }
+
+    #[test]
+    fn a_parent_cycle_and_a_missing_parent_do_not_loop_or_spread() {
+        let out = flagged(&[
+            ("x", Some("y"), true),
+            ("y", Some("x"), false),
+            ("z", Some("gone"), false),
+        ]);
+        assert_eq!(out, vec!["x"]);
     }
 }

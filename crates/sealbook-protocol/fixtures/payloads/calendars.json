@@ -8,7 +8,8 @@
       "name",
       "color",
       "favorite",
-      "archived"
+      "archived",
+      "hideFromAll"
     ],
     "calendar_event_keys": [
       "@type",
@@ -100,7 +101,8 @@
         "name": "Work",
         "color": "#7aa2f7",
         "favorite": false,
-        "archived": false
+        "archived": false,
+        "hide_from_all": false
       },
       "payload": "{\"@type\":\"Calendar\",\"color\":\"#7aa2f7\",\"favorite\":false,\"name\":\"Work\",\"version\":\"1.0\"}"
     },
@@ -110,7 +112,8 @@
         "name": "  Work  ",
         "color": "#7aa2f7",
         "favorite": true,
-        "archived": false
+        "archived": false,
+        "hide_from_all": false
       },
       "payload": "{\"@type\":\"Calendar\",\"color\":\"#7aa2f7\",\"favorite\":true,\"name\":\"Work\",\"version\":\"1.0\"}"
     },
@@ -120,7 +123,8 @@
         "name": "Work",
         "color": "   ",
         "favorite": false,
-        "archived": false
+        "archived": false,
+        "hide_from_all": false
       },
       "payload": "{\"@type\":\"Calendar\",\"color\":\"#7aa2f7\",\"favorite\":false,\"name\":\"Work\",\"version\":\"1.0\"}"
     },
@@ -130,9 +134,21 @@
         "name": "Old Team",
         "color": "#9ece6a",
         "favorite": false,
-        "archived": true
+        "archived": true,
+        "hide_from_all": false
       },
       "payload": "{\"@type\":\"Calendar\",\"archived\":true,\"color\":\"#9ece6a\",\"favorite\":false,\"name\":\"Old Team\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a calendar hidden from the combined view",
+      "draft": {
+        "name": "Old Team",
+        "color": "#9ece6a",
+        "favorite": false,
+        "archived": false,
+        "hide_from_all": true
+      },
+      "payload": "{\"@type\":\"Calendar\",\"color\":\"#9ece6a\",\"favorite\":false,\"hideFromAll\":true,\"name\":\"Old Team\",\"version\":\"1.0\"}"
     },
     {
       "case": "a rename that keeps the colour, the flags and a key from a later build",
@@ -141,6 +157,7 @@
         "color": "#9ece6a",
         "favorite": true,
         "archived": true,
+        "hide_from_all": false,
         "raw": "{\"@type\":\"Calendar\",\"archived\":true,\"color\":\"#9ece6a\",\"favorite\":true,\"name\":\"Old Team\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
       },
       "payload": "{\"@type\":\"Calendar\",\"archived\":true,\"color\":\"#9ece6a\",\"favorite\":true,\"name\":\"Renamed\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
@@ -152,6 +169,7 @@
         "color": "#9ece6a",
         "favorite": true,
         "archived": false,
+        "hide_from_all": false,
         "raw": "{\"@type\":\"Calendar\",\"archived\":true,\"color\":\"#9ece6a\",\"favorite\":true,\"name\":\"Old Team\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
       },
       "payload": "{\"@type\":\"Calendar\",\"color\":\"#9ece6a\",\"favorite\":true,\"name\":\"Old Team\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
@@ -168,8 +186,24 @@
         "color": "#9ece6a",
         "favorite": true,
         "archived": true,
+        "hide_from_all": false,
         "readable": true,
         "raw": "{\"@type\":\"Calendar\",\"archived\":true,\"color\":\"#9ece6a\",\"favorite\":true,\"name\":\"Old Team\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
+      }
+    },
+    {
+      "case": "a calendar hidden from the combined view",
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "raw": "{\"name\":\"Work\",\"color\":\"#9ece6a\",\"favorite\":false,\"hideFromAll\":true}",
+      "calendar": {
+        "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "name": "Work",
+        "color": "#9ece6a",
+        "favorite": false,
+        "archived": false,
+        "hide_from_all": true,
+        "readable": true,
+        "raw": "{\"name\":\"Work\",\"color\":\"#9ece6a\",\"favorite\":false,\"hideFromAll\":true}"
       }
     },
     {
@@ -182,6 +216,7 @@
         "color": "#7aa2f7",
         "favorite": false,
         "archived": false,
+        "hide_from_all": false,
         "readable": true,
         "raw": "{}"
       }
@@ -196,6 +231,7 @@
         "color": "#7aa2f7",
         "favorite": false,
         "archived": false,
+        "hide_from_all": false,
         "readable": true,
         "raw": "{}"
       }
@@ -210,6 +246,7 @@
         "color": "#7aa2f7",
         "favorite": false,
         "archived": false,
+        "hide_from_all": false,
         "readable": true,
         "raw": "this was never a calendar"
       }
@@ -224,6 +261,7 @@
         "color": "#7aa2f7",
         "favorite": true,
         "archived": false,
+        "hide_from_all": false,
         "readable": true,
         "raw": "{\"name\":\"  \",\"color\":\"   \",\"favorite\":true}"
       }
@@ -238,6 +276,7 @@
         "color": "#7aa2f7",
         "favorite": false,
         "archived": false,
+        "hide_from_all": false,
         "readable": false,
         "raw": "{\"@type\":\"Calendar\",\"version\":\"2.0\",\"name\":\"future\"}"
       }

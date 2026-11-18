@@ -19,7 +19,8 @@
       "version",
       "name",
       "color",
-      "archived"
+      "archived",
+      "hideFromAll"
     ],
     "default_notebook_id": "00000000-0000-0000-0000-000000000002",
     "default_notebook_name": "Default Notebook",
@@ -274,18 +275,21 @@
       "case": "a notebook created from scratch",
       "name": "Work",
       "archived": false,
+      "hide_from_all": false,
       "payload": "{\"@type\":\"Notebook\",\"name\":\"Work\",\"version\":\"1.0\"}"
     },
     {
       "case": "a name with surrounding space",
       "name": "  Work  ",
       "archived": false,
+      "hide_from_all": false,
       "payload": "{\"@type\":\"Notebook\",\"name\":\"Work\",\"version\":\"1.0\"}"
     },
     {
       "case": "a rename that keeps what this build does not own",
       "name": "Renamed",
       "archived": false,
+      "hide_from_all": false,
       "previous": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"Work\",\"colour\":\"amber\"}",
       "payload": "{\"@type\":\"Notebook\",\"colour\":\"amber\",\"name\":\"Renamed\",\"version\":\"1.0\"}"
     },
@@ -294,6 +298,7 @@
       "name": "Work",
       "color": "  #7aa2f7  ",
       "archived": false,
+      "hide_from_all": false,
       "payload": "{\"@type\":\"Notebook\",\"color\":\"#7aa2f7\",\"name\":\"Work\",\"version\":\"1.0\"}"
     },
     {
@@ -301,6 +306,7 @@
       "name": "Renamed",
       "color": "#7aa2f7",
       "archived": false,
+      "hide_from_all": false,
       "previous": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"Work\",\"color\":\"#7aa2f7\"}",
       "payload": "{\"@type\":\"Notebook\",\"color\":\"#7aa2f7\",\"name\":\"Renamed\",\"version\":\"1.0\"}"
     },
@@ -308,6 +314,7 @@
       "case": "a write without a colour clears the stored one",
       "name": "Work",
       "archived": false,
+      "hide_from_all": false,
       "previous": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"Work\",\"color\":\"#7aa2f7\"}",
       "payload": "{\"@type\":\"Notebook\",\"name\":\"Work\",\"version\":\"1.0\"}"
     },
@@ -315,12 +322,14 @@
       "case": "an archived notebook",
       "name": "Work",
       "archived": true,
+      "hide_from_all": false,
       "payload": "{\"@type\":\"Notebook\",\"archived\":true,\"name\":\"Work\",\"version\":\"1.0\"}"
     },
     {
       "case": "a rename that passes the archived flag back",
       "name": "Renamed",
       "archived": true,
+      "hide_from_all": false,
       "previous": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"Work\",\"archived\":true}",
       "payload": "{\"@type\":\"Notebook\",\"archived\":true,\"name\":\"Renamed\",\"version\":\"1.0\"}"
     },
@@ -328,11 +337,55 @@
       "case": "a write that is not archived clears the stored flag",
       "name": "Work",
       "archived": false,
+      "hide_from_all": false,
       "previous": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"Work\",\"archived\":true}",
       "payload": "{\"@type\":\"Notebook\",\"name\":\"Work\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a notebook hidden from the overview",
+      "name": "Work",
+      "archived": false,
+      "hide_from_all": true,
+      "payload": "{\"@type\":\"Notebook\",\"hideFromAll\":true,\"name\":\"Work\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a rename that passes the hidden flag back",
+      "name": "Renamed",
+      "archived": false,
+      "hide_from_all": true,
+      "previous": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"Work\",\"hideFromAll\":true}",
+      "payload": "{\"@type\":\"Notebook\",\"hideFromAll\":true,\"name\":\"Renamed\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a write that is not hidden clears the stored flag",
+      "name": "Work",
+      "archived": false,
+      "hide_from_all": false,
+      "previous": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"Work\",\"hideFromAll\":true}",
+      "payload": "{\"@type\":\"Notebook\",\"name\":\"Work\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a notebook both archived and hidden",
+      "name": "Work",
+      "archived": true,
+      "hide_from_all": true,
+      "payload": "{\"@type\":\"Notebook\",\"archived\":true,\"hideFromAll\":true,\"name\":\"Work\",\"version\":\"1.0\"}"
     }
   ],
   "notebook_parses": [
+    {
+      "case": "a notebook hidden from the overview",
+      "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "raw": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"Work\",\"hideFromAll\":true}",
+      "notebook": {
+        "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "name": "Work",
+        "archived": false,
+        "hide_from_all": true,
+        "readable": true,
+        "raw": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"Work\",\"hideFromAll\":true}"
+      }
+    },
     {
       "case": "a named notebook",
       "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -341,6 +394,7 @@
         "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "name": "Work",
         "archived": false,
+        "hide_from_all": false,
         "readable": true,
         "raw": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"  Work  \"}"
       }
@@ -353,6 +407,7 @@
         "id": "00000000-0000-0000-0000-000000000002",
         "name": "Default Notebook",
         "archived": false,
+        "hide_from_all": false,
         "readable": true,
         "raw": "{}"
       }
@@ -365,6 +420,7 @@
         "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "name": "Untitled",
         "archived": false,
+        "hide_from_all": false,
         "readable": true,
         "raw": "not json"
       }
@@ -378,6 +434,7 @@
         "name": "Work",
         "color": "#7aa2f7",
         "archived": false,
+        "hide_from_all": false,
         "readable": true,
         "raw": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"Work\",\"color\":\" #7aa2f7 \"}"
       }
@@ -390,6 +447,7 @@
         "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "name": "Work",
         "archived": true,
+        "hide_from_all": false,
         "readable": true,
         "raw": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"Work\",\"archived\":true}"
       }
@@ -402,6 +460,7 @@
         "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "name": "Work",
         "archived": false,
+        "hide_from_all": false,
         "readable": true,
         "raw": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"Work\",\"archived\":\"yes\"}"
       }

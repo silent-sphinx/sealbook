@@ -117,6 +117,7 @@ fn blank_calendar() -> CoreCalendarDraft {
         color: DEFAULT_CALENDAR_COLOR.into(),
         favorite: false,
         archived: false,
+        hide_from_all: false,
         raw: None,
     }
 }
@@ -229,12 +230,22 @@ fn calendar_write_cases() -> Vec<(String, CoreCalendarDraft)> {
             },
         ),
         (
+            "a calendar hidden from the combined view".into(),
+            CoreCalendarDraft {
+                name: "Old Team".into(),
+                color: "#9ece6a".into(),
+                hide_from_all: true,
+                ..blank_calendar()
+            },
+        ),
+        (
             "a rename that keeps the colour, the flags and a key from a later build".into(),
             CoreCalendarDraft {
                 name: "Renamed".into(),
                 color: parsed.color.clone(),
                 favorite: parsed.favorite,
                 archived: parsed.archived,
+                hide_from_all: parsed.hide_from_all,
                 raw: Some(stored.clone()),
             },
         ),
@@ -245,6 +256,7 @@ fn calendar_write_cases() -> Vec<(String, CoreCalendarDraft)> {
                 color: parsed.color.clone(),
                 favorite: parsed.favorite,
                 archived: false,
+                hide_from_all: false,
                 raw: Some(stored),
             },
         ),
@@ -257,6 +269,11 @@ fn calendar_parse_cases() -> Vec<(String, String, String)> {
             "a calendar that has been through every feature".into(),
             CALENDAR.into(),
             stored_calendar(),
+        ),
+        (
+            "a calendar hidden from the combined view".into(),
+            CALENDAR.into(),
+            r##"{"name":"Work","color":"#9ece6a","favorite":false,"hideFromAll":true}"##.into(),
         ),
         (
             "the default calendar, unnamed".into(),

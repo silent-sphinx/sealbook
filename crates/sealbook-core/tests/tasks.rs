@@ -442,6 +442,21 @@ fn list_write_cases() -> Vec<(String, CoreTaskListDraft)> {
             },
         ),
         (
+            "a list hidden from the overview".into(),
+            CoreTaskListDraft {
+                name: "Home".into(),
+                hide_from_all: true,
+                ..Default::default()
+            },
+        ),
+        (
+            "showing a list again drops the hidden flag".into(),
+            CoreTaskListDraft {
+                hide_from_all: false,
+                ..task_list_parse(CHILD, r#"{"name":"Home","hideFromAll":true}"#).draft()
+            },
+        ),
+        (
             "restoring a list drops the archived flag".into(),
             CoreTaskListDraft {
                 archived: false,
@@ -467,6 +482,16 @@ fn list_parse_cases() -> Vec<(String, String, String)> {
             "a non-boolean archived reads as live".into(),
             CHILD.into(),
             r#"{"name":"Home","archived":"yes"}"#.into(),
+        ),
+        (
+            "a hidden list".into(),
+            CHILD.into(),
+            r#"{"name":"Home","hideFromAll":true}"#.into(),
+        ),
+        (
+            "a non-boolean hideFromAll reads as shown".into(),
+            CHILD.into(),
+            r#"{"name":"Home","hideFromAll":"yes"}"#.into(),
         ),
         (
             "the default list, unnamed".into(),

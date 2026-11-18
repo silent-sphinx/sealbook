@@ -2229,10 +2229,17 @@ pub fn core_notebook_write(
     name: &str,
     color: Option<String>,
     archived: bool,
+    hide_from_all: bool,
     previous_raw: Option<String>,
 ) -> Result<String, JsError> {
-    sealbook_core::notebook_write(name, color.as_deref(), archived, previous_raw.as_deref())
-        .map_err(core_err)
+    sealbook_core::notebook_write(
+        name,
+        color.as_deref(),
+        archived,
+        hide_from_all,
+        previous_raw.as_deref(),
+    )
+    .map_err(core_err)
 }
 
 /// The name to show for a note's notebook. A notebook that is gone shows the

@@ -55,7 +55,7 @@ mod sync;
 mod task_rules;
 mod tasks;
 mod tree;
-pub use tree::may_reparent;
+pub use tree::{flagged_with_descendants, may_reparent};
 mod vault_search;
 mod vcard;
 
