@@ -126,6 +126,39 @@ fn call(op: &str, args: &[Value]) -> Value {
             &arg(args, 1),
             &arg::<String>(args, 2),
         ))),
+        "trash.write" => out(trash_write(
+            arg(args, 0),
+            &arg::<String>(args, 1),
+            &arg::<String>(args, 2),
+        )),
+        "trash.restore_write" => out(trash_restore_write(
+            arg(args, 0),
+            &arg::<String>(args, 1),
+            arg::<Option<TrashRehome>>(args, 2).as_ref(),
+        )),
+        "trash.hidden" => {
+            let mut hidden: Vec<String> = trash_hidden(&arg::<Vec<TrashNode>>(args, 0))
+                .into_iter()
+                .collect();
+            hidden.sort();
+            out::<_, String>(Ok(hidden))
+        }
+        "trash.roots" => out::<_, String>(Ok(trash_roots(
+            &arg::<Vec<TrashNode>>(args, 0),
+            arg(args, 1),
+        ))),
+        "trash.restore_plan" => out::<_, String>(Ok(trash_restore_plan(
+            &arg::<Vec<TrashNode>>(args, 0),
+            &arg::<String>(args, 1),
+        ))),
+        "trash.purge_plan" => out::<_, String>(Ok(trash_purge_plan(
+            &arg::<Vec<TrashNode>>(args, 0),
+            &arg::<Vec<String>>(args, 1),
+        ))),
+        "trash.expired" => out::<_, String>(Ok(trash_expired(
+            &arg::<Vec<TrashNode>>(args, 0),
+            arg(args, 1),
+        ))),
         other => panic!("the corpus names an operation this host lacks: {other}"),
     }
 }

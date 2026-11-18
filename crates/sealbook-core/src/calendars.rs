@@ -244,6 +244,9 @@ pub struct CoreCalendar {
     /// Whether this build reads the schema major the payload declares. False
     /// means the fields above were still read, because a lenient parse beats a
     /// blank row, but [`calendar_write`] will refuse to write over it.
+    /// When it went into the trash: see `crate::trash`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trashed_at: Option<String>,
     pub readable: bool,
     pub raw: String,
 }
@@ -328,6 +331,9 @@ pub struct CoreCalendarEvent {
     pub alerts: Vec<CoreEventAlert>,
     #[serde(default)]
     pub unreadable_alerts: Vec<String>,
+    /// When it went into the trash: see `crate::trash`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trashed_at: Option<String>,
     pub readable: bool,
     pub raw: String,
 }
@@ -354,6 +360,9 @@ pub fn calendar_parse(id: &str, raw: &str) -> CoreCalendar {
         favorite: flag("favorite"),
         archived: flag("archived"),
         hide_from_all: flag("hideFromAll"),
+        trashed_at: object.as_ref().and_then(|object| {
+            crate::trash::stored_trashed_at(crate::CorePayloadKind::Calendar, object)
+        }),
         readable: object.as_ref().map(declared_readable).unwrap_or(true),
         raw: raw.to_string(),
     }
@@ -399,6 +408,7 @@ pub fn event_parse(id: &str, raw: &str) -> CoreCalendarEvent {
             unreadable_recurrence: None,
             alerts: Vec::new(),
             unreadable_alerts: Vec::new(),
+            trashed_at: None,
             readable: true,
             raw: raw.to_string(),
         };
@@ -420,6 +430,7 @@ pub fn event_parse(id: &str, raw: &str) -> CoreCalendarEvent {
             .map(|stored| Value::Object(stored.clone()).to_string()),
         alerts,
         unreadable_alerts,
+        trashed_at: crate::trash::stored_trashed_at(crate::CorePayloadKind::CalendarEvent, &object),
         readable: declared_readable(&object),
         raw: raw.to_string(),
     }

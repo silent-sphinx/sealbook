@@ -368,6 +368,9 @@ pub struct CoreContact {
     /// Whether this build reads the schema major the payload declares. False
     /// means the fields above were still read, because a lenient parse beats a
     /// blank row, but [`contact_write`] will refuse to write over it.
+    /// When it went into the trash: see `crate::trash`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trashed_at: Option<String>,
     pub readable: bool,
     pub raw: String,
 }
@@ -402,6 +405,9 @@ pub struct CoreAddressBook {
     pub hide_from_all: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// When it went into the trash: see `crate::trash`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trashed_at: Option<String>,
     pub readable: bool,
     pub raw: String,
 }
@@ -922,6 +928,7 @@ pub fn contact_parse(id: &str, raw: &str) -> CoreContact {
         archived: card.get(CONTACT_ARCHIVED_PROP).and_then(Value::as_bool) == Some(true),
         created_at: first_of(&card, &["created", "createdAt"]),
         updated_at: first_of(&card, &["updated", "updatedAt"]),
+        trashed_at: crate::trash::stored_trashed_at(crate::CorePayloadKind::Contact, &card),
         readable: declared_readable(&card),
         raw: raw.to_string(),
     }
@@ -1276,6 +1283,9 @@ pub fn address_book_parse(id: &str, raw: &str) -> CoreAddressBook {
             .and_then(Value::as_bool)
             .unwrap_or(false),
         color: object.as_ref().and_then(|object| trimmed(object, "color")),
+        trashed_at: object.as_ref().and_then(|object| {
+            crate::trash::stored_trashed_at(crate::CorePayloadKind::AddressBook, object)
+        }),
         readable: object.as_ref().map(declared_readable).unwrap_or(true),
         raw: raw.to_string(),
     }

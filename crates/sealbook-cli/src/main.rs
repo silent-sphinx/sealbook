@@ -3,6 +3,7 @@ mod bookmark_io;
 mod search;
 mod settings;
 mod tasks;
+mod trash;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -199,6 +200,14 @@ enum Command {
         #[command(subcommand)]
         command: tasks::TasklistCommand,
     },
+    /// Deleted items: list, restore, or delete them for good.
+    ///
+    /// Everything deleted waits here for 30 days before a client deletes it
+    /// for good.
+    Trash {
+        #[command(subcommand)]
+        command: trash::TrashCommand,
+    },
     /// Search notes, tasks, bookmarks, events and contacts at once.
     ///
     /// Finished tasks, archived items, bookmarks kept out of "All" and any
@@ -298,18 +307,22 @@ enum BookCommand {
         #[arg(long)]
         color: Option<String>,
     },
-    /// Delete an address book.
+    /// Move an address book to the trash, its contacts with it.
     ///
-    /// Its contacts are moved to another book or deleted with it, as web asks.
-    /// The default book cannot be deleted.
+    /// Pass --move-to to keep its contacts out of the trash. With --forever,
+    /// contacts still in it need --move-to or --delete-contacts. The default
+    /// book cannot be deleted.
     Delete {
         #[arg(long)]
         id: Uuid,
+        /// Delete it for good instead of moving it to the trash.
+        #[arg(long)]
+        forever: bool,
         /// Move its contacts to this book (a name or an id).
         #[arg(long)]
         move_to: Option<String>,
-        /// Delete its contacts along with it.
-        #[arg(long, conflicts_with = "move_to")]
+        /// With --forever, delete its contacts along with it.
+        #[arg(long, conflicts_with = "move_to", requires = "forever")]
         delete_contacts: bool,
     },
 }
@@ -420,10 +433,13 @@ enum ContactsCommand {
         #[command(subcommand)]
         command: ProfileCommand,
     },
-    /// Delete a contact.
+    /// Move a contact to the trash.
     Delete {
         #[arg(long)]
         id: Uuid,
+        /// Delete it for good instead of moving it to the trash.
+        #[arg(long)]
+        forever: bool,
     },
     /// List contacts, optionally from one address book.
     List {
@@ -474,10 +490,13 @@ enum NotebookCommand {
         #[arg(long)]
         color: Option<String>,
     },
-    /// Delete a notebook.
+    /// Move a notebook to the trash.
     Delete {
         #[arg(long)]
         id: Uuid,
+        /// Delete it for good instead of moving it to the trash.
+        #[arg(long)]
+        forever: bool,
     },
 }
 
@@ -554,10 +573,13 @@ enum NotesCommand {
         #[arg(long)]
         out: Option<PathBuf>,
     },
-    /// Delete a note.
+    /// Move a note to the trash.
     Delete {
         #[arg(long)]
         id: Uuid,
+        /// Delete it for good instead of moving it to the trash.
+        #[arg(long)]
+        forever: bool,
     },
 }
 
@@ -599,10 +621,13 @@ enum CollectionCommand {
         #[arg(long)]
         color: Option<String>,
     },
-    /// Delete a bookmark collection.
+    /// Move a bookmark collection to the trash.
     Delete {
         #[arg(long)]
         id: Uuid,
+        /// Delete it for good instead of moving it to the trash.
+        #[arg(long)]
+        forever: bool,
     },
 }
 
@@ -655,10 +680,13 @@ enum BookmarksCommand {
         #[arg(long)]
         id: Uuid,
     },
-    /// Delete a bookmark.
+    /// Move a bookmark to the trash.
     Delete {
         #[arg(long)]
         id: Uuid,
+        /// Delete it for good instead of moving it to the trash.
+        #[arg(long)]
+        forever: bool,
     },
     #[command(flatten)]
     File(bookmark_io::BookmarkFileCommand),
@@ -731,10 +759,13 @@ enum CalendarCommand {
         #[arg(long = "alert", allow_hyphen_values = true)]
         alerts: Vec<String>,
     },
-    /// Delete one event.
+    /// Move one event to the trash.
     Delete {
         #[arg(long)]
         id: Uuid,
+        /// Delete it for good instead of moving it to the trash.
+        #[arg(long)]
+        forever: bool,
     },
     /// Rename a calendar, or change its colour.
     Rename {
@@ -745,13 +776,16 @@ enum CalendarCommand {
         #[arg(long)]
         color: Option<String>,
     },
-    /// Delete a calendar and every event in it, as web does.
+    /// Move a calendar and every event in it to the trash.
     Remove {
         #[arg(long)]
         id: Uuid,
-        /// Confirm that the calendar's events go with it.
+        /// With --forever, confirm that the calendar's events go with it.
         #[arg(long)]
         yes: bool,
+        /// Delete it for good instead of moving it to the trash.
+        #[arg(long)]
+        forever: bool,
     },
     /// Write events as an `.ics` file.
     Export {
@@ -1156,15 +1190,14 @@ async fn main() -> Result<()> {
                 warn_unreadable(&client);
                 save_state(&cli.state, client.state.as_ref().unwrap())?;
             }
-            ContactsCommand::Delete { id } => {
+            ContactsCommand::Delete { id, forever } => {
                 let state = load_state(&cli.state)?;
                 let password = std::env::var("SEALBOOK_PASSWORD")
                     .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
                 let mut client =
                     SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
                 sign_in(&mut client, &password).await?;
-                let revision = client.delete_contact(id).await.context("delete")?;
-                println!("deleted encrypted contact {id} at revision {revision}");
+                println!("{}", trash::remove(&mut client, id, forever).await?);
                 save_state(&cli.state, client.state.as_ref().unwrap())?;
             }
             ContactsCommand::List { book } => {
@@ -1328,10 +1361,8 @@ async fn main() -> Result<()> {
                     id,
                     move_to,
                     delete_contacts,
+                    forever,
                 } => {
-                    if id == DEFAULT_ADDRESS_BOOK_ID {
-                        anyhow::bail!("the default address book cannot be deleted");
-                    }
                     let books = client.list_address_books().await.context("books")?;
                     if !books.iter().any(|(book, _)| *book == id) {
                         anyhow::bail!("no address book {id}: see `book list`");
@@ -1346,34 +1377,22 @@ async fn main() -> Result<()> {
                         .into_iter()
                         .filter(|(_, json)| contact_book_id(json) == id)
                         .collect();
-                    if !contained.is_empty() && destination.is_none() && !delete_contacts {
+                    if forever && !contained.is_empty() && destination.is_none() && !delete_contacts
+                    {
                         anyhow::bail!(
                             "{} contact(s) are in this book: pass --move-to <book> to keep \
                              them or --delete-contacts to delete them with it",
                             contained.len()
                         );
                     }
-                    for (contact, json) in &contained {
-                        match destination {
-                            Some(destination) => {
-                                let moved = contact_moved(json, destination)?;
-                                client.put_contact(*contact, &moved).await?;
-                            }
-                            None => {
-                                client.delete_contact(*contact).await?;
-                            }
+                    if let Some(destination) = destination {
+                        for (contact, json) in &contained {
+                            let moved = contact_moved(json, destination)?;
+                            client.put_contact(*contact, &moved).await?;
                         }
+                        println!("moved {} contact(s) out", contained.len());
                     }
-                    client.delete_address_book(id).await?;
-                    let verb = if destination.is_some() {
-                        "moved"
-                    } else {
-                        "deleted"
-                    };
-                    println!(
-                        "deleted address book {id}, {verb} {} contact(s)",
-                        contained.len()
-                    );
+                    println!("{}", trash::remove(&mut client, id, forever).await?);
                 }
             }
             save_state(&cli.state, client.state.as_ref().unwrap())?;
@@ -1437,12 +1456,8 @@ async fn main() -> Result<()> {
                         .context("change collection")?;
                     println!("stored collection {id} {}", draft.name);
                 }
-                CollectionCommand::Delete { id } => {
-                    let revision = client
-                        .delete_bookmark_collection(id)
-                        .await
-                        .context("delete collection")?;
-                    println!("deleted collection {id} at revision {revision}");
+                CollectionCommand::Delete { id, forever } => {
+                    println!("{}", trash::remove(&mut client, id, forever).await?);
                 }
             }
             save_state(&cli.state, client.state.as_ref().unwrap())?;
@@ -1568,12 +1583,8 @@ async fn main() -> Result<()> {
                 BookmarksCommand::File(command) => {
                     bookmark_io::run(&mut client, command, &now_rfc3339()).await?;
                 }
-                BookmarksCommand::Delete { id } => {
-                    let revision = client
-                        .delete_bookmark(id)
-                        .await
-                        .context("delete bookmark")?;
-                    println!("deleted encrypted bookmark {id} at revision {revision}");
+                BookmarksCommand::Delete { id, forever } => {
+                    println!("{}", trash::remove(&mut client, id, forever).await?);
                 }
             }
             save_state(&cli.state, client.state.as_ref().unwrap())?;
@@ -1609,6 +1620,12 @@ async fn main() -> Result<()> {
         Command::Search { query, kind, limit } => {
             let mut client = connect(&cli.state, pinned).await?;
             search::run(&mut client, &query, &kind, limit).await?;
+            warn_unreadable(&client);
+            save_state(&cli.state, client.state.as_ref().unwrap())?;
+        }
+        Command::Trash { command } => {
+            let mut client = connect(&cli.state, pinned).await?;
+            trash::run(&mut client, command).await?;
             warn_unreadable(&client);
             save_state(&cli.state, client.state.as_ref().unwrap())?;
         }
@@ -1887,10 +1904,9 @@ async fn main() -> Result<()> {
                     let revision = client.put_calendar_event(id, &draft).await?;
                     println!("stored encrypted calendar event {id} at revision {revision}");
                 }
-                CalendarCommand::Delete { id } => {
+                CalendarCommand::Delete { id, forever } => {
                     stored_event(&mut client, id).await?;
-                    let revision = client.delete_calendar_event(id).await?;
-                    println!("deleted calendar event {id} at revision {revision}");
+                    println!("{}", trash::remove(&mut client, id, forever).await?);
                 }
                 CalendarCommand::Rename { id, name, color } => {
                     let calendar = stored_calendar(&mut client, id).await?;
@@ -1900,7 +1916,7 @@ async fn main() -> Result<()> {
                         .await?;
                     println!("stored encrypted calendar {id} at revision {revision}");
                 }
-                CalendarCommand::Remove { id, yes } => {
+                CalendarCommand::Remove { id, yes, forever } => {
                     stored_calendar(&mut client, id).await?;
                     let events: Vec<Uuid> = client
                         .list_calendar_events()
@@ -1911,18 +1927,14 @@ async fn main() -> Result<()> {
                         })
                         .map(|(event, _)| event)
                         .collect();
-                    if !yes {
+                    if forever && !yes {
                         anyhow::bail!(
-                            "this deletes the calendar and its {} event(s) from every device; \
-                             run again with --yes to confirm",
+                            "this deletes the calendar and its {} event(s) from every device \
+                             for good; run again with --yes to confirm",
                             events.len()
                         );
                     }
-                    for event in &events {
-                        client.delete_calendar_event(*event).await?;
-                    }
-                    client.delete_calendar(id).await?;
-                    println!("deleted calendar {id} and {} event(s)", events.len());
+                    println!("{}", trash::remove(&mut client, id, forever).await?);
                 }
                 CalendarCommand::Export { calendar, out } => {
                     let calendars = client.list_calendars().await?;
@@ -2075,12 +2087,8 @@ async fn main() -> Result<()> {
                         .context("rename notebook")?;
                     println!("stored encrypted notebook {id} at revision {revision}");
                 }
-                NotebookCommand::Delete { id } => {
-                    let revision = client
-                        .delete_notebook(id)
-                        .await
-                        .context("delete notebook")?;
-                    println!("deleted notebook {id} at revision {revision}");
+                NotebookCommand::Delete { id, forever } => {
+                    println!("{}", trash::remove(&mut client, id, forever).await?);
                 }
             }
             save_state(&cli.state, client.state.as_ref().unwrap())?;
@@ -2280,9 +2288,8 @@ async fn main() -> Result<()> {
                         None => print!("{text}"),
                     }
                 }
-                NotesCommand::Delete { id } => {
-                    let revision = client.delete_note(id).await.context("delete note")?;
-                    println!("deleted encrypted note {id} at revision {revision}");
+                NotesCommand::Delete { id, forever } => {
+                    println!("{}", trash::remove(&mut client, id, forever).await?);
                 }
             }
             save_state(&cli.state, client.state.as_ref().unwrap())?;
@@ -2959,6 +2966,7 @@ fn write_contacts(
                     archived: false,
                     hide_from_all: false,
                     color: None,
+                    trashed_at: None,
                     readable: true,
                     raw: String::new(),
                 })

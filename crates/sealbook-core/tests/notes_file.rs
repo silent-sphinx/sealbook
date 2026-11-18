@@ -18,6 +18,7 @@ fn notebooks() -> Vec<CoreNotebook> {
         color: None,
         archived: false,
         hide_from_all: false,
+        trashed_at: None,
         readable: true,
         raw: String::new(),
     }]

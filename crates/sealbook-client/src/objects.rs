@@ -910,6 +910,33 @@ impl SealbookClient {
         Ok((out, unreadable))
     }
 
+    /// Every readable object as `(id, content type, payload)`.
+    pub(crate) async fn plain_objects(
+        &mut self,
+    ) -> Result<Vec<(Uuid, String, String)>, ClientError> {
+        Ok(self
+            .listed_objects()
+            .await?
+            .into_iter()
+            .map(|object| (object.id, object.content_type, object.plaintext))
+            .collect())
+    }
+
+    pub(crate) async fn put_plaintext(
+        &mut self,
+        object_id: Uuid,
+        plaintext: &str,
+        content_type: &str,
+    ) -> Result<u64, ClientError> {
+        self.put_sealed(object_id, plaintext.as_bytes(), content_type)
+            .await
+    }
+
+    pub(crate) async fn tombstone(&mut self, object_id: Uuid) -> Result<u64, ClientError> {
+        self.write_object(object_id, Vec::new(), Vec::new(), 0, true)
+            .await
+    }
+
     /// [`Self::list_objects`] for a caller that filters to one content type.
     ///
     /// A typed listing cannot say which type an unreadable row was, so it does

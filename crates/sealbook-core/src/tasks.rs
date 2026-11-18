@@ -307,6 +307,9 @@ pub struct CoreTask {
     pub updated_at: Option<String>,
     /// Whether this build reads the schema major the payload declares. False
     /// means the fields above were still read, but [`task_write`] refuses.
+    /// When it went into the trash: see `crate::trash`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trashed_at: Option<String>,
     pub readable: bool,
     pub raw: String,
 }
@@ -375,6 +378,9 @@ pub struct CoreTaskList {
     pub archived: bool,
     #[serde(default)]
     pub hide_from_all: bool,
+    /// When it went into the trash: see `crate::trash`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trashed_at: Option<String>,
     pub readable: bool,
     pub raw: String,
 }
@@ -417,6 +423,7 @@ pub fn task_parse(id: &str, raw: &str) -> CoreTask {
             recurrence_anchor: None,
             created_at: None,
             updated_at: None,
+            trashed_at: None,
             readable: true,
             raw: raw.to_string(),
         };
@@ -445,6 +452,7 @@ pub fn task_parse(id: &str, raw: &str) -> CoreTask {
             .and_then(|anchor| normalize_due_date(&anchor)),
         created_at: trimmed(&object, "createdAt"),
         updated_at: trimmed(&object, "updatedAt"),
+        trashed_at: crate::trash::stored_trashed_at(crate::CorePayloadKind::Task, &object),
         readable: declared_readable(&object),
         raw: raw.to_string(),
     }
@@ -542,6 +550,9 @@ pub fn task_list_parse(id: &str, raw: &str) -> CoreTaskList {
             .and_then(|object| object.get("hideFromAll"))
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        trashed_at: object.as_ref().and_then(|object| {
+            crate::trash::stored_trashed_at(crate::CorePayloadKind::TaskList, object)
+        }),
         readable: object.as_ref().map(declared_readable).unwrap_or(true),
         raw: raw.to_string(),
     }

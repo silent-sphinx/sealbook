@@ -818,7 +818,7 @@ fn rfc3339_from_epoch(seconds: i64) -> Option<String> {
 }
 
 /// Seconds since the epoch for an RFC 3339 stamp, or None for anything else.
-fn epoch_from_rfc3339(stamp: &str) -> Option<i64> {
+pub(crate) fn epoch_from_rfc3339(stamp: &str) -> Option<i64> {
     let (date, time) = stamp.split_once(['T', 't'])?;
     let mut date = date.splitn(3, '-');
     let (year, month, day) = (

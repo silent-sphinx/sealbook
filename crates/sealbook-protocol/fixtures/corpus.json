@@ -263,6 +263,75 @@
       ]
     },
     {
+      "file": "payloads/trash.json",
+      "tables": [
+        {
+          "table": "writes",
+          "op": "trash.write",
+          "args": [
+            "kind",
+            "raw",
+            "$now"
+          ],
+          "expect": "payload"
+        },
+        {
+          "table": "restores",
+          "op": "trash.restore_write",
+          "args": [
+            "kind",
+            "raw",
+            "rehome"
+          ],
+          "expect": "payload"
+        },
+        {
+          "table": "hidden",
+          "op": "trash.hidden",
+          "args": [
+            "nodes"
+          ],
+          "expect": "hidden"
+        },
+        {
+          "table": "roots",
+          "op": "trash.roots",
+          "args": [
+            "nodes",
+            "now_secs"
+          ],
+          "expect": "roots"
+        },
+        {
+          "table": "restore_plans",
+          "op": "trash.restore_plan",
+          "args": [
+            "nodes",
+            "id"
+          ],
+          "expect": "rehome"
+        },
+        {
+          "table": "purges",
+          "op": "trash.purge_plan",
+          "args": [
+            "nodes",
+            "ids"
+          ],
+          "expect": "purged"
+        },
+        {
+          "table": "expiries",
+          "op": "trash.expired",
+          "args": [
+            "nodes",
+            "now_secs"
+          ],
+          "expect": "expired"
+        }
+      ]
+    },
+    {
       "file": "payloads/fuzz.json",
       "tables": [
         {

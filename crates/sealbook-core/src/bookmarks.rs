@@ -201,6 +201,9 @@ pub struct CoreBookmark {
     pub updated_at: Option<String>,
     /// Whether this build reads the schema major the payload declares. False
     /// means the fields above were still read, but [`bookmark_write`] refuses.
+    /// When it went into the trash: see `crate::trash`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trashed_at: Option<String>,
     pub readable: bool,
     pub raw: String,
 }
@@ -261,6 +264,9 @@ pub struct CoreBookmarkCollection {
     pub hide_from_all: bool,
     #[serde(default)]
     pub archived: bool,
+    /// When it went into the trash: see `crate::trash`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trashed_at: Option<String>,
     pub readable: bool,
     pub raw: String,
 }
@@ -295,6 +301,7 @@ pub fn bookmark_parse(id: &str, raw: &str) -> CoreBookmark {
             collection_id: default_bookmark_collection_id(),
             created_at: None,
             updated_at: None,
+            trashed_at: None,
             readable: true,
             raw: raw.to_string(),
         };
@@ -324,6 +331,7 @@ pub fn bookmark_parse(id: &str, raw: &str) -> CoreBookmark {
         collection_id: resolve_collection_id(trimmed(&object, "collectionId")),
         created_at: trimmed(&object, "createdAt"),
         updated_at: trimmed(&object, "updatedAt"),
+        trashed_at: crate::trash::stored_trashed_at(crate::CorePayloadKind::Bookmark, &object),
         readable: declared_readable(&object),
         raw: raw.to_string(),
     }
@@ -400,6 +408,9 @@ pub fn bookmark_collection_parse(id: &str, raw: &str) -> CoreBookmarkCollection 
             .and_then(|object| object.get("archived"))
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        trashed_at: object.as_ref().and_then(|object| {
+            crate::trash::stored_trashed_at(crate::CorePayloadKind::BookmarkCollection, object)
+        }),
         readable: object.as_ref().map(declared_readable).unwrap_or(true),
         raw: raw.to_string(),
     }

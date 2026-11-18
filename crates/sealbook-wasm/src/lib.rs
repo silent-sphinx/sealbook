@@ -2766,6 +2766,95 @@ pub fn core_payload_kind(
     Ok(sealbook_core::payload_kind(content_type, raw).into_ts()?)
 }
 
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct TrashNodeList(pub Vec<sealbook_core::TrashNode>);
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct TrashRootList(pub Vec<sealbook_core::TrashRoot>);
+
+#[derive(serde::Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(transparent)]
+pub struct TrashRehomeOption(pub Option<sealbook_core::TrashRehome>);
+
+#[wasm_bindgen]
+pub fn core_trash_retention_days() -> i32 {
+    sealbook_core::TRASH_RETENTION_DAYS as i32
+}
+
+/// Puts a payload in the trash, stamped `now`.
+#[wasm_bindgen]
+pub fn core_trash_write(
+    kind: Ts<sealbook_core::CorePayloadKind>,
+    raw: &str,
+    now: &str,
+) -> Result<String, JsError> {
+    Ok(sealbook_core::trash_write(kind.to_rust()?, raw, now)?)
+}
+
+/// Takes a payload out of the trash, moving it as the restore plan says.
+#[wasm_bindgen]
+pub fn core_trash_restore_write(
+    kind: Ts<sealbook_core::CorePayloadKind>,
+    raw: &str,
+    rehome: Ts<TrashRehomeOption>,
+) -> Result<String, JsError> {
+    Ok(sealbook_core::trash_restore_write(
+        kind.to_rust()?,
+        raw,
+        rehome.to_rust()?.0.as_ref(),
+    )?)
+}
+
+/// Every id to leave out of a live view.
+#[wasm_bindgen]
+pub fn core_trash_hidden(nodes: Ts<TrashNodeList>) -> Result<Vec<String>, JsError> {
+    let mut hidden: Vec<String> = sealbook_core::trash_hidden(&nodes.to_rust()?.0)
+        .into_iter()
+        .collect();
+    hidden.sort();
+    Ok(hidden)
+}
+
+/// What the trash lists, newest first. `now_secs` is a float so a JS number
+/// passes straight through.
+#[wasm_bindgen]
+pub fn core_trash_roots(
+    nodes: Ts<TrashNodeList>,
+    now_secs: f64,
+) -> Result<Ts<TrashRootList>, JsError> {
+    Ok(TrashRootList(sealbook_core::trash_roots(
+        &nodes.to_rust()?.0,
+        now_secs as i64,
+    ))
+    .into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_trash_restore_plan(
+    nodes: Ts<TrashNodeList>,
+    id: &str,
+) -> Result<Ts<TrashRehomeOption>, JsError> {
+    Ok(TrashRehomeOption(sealbook_core::trash_restore_plan(&nodes.to_rust()?.0, id)).into_ts()?)
+}
+
+#[wasm_bindgen]
+pub fn core_trash_purge_plan(
+    nodes: Ts<TrashNodeList>,
+    ids: Vec<String>,
+) -> Result<Vec<String>, JsError> {
+    Ok(sealbook_core::trash_purge_plan(&nodes.to_rust()?.0, &ids))
+}
+
+#[wasm_bindgen]
+pub fn core_trash_expired(nodes: Ts<TrashNodeList>, now_secs: f64) -> Result<Vec<String>, JsError> {
+    Ok(sealbook_core::trash_expired(
+        &nodes.to_rust()?.0,
+        now_secs as i64,
+    ))
+}
+
 /// Whether the text is a real calendar day, which `Date.parse` is not strict
 /// enough to say.
 #[wasm_bindgen]

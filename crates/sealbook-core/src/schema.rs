@@ -17,13 +17,13 @@ use crate::{
     ADDRESS_BOOK_ID_PROP, ADDRESS_BOOK_KEYS, BOOKMARK_COLLECTION_CONTENT_TYPE,
     BOOKMARK_COLLECTION_KEYS, BOOKMARK_CONTENT_TYPE, BOOKMARK_KEYS, CALENDAR_CONTENT_TYPE,
     CALENDAR_EVENT_CONTENT_TYPE, CALENDAR_EVENT_KEYS, CALENDAR_KEYS, CONTACT_ARCHIVED_PROP,
-    CONTACT_ATTACHMENTS_PROP, CONTACT_KEYS, CONTACT_MODES, CONTACT_PROFILE_PROP, DEVICE_KINDS,
-    DEVICE_LABEL_CONTENT_TYPE, DEVICE_LABEL_KEYS, FEATURES, JSCONTACT_CONTENT_TYPE,
-    MAX_ALERT_MINUTES_BEFORE, MAX_BOOKMARK_TAGS, MAX_DEVICE_NAME_CHARS, MAX_DEVICE_PLATFORM_CHARS,
-    MAX_PROFILE_ENTRIES, MAX_TASK_COMPLETIONS, MIN_ALERT_MINUTES_BEFORE, NOTEBOOK_CONTENT_TYPE,
-    NOTEBOOK_KEYS, NOTE_CONTENT_TYPE, NOTE_KEYS, PERIOD_CURRENT_PROP, PERIOD_END_PROP,
-    PERIOD_START_PROP, PROFILE_KEYS, TASK_CONTENT_TYPE, TASK_EXPORT_TYPE, TASK_KEYS,
-    TASK_LIST_CONTENT_TYPE, TASK_LIST_KEYS, WORK_NOTE_PROP,
+    CONTACT_ATTACHMENTS_PROP, CONTACT_KEYS, CONTACT_MODES, CONTACT_PROFILE_PROP,
+    CONTACT_TRASHED_AT_PROP, DEVICE_KINDS, DEVICE_LABEL_CONTENT_TYPE, DEVICE_LABEL_KEYS, FEATURES,
+    JSCONTACT_CONTENT_TYPE, MAX_ALERT_MINUTES_BEFORE, MAX_BOOKMARK_TAGS, MAX_DEVICE_NAME_CHARS,
+    MAX_DEVICE_PLATFORM_CHARS, MAX_PROFILE_ENTRIES, MAX_TASK_COMPLETIONS, MIN_ALERT_MINUTES_BEFORE,
+    NOTEBOOK_CONTENT_TYPE, NOTEBOOK_KEYS, NOTE_CONTENT_TYPE, NOTE_KEYS, PERIOD_CURRENT_PROP,
+    PERIOD_END_PROP, PERIOD_START_PROP, PROFILE_KEYS, TASK_CONTENT_TYPE, TASK_EXPORT_TYPE,
+    TASK_KEYS, TASK_LIST_CONTENT_TYPE, TASK_LIST_KEYS, TRASHED_AT_KEY, WORK_NOTE_PROP,
 };
 
 pub const PAYLOAD_SCHEMA_ID: &str = "urn:sealbook:schema:payloads";
@@ -74,16 +74,22 @@ pub fn payload_schema() -> Value {
         ("Recurrence", recurrence()),
         ("Attachment", attachment()),
         ("Profile", profile()),
-        ("Note", note()),
-        ("Notebook", notebook()),
-        ("Bookmark", bookmark()),
-        ("BookmarkCollection", bookmark_collection()),
-        ("Task", task()),
-        ("TaskList", nested_container("TaskList")),
-        ("Calendar", calendar()),
-        ("CalendarEvent", calendar_event()),
-        ("Card", card()),
-        ("AddressBook", address_book()),
+        ("Note", trashable(note(), TRASHED_AT_KEY)),
+        ("Notebook", trashable(notebook(), TRASHED_AT_KEY)),
+        ("Bookmark", trashable(bookmark(), TRASHED_AT_KEY)),
+        (
+            "BookmarkCollection",
+            trashable(bookmark_collection(), TRASHED_AT_KEY),
+        ),
+        ("Task", trashable(task(), TRASHED_AT_KEY)),
+        (
+            "TaskList",
+            trashable(nested_container("TaskList"), TRASHED_AT_KEY),
+        ),
+        ("Calendar", trashable(calendar(), TRASHED_AT_KEY)),
+        ("CalendarEvent", trashable(calendar_event(), TRASHED_AT_KEY)),
+        ("Card", trashable(card(), CONTACT_TRASHED_AT_PROP)),
+        ("AddressBook", trashable(address_book(), TRASHED_AT_KEY)),
         ("AccountSettings", account_settings()),
         ("DeviceLabel", device_label()),
     ] {
@@ -100,6 +106,21 @@ pub fn payload_schema() -> Value {
         "x-sealbook-rules": RULES,
         "$defs": defs,
     })
+}
+
+/// Adds the trash stamp, which only the trash writes set or clear: see
+/// `crate::trash`. Every other write carries it.
+fn trashable(mut schema: Value, key: &str) -> Value {
+    schema["properties"][key] = json!({
+        "type": "string",
+        "format": "date-time",
+        "description": "When it went into the trash. Set and cleared only by the trash writes.",
+    });
+    match schema["x-sealbook-conditionally-owned"].as_array_mut() {
+        Some(keys) => keys.push(json!(key)),
+        None => schema["x-sealbook-conditionally-owned"] = json!([key]),
+    }
+    schema
 }
 
 fn payload(type_name: &str, properties: Value, required: &[&str]) -> Value {

@@ -54,7 +54,13 @@ mod state;
 mod sync;
 mod task_rules;
 mod tasks;
+mod trash;
 mod tree;
+pub use trash::{
+    trash_expired, trash_hidden, trash_node, trash_purge_plan, trash_restore_plan,
+    trash_restore_write, trash_roots, trash_write, TrashNode, TrashRehome, TrashRoot,
+    CONTACT_TRASHED_AT_PROP, TRASHED_AT_KEY, TRASH_RETENTION_DAYS,
+};
 pub use tree::{flagged_with_descendants, may_reparent};
 mod vault_search;
 mod vcard;

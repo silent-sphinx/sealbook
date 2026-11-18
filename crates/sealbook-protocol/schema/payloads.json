@@ -120,6 +120,11 @@
         "name": {
           "type": "string"
         },
+        "trashedAt": {
+          "description": "When it went into the trash. Set and cleared only by the trash writes.",
+          "format": "date-time",
+          "type": "string"
+        },
         "version": {
           "$ref": "#/$defs/Version"
         }
@@ -130,6 +135,9 @@
         "name"
       ],
       "type": "object",
+      "x-sealbook-conditionally-owned": [
+        "trashedAt"
+      ],
       "x-sealbook-content-type": "application/sealbook.addressbook+json"
     },
     "Attachment": {
@@ -220,6 +228,11 @@
         "title": {
           "type": "string"
         },
+        "trashedAt": {
+          "description": "When it went into the trash. Set and cleared only by the trash writes.",
+          "format": "date-time",
+          "type": "string"
+        },
         "updatedAt": {
           "format": "date-time",
           "type": "string"
@@ -241,6 +254,9 @@
         "updatedAt"
       ],
       "type": "object",
+      "x-sealbook-conditionally-owned": [
+        "trashedAt"
+      ],
       "x-sealbook-content-type": "application/sealbook.bookmark+json"
     },
     "BookmarkCollection": {
@@ -268,6 +284,11 @@
           "format": "uuid",
           "type": "string"
         },
+        "trashedAt": {
+          "description": "When it went into the trash. Set and cleared only by the trash writes.",
+          "format": "date-time",
+          "type": "string"
+        },
         "version": {
           "$ref": "#/$defs/Version"
         }
@@ -278,6 +299,9 @@
         "name"
       ],
       "type": "object",
+      "x-sealbook-conditionally-owned": [
+        "trashedAt"
+      ],
       "x-sealbook-content-type": "application/sealbook.bookmark-collection+json"
     },
     "Calendar": {
@@ -303,6 +327,11 @@
         "name": {
           "type": "string"
         },
+        "trashedAt": {
+          "description": "When it went into the trash. Set and cleared only by the trash writes.",
+          "format": "date-time",
+          "type": "string"
+        },
         "version": {
           "$ref": "#/$defs/Version"
         }
@@ -315,6 +344,9 @@
         "favorite"
       ],
       "type": "object",
+      "x-sealbook-conditionally-owned": [
+        "trashedAt"
+      ],
       "x-sealbook-content-type": "application/sealbook.calendar+json"
     },
     "CalendarEvent": {
@@ -389,6 +421,11 @@
         "title": {
           "type": "string"
         },
+        "trashedAt": {
+          "description": "When it went into the trash. Set and cleared only by the trash writes.",
+          "format": "date-time",
+          "type": "string"
+        },
         "version": {
           "$ref": "#/$defs/Version"
         }
@@ -400,6 +437,9 @@
         "start"
       ],
       "type": "object",
+      "x-sealbook-conditionally-owned": [
+        "trashedAt"
+      ],
       "x-sealbook-content-type": "application/sealbook.calendar-event+json"
     },
     "Card": {
@@ -730,6 +770,11 @@
         "sealbook:profile": {
           "$ref": "#/$defs/Profile"
         },
+        "sealbook:trashedAt": {
+          "description": "When it went into the trash. Set and cleared only by the trash writes.",
+          "format": "date-time",
+          "type": "string"
+        },
         "speakToAs": {
           "properties": {
             "pronouns": {
@@ -778,6 +823,9 @@
         "updated"
       ],
       "type": "object",
+      "x-sealbook-conditionally-owned": [
+        "sealbook:trashedAt"
+      ],
       "x-sealbook-content-type": "application/jscontact+json"
     },
     "DeviceLabel": {
@@ -859,6 +907,11 @@
         "title": {
           "type": "string"
         },
+        "trashedAt": {
+          "description": "When it went into the trash. Set and cleared only by the trash writes.",
+          "format": "date-time",
+          "type": "string"
+        },
         "updatedAt": {
           "format": "date-time",
           "type": "string"
@@ -878,7 +931,8 @@
       ],
       "type": "object",
       "x-sealbook-conditionally-owned": [
-        "pinned"
+        "pinned",
+        "trashedAt"
       ],
       "x-sealbook-content-type": "application/sealbook.note+json"
     },
@@ -902,6 +956,11 @@
         "name": {
           "type": "string"
         },
+        "trashedAt": {
+          "description": "When it went into the trash. Set and cleared only by the trash writes.",
+          "format": "date-time",
+          "type": "string"
+        },
         "version": {
           "$ref": "#/$defs/Version"
         }
@@ -912,6 +971,9 @@
         "name"
       ],
       "type": "object",
+      "x-sealbook-conditionally-owned": [
+        "trashedAt"
+      ],
       "x-sealbook-content-type": "application/sealbook.notebook+json"
     },
     "Profile": {
@@ -1263,6 +1325,11 @@
         "title": {
           "type": "string"
         },
+        "trashedAt": {
+          "description": "When it went into the trash. Set and cleared only by the trash writes.",
+          "format": "date-time",
+          "type": "string"
+        },
         "updatedAt": {
           "format": "date-time",
           "type": "string"
@@ -1280,6 +1347,9 @@
         "updatedAt"
       ],
       "type": "object",
+      "x-sealbook-conditionally-owned": [
+        "trashedAt"
+      ],
       "x-sealbook-content-type": "application/sealbook.task+json"
     },
     "TaskList": {
@@ -1307,6 +1377,11 @@
           "format": "uuid",
           "type": "string"
         },
+        "trashedAt": {
+          "description": "When it went into the trash. Set and cleared only by the trash writes.",
+          "format": "date-time",
+          "type": "string"
+        },
         "version": {
           "$ref": "#/$defs/Version"
         }
@@ -1317,6 +1392,9 @@
         "name"
       ],
       "type": "object",
+      "x-sealbook-conditionally-owned": [
+        "trashedAt"
+      ],
       "x-sealbook-content-type": "application/sealbook.task-list+json"
     },
     "Version": {

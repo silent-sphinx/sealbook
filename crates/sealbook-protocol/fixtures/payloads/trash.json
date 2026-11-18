@@ -1,0 +1,500 @@
+{
+  "now": "2026-11-18T12:00:00Z",
+  "about": "The trash rules: stamping and restoring a payload, and which items a trashed one hides, lists, re-homes, purges and expires. Node kinds are core's payload kinds in snake_case.",
+  "writes": [
+    {
+      "case": "a note is stamped and keeps every other key",
+      "kind": "note",
+      "raw": "{\"@type\":\"Note\",\"body\":\"x\",\"createdAt\":\"2026-11-01T00:00:00Z\",\"notebookId\":\"book\",\"parentId\":\"a\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T00:00:00Z\",\"version\":\"1.0\",\"x-unknown\":1}",
+      "payload": "{\"@type\":\"Note\",\"body\":\"x\",\"createdAt\":\"2026-11-01T00:00:00Z\",\"notebookId\":\"book\",\"parentId\":\"a\",\"title\":\"Plan\",\"trashedAt\":\"2026-11-18T12:00:00Z\",\"updatedAt\":\"2026-11-01T00:00:00Z\",\"version\":\"1.0\",\"x-unknown\":1}"
+    },
+    {
+      "case": "a card is stamped under its Sealbook key",
+      "kind": "contact",
+      "raw": "{\"@type\":\"Card\",\"name\":{\"full\":\"Ada\"},\"sealbook:addressBookId\":\"gone\",\"version\":\"1.0\"}",
+      "payload": "{\"@type\":\"Card\",\"name\":{\"full\":\"Ada\"},\"sealbook:addressBookId\":\"gone\",\"sealbook:trashedAt\":\"2026-11-18T12:00:00Z\",\"version\":\"1.0\"}"
+    }
+  ],
+  "restores": [
+    {
+      "case": "a restore in place only clears the stamp",
+      "kind": "note",
+      "raw": "{\"@type\":\"Note\",\"body\":\"x\",\"createdAt\":\"2026-11-01T00:00:00Z\",\"notebookId\":\"book\",\"parentId\":\"a\",\"title\":\"Plan\",\"trashedAt\":\"2026-11-18T12:00:00Z\",\"updatedAt\":\"2026-11-01T00:00:00Z\",\"version\":\"1.0\",\"x-unknown\":1}",
+      "rehome": null,
+      "payload": "{\"@type\":\"Note\",\"body\":\"x\",\"createdAt\":\"2026-11-01T00:00:00Z\",\"notebookId\":\"book\",\"parentId\":\"a\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T00:00:00Z\",\"version\":\"1.0\",\"x-unknown\":1}"
+    },
+    {
+      "case": "a note whose parent and notebook are still trashed comes back at the top of the default notebook",
+      "kind": "note",
+      "raw": "{\"@type\":\"Note\",\"body\":\"x\",\"createdAt\":\"2026-11-01T00:00:00Z\",\"notebookId\":\"book\",\"parentId\":\"a\",\"title\":\"Plan\",\"trashedAt\":\"2026-11-18T12:00:00Z\",\"updatedAt\":\"2026-11-01T00:00:00Z\",\"version\":\"1.0\",\"x-unknown\":1}",
+      "rehome": {
+        "clear_parent": true,
+        "container_id": "00000000-0000-0000-0000-000000000002"
+      },
+      "payload": "{\"@type\":\"Note\",\"body\":\"x\",\"createdAt\":\"2026-11-01T00:00:00Z\",\"notebookId\":\"00000000-0000-0000-0000-000000000002\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T00:00:00Z\",\"version\":\"1.0\",\"x-unknown\":1}"
+    },
+    {
+      "case": "a card comes back in the default address book",
+      "kind": "contact",
+      "raw": "{\"@type\":\"Card\",\"name\":{\"full\":\"Ada\"},\"sealbook:addressBookId\":\"gone\",\"sealbook:trashedAt\":\"2026-11-18T12:00:00Z\",\"version\":\"1.0\"}",
+      "rehome": {
+        "clear_parent": false,
+        "container_id": "00000000-0000-0000-0000-000000000001"
+      },
+      "payload": "{\"@type\":\"Card\",\"name\":{\"full\":\"Ada\"},\"sealbook:addressBookId\":\"00000000-0000-0000-0000-000000000001\",\"version\":\"1.0\"}"
+    }
+  ],
+  "hidden": [
+    {
+      "case": "a trashed notebook hides its notes and the notes under them",
+      "nodes": [
+        {
+          "id": "book",
+          "kind": "notebook",
+          "trashed_at": "2026-11-01T00:00:00Z"
+        },
+        {
+          "id": "a",
+          "kind": "note",
+          "container_id": "book"
+        },
+        {
+          "id": "b",
+          "kind": "note",
+          "parent_id": "a",
+          "container_id": "book"
+        },
+        {
+          "id": "elsewhere",
+          "kind": "notebook"
+        },
+        {
+          "id": "other",
+          "kind": "note",
+          "container_id": "elsewhere"
+        }
+      ],
+      "hidden": [
+        "a",
+        "b",
+        "book"
+      ]
+    },
+    {
+      "case": "a trashed note hides the notes under it",
+      "nodes": [
+        {
+          "id": "a",
+          "kind": "note",
+          "container_id": "book",
+          "trashed_at": "2026-11-01T00:00:00Z"
+        },
+        {
+          "id": "b",
+          "kind": "note",
+          "parent_id": "a",
+          "container_id": "book"
+        },
+        {
+          "id": "book",
+          "kind": "notebook"
+        }
+      ],
+      "hidden": [
+        "a",
+        "b"
+      ]
+    },
+    {
+      "case": "a trashed list hides its nested lists and their tasks",
+      "nodes": [
+        {
+          "id": "l",
+          "kind": "task_list",
+          "trashed_at": "2026-11-01T00:00:00Z"
+        },
+        {
+          "id": "m",
+          "kind": "task_list",
+          "parent_id": "l"
+        },
+        {
+          "id": "t",
+          "kind": "task",
+          "container_id": "m"
+        },
+        {
+          "id": "u",
+          "kind": "task"
+        }
+      ],
+      "hidden": [
+        "l",
+        "m",
+        "t"
+      ]
+    },
+    {
+      "case": "a parent cycle does not hang",
+      "nodes": [
+        {
+          "id": "x",
+          "kind": "bookmark_collection",
+          "parent_id": "y",
+          "trashed_at": "2026-11-01T00:00:00Z"
+        },
+        {
+          "id": "y",
+          "kind": "bookmark_collection",
+          "parent_id": "x"
+        }
+      ],
+      "hidden": [
+        "x",
+        "y"
+      ]
+    }
+  ],
+  "roots": [
+    {
+      "case": "a trashed notebook is listed once with what it took",
+      "nodes": [
+        {
+          "id": "book",
+          "kind": "notebook",
+          "trashed_at": "2026-11-01T00:00:00Z"
+        },
+        {
+          "id": "a",
+          "kind": "note",
+          "container_id": "book"
+        },
+        {
+          "id": "b",
+          "kind": "note",
+          "parent_id": "a",
+          "container_id": "book"
+        },
+        {
+          "id": "elsewhere",
+          "kind": "notebook"
+        },
+        {
+          "id": "other",
+          "kind": "note",
+          "container_id": "elsewhere"
+        }
+      ],
+      "now_secs": 1793491200,
+      "roots": [
+        {
+          "id": "book",
+          "kind": "notebook",
+          "trashed_at": "2026-11-01T00:00:00Z",
+          "days_left": 30,
+          "contained": 2
+        }
+      ]
+    },
+    {
+      "case": "newest first, and an unreadable stamp has no days left",
+      "nodes": [
+        {
+          "id": "old",
+          "kind": "bookmark",
+          "trashed_at": "2026-10-01T00:00:00Z"
+        },
+        {
+          "id": "new",
+          "kind": "bookmark",
+          "trashed_at": "2026-11-01T00:00:00Z"
+        },
+        {
+          "id": "odd",
+          "kind": "bookmark",
+          "trashed_at": "yesterday"
+        }
+      ],
+      "now_secs": 1793491200,
+      "roots": [
+        {
+          "id": "new",
+          "kind": "bookmark",
+          "trashed_at": "2026-11-01T00:00:00Z",
+          "days_left": 30,
+          "contained": 0
+        },
+        {
+          "id": "old",
+          "kind": "bookmark",
+          "trashed_at": "2026-10-01T00:00:00Z",
+          "days_left": 0,
+          "contained": 0
+        },
+        {
+          "id": "odd",
+          "kind": "bookmark",
+          "trashed_at": "yesterday",
+          "contained": 0
+        }
+      ]
+    },
+    {
+      "case": "an item trashed before its notebook is listed again once the notebook is back",
+      "nodes": [
+        {
+          "id": "book",
+          "kind": "notebook"
+        },
+        {
+          "id": "a",
+          "kind": "note",
+          "container_id": "book"
+        },
+        {
+          "id": "b",
+          "kind": "note",
+          "parent_id": "a",
+          "container_id": "book",
+          "trashed_at": "2026-11-01T00:00:00Z"
+        }
+      ],
+      "now_secs": 1793491200,
+      "roots": [
+        {
+          "id": "b",
+          "kind": "note",
+          "trashed_at": "2026-11-01T00:00:00Z",
+          "days_left": 30,
+          "contained": 0
+        }
+      ]
+    }
+  ],
+  "restore_plans": [
+    {
+      "case": "a root comes back where it was",
+      "nodes": [
+        {
+          "id": "book",
+          "kind": "notebook",
+          "trashed_at": "2026-11-01T00:00:00Z"
+        },
+        {
+          "id": "a",
+          "kind": "note",
+          "container_id": "book"
+        },
+        {
+          "id": "b",
+          "kind": "note",
+          "parent_id": "a",
+          "container_id": "book"
+        },
+        {
+          "id": "elsewhere",
+          "kind": "notebook"
+        },
+        {
+          "id": "other",
+          "kind": "note",
+          "container_id": "elsewhere"
+        }
+      ],
+      "id": "book",
+      "rehome": null
+    },
+    {
+      "case": "a note under a trashed note in a trashed notebook comes back at the top of the default notebook",
+      "nodes": [
+        {
+          "id": "book",
+          "kind": "notebook",
+          "trashed_at": "2026-11-01T00:00:00Z"
+        },
+        {
+          "id": "a",
+          "kind": "note",
+          "container_id": "book",
+          "trashed_at": "2026-11-01T00:00:00Z"
+        },
+        {
+          "id": "b",
+          "kind": "note",
+          "parent_id": "a",
+          "container_id": "book",
+          "trashed_at": "2026-11-01T00:00:00Z"
+        }
+      ],
+      "id": "b",
+      "rehome": {
+        "clear_parent": true,
+        "container_id": "00000000-0000-0000-0000-000000000002"
+      }
+    },
+    {
+      "case": "a nested list under a trashed list comes back at the top level",
+      "nodes": [
+        {
+          "id": "l",
+          "kind": "task_list",
+          "trashed_at": "2026-11-01T00:00:00Z"
+        },
+        {
+          "id": "m",
+          "kind": "task_list",
+          "parent_id": "l",
+          "trashed_at": "2026-11-01T00:00:00Z"
+        }
+      ],
+      "id": "m",
+      "rehome": {
+        "clear_parent": true
+      }
+    }
+  ],
+  "purges": [
+    {
+      "case": "a purge takes everything inside, innermost first",
+      "nodes": [
+        {
+          "id": "book",
+          "kind": "notebook",
+          "trashed_at": "2026-11-01T00:00:00Z"
+        },
+        {
+          "id": "a",
+          "kind": "note",
+          "container_id": "book"
+        },
+        {
+          "id": "b",
+          "kind": "note",
+          "parent_id": "a",
+          "container_id": "book"
+        },
+        {
+          "id": "elsewhere",
+          "kind": "notebook"
+        },
+        {
+          "id": "other",
+          "kind": "note",
+          "container_id": "elsewhere"
+        }
+      ],
+      "ids": [
+        "book"
+      ],
+      "purged": [
+        "b",
+        "a",
+        "book"
+      ]
+    },
+    {
+      "case": "an id no node names is still purged",
+      "nodes": [
+        {
+          "id": "book",
+          "kind": "notebook",
+          "trashed_at": "2026-11-01T00:00:00Z"
+        },
+        {
+          "id": "a",
+          "kind": "note",
+          "container_id": "book"
+        },
+        {
+          "id": "b",
+          "kind": "note",
+          "parent_id": "a",
+          "container_id": "book"
+        },
+        {
+          "id": "elsewhere",
+          "kind": "notebook"
+        },
+        {
+          "id": "other",
+          "kind": "note",
+          "container_id": "elsewhere"
+        }
+      ],
+      "ids": [
+        "gone"
+      ],
+      "purged": [
+        "gone"
+      ]
+    }
+  ],
+  "expiries": [
+    {
+      "case": "a second before the boundary nothing expires",
+      "nodes": [
+        {
+          "id": "book",
+          "kind": "notebook",
+          "trashed_at": "2026-11-01T00:00:00Z"
+        },
+        {
+          "id": "a",
+          "kind": "note",
+          "container_id": "book"
+        },
+        {
+          "id": "b",
+          "kind": "note",
+          "parent_id": "a",
+          "container_id": "book"
+        },
+        {
+          "id": "elsewhere",
+          "kind": "notebook"
+        },
+        {
+          "id": "other",
+          "kind": "note",
+          "container_id": "elsewhere"
+        }
+      ],
+      "now_secs": 1796083199,
+      "expired": []
+    },
+    {
+      "case": "on the boundary the root expires, its contents with it through the purge plan",
+      "nodes": [
+        {
+          "id": "book",
+          "kind": "notebook",
+          "trashed_at": "2026-11-01T00:00:00Z"
+        },
+        {
+          "id": "a",
+          "kind": "note",
+          "container_id": "book"
+        },
+        {
+          "id": "b",
+          "kind": "note",
+          "parent_id": "a",
+          "container_id": "book"
+        },
+        {
+          "id": "elsewhere",
+          "kind": "notebook"
+        },
+        {
+          "id": "other",
+          "kind": "note",
+          "container_id": "elsewhere"
+        }
+      ],
+      "now_secs": 1796083200,
+      "expired": [
+        "book"
+      ]
+    }
+  ]
+}

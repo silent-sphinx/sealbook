@@ -8538,3 +8538,81 @@ async fn a_substituted_device_wrap_is_refused_at_login() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn a_trashed_notebook_takes_its_notes_and_brings_them_back() {
+    let dir = std::env::temp_dir().join(format!("sealbook-trash-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "trash", "correct horse battery")
+        .await
+        .expect("register");
+    let notebook = Uuid::new_v4();
+    client
+        .put_notebook(notebook, "Work", None)
+        .await
+        .expect("notebook");
+    let (parent, child) = (Uuid::new_v4(), Uuid::new_v4());
+    client
+        .put_note(parent, &note_json("Plan", "", notebook))
+        .await
+        .expect("note");
+    let nested = sealbook_client::note_write(
+        &sealbook_client::CoreNoteDraft {
+            title: "Detail".into(),
+            notebook_id: notebook.to_string(),
+            parent_id: Some(parent.to_string()),
+            ..Default::default()
+        },
+        "2026-10-28T12:00:00Z",
+    )
+    .expect("writes");
+    client.put_note(child, &nested).await.expect("nested note");
+
+    let objects = client.trashable_objects().await.expect("objects");
+    let book = objects.iter().find(|object| object.id == notebook).unwrap();
+    client
+        .trash_object(book, "2026-11-01T00:00:00Z")
+        .await
+        .expect("trash");
+
+    let objects = client.trashable_objects().await.expect("objects");
+    let nodes = sealbook_client::trash_nodes(&objects);
+    let hidden = sealbook_client::trash_hidden(&nodes);
+    for id in [notebook, parent, child] {
+        assert!(hidden.contains(&id.to_string()), "{id} should be hidden");
+    }
+    let roots = sealbook_client::trash_roots(&nodes, 1_793_491_200);
+    assert_eq!(roots.len(), 1);
+    assert_eq!(roots[0].contained, 2);
+
+    let book = objects.iter().find(|object| object.id == notebook).unwrap();
+    client
+        .restore_object(&objects, book)
+        .await
+        .expect("restore");
+    let objects = client.trashable_objects().await.expect("objects");
+    assert!(sealbook_client::trash_hidden(&sealbook_client::trash_nodes(&objects)).is_empty());
+
+    let book = objects.iter().find(|object| object.id == notebook).unwrap();
+    client
+        .trash_object(book, "2026-11-01T00:00:00Z")
+        .await
+        .expect("trash again");
+    let objects = client.trashable_objects().await.expect("objects");
+    let purged = client
+        .purge_objects(&objects, &[notebook])
+        .await
+        .expect("purge");
+    assert_eq!(purged, 3);
+    let left = client.trashable_objects().await.expect("objects");
+    assert!(!left
+        .iter()
+        .any(|object| [notebook, parent, child].contains(&object.id)));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

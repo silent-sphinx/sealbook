@@ -20,6 +20,7 @@ mod roster;
 mod state;
 mod sync;
 mod tls;
+mod trash;
 
 pub use attachments::UploadedAttachment;
 pub use client::SealbookClient;
@@ -28,6 +29,7 @@ pub use objects::{ExportedObject, ExportedVault};
 pub use pairing::JoinPairing;
 pub use state::LocalState;
 pub use tls::{certificate_from_pem, pq_tls_config, TrustAnchors};
+pub use trash::{trash_nodes, TrashObject};
 
 pub use sealbook_core::CoreError;
 /// The content-payload decisions, straight from core: every client writes a
@@ -74,6 +76,10 @@ pub use sealbook_core::{
 pub use sealbook_core::{
     device_default_name, os_display_name, write_batches, CoreDeviceEntry, CoreDeviceKind,
     UNREPORTED_DEVICE_DETAIL,
+};
+pub use sealbook_core::{
+    trash_expired, trash_hidden, trash_node, trash_purge_plan, trash_restore_plan, trash_roots,
+    CorePayloadKind, TrashNode, TrashRehome, TrashRoot, TRASH_RETENTION_DAYS,
 };
 
 pub use sealbook_protocol::{

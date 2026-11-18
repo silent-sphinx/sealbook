@@ -15,9 +15,9 @@ use clap::ValueEnum;
 use sealbook_client::{
     address_book_parse, bookmark_collection_parse, bookmark_parse, calendar_parse, contact_parse,
     event_parse, note_parse, notebook_parse, resolve_address_book_id, resolve_collection_id,
-    task_list_parse, task_parse, CoreAccountSettings, CoreBookName, CoreContactSource,
-    CoreSearchContainer, CoreSearchHit, CoreSearchKind, CoreSearchSource, SealbookClient,
-    VaultIndex,
+    task_list_parse, task_parse, trash_hidden, trash_node, CoreAccountSettings, CoreBookName,
+    CoreContactSource, CorePayloadKind, CoreSearchContainer, CoreSearchHit, CoreSearchKind,
+    CoreSearchSource, SealbookClient, VaultIndex,
 };
 use uuid::Uuid;
 
@@ -68,7 +68,7 @@ pub struct Stored {
 }
 
 pub async fn load(client: &mut SealbookClient) -> Result<Stored> {
-    Ok(Stored {
+    Ok(without_trash(Stored {
         contacts: client.list_contacts().await.context("contacts")?,
         books: client.list_address_book_payloads().await.context("books")?,
         events: client.list_calendar_events().await.context("events")?,
@@ -85,7 +85,46 @@ pub async fn load(client: &mut SealbookClient) -> Result<Stored> {
             .list_task_list_payloads()
             .await
             .context("task lists")?,
-    })
+    }))
+}
+
+/// Leaves out whatever is in the trash, or inside something that is.
+fn without_trash(mut stored: Stored) -> Stored {
+    use CorePayloadKind::*;
+    let mut nodes = Vec::new();
+    for (kind, rows) in [
+        (Contact, &stored.contacts),
+        (AddressBook, &stored.books),
+        (CalendarEvent, &stored.events),
+        (Calendar, &stored.calendars),
+        (Note, &stored.notes),
+        (Notebook, &stored.notebooks),
+        (Bookmark, &stored.bookmarks),
+        (BookmarkCollection, &stored.collections),
+        (Task, &stored.tasks),
+        (TaskList, &stored.task_lists),
+    ] {
+        nodes.extend(
+            rows.iter()
+                .filter_map(|(id, raw)| trash_node(&id.to_string(), kind, raw)),
+        );
+    }
+    let hidden = trash_hidden(&nodes);
+    for rows in [
+        &mut stored.contacts,
+        &mut stored.books,
+        &mut stored.events,
+        &mut stored.calendars,
+        &mut stored.notes,
+        &mut stored.notebooks,
+        &mut stored.bookmarks,
+        &mut stored.collections,
+        &mut stored.tasks,
+        &mut stored.task_lists,
+    ] {
+        rows.retain(|(id, _)| !hidden.contains(&id.to_string()));
+    }
+    stored
 }
 
 type Inputs = (

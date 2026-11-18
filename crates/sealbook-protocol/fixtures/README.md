@@ -35,6 +35,11 @@ both builds already require for the wasm module and the JNI library.
   (`LiveServerTest`, native library under a JVM) against it. Both skip when
   `SEALBOOK_E2E_SERVER` is unset.
 
+- `payloads/trash.json` - the trash rules in core's `trash` module: stamping
+  and restoring a payload, and which items a trashed one hides, lists,
+  re-homes, purges and expires. Hand-written; every case is in `corpus.json`, so
+  Rust, the web and Android all run it.
+
 - `v1.0.0-account-export.json` — the v1.0.0 release's own account export,
   carrying a content type that release had no parser for and a payload that is
   not JSON. Pins that both the CLI and the web importer still round-trip every
@@ -314,7 +319,9 @@ Every `op` names one function of `sealbook-core`, in the form `<type>.<verb>`:
 `write` takes a draft (and the clock when the table passes `$now`) and returns
 the payload text, `parse` takes an id and the stored text and returns the
 record; `tone` and `normalize_due` are the two rules that are not a payload
-read or write. The `offline.*` operations are the queue and merge rules:
+read or write. The `trash.*` operations take a kind in core's snake_case payload kinds and
+`TrashNode` lists, and `trash.hidden` returns its ids sorted. The `offline.*`
+operations are the queue and merge rules:
 `offline.outbox_push` folds a row's `pushes` through `outbox_push` from an empty
 outbox, the one operation a runner composes rather than calls once, and
 `offline.merge` returns the outcome in serde's tagged form with an absent

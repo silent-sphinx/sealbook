@@ -94,6 +94,7 @@ fn a_notes_backup_meets_the_schema() {
         color: None,
         archived: false,
         hide_from_all: false,
+        trashed_at: None,
         readable: true,
         raw: String::new(),
     }];

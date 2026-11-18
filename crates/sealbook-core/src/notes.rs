@@ -197,6 +197,9 @@ pub struct CoreNote {
     /// is optional and a lenient parse is better than a blank row, but a field
     /// this build understands may have changed meaning. [`note_write`] refuses
     /// such a payload, so a host that offers an editor should show it read-only.
+    /// When it went into the trash: see `crate::trash`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trashed_at: Option<String>,
     pub readable: bool,
     pub raw: String,
 }
@@ -215,6 +218,9 @@ pub struct CoreNotebook {
     /// Left out of the notes overview, still listed and searchable.
     #[serde(default)]
     pub hide_from_all: bool,
+    /// When it went into the trash: see `crate::trash`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trashed_at: Option<String>,
     pub readable: bool,
     pub raw: String,
 }
@@ -248,6 +254,7 @@ pub fn note_parse(id: &str, raw: &str) -> CoreNote {
             created_at: None,
             updated_at: None,
             pinned: None,
+            trashed_at: None,
             readable: true,
             raw: raw.to_string(),
         };
@@ -262,6 +269,7 @@ pub fn note_parse(id: &str, raw: &str) -> CoreNote {
         created_at: trimmed(&object, "createdAt"),
         updated_at: trimmed(&object, "updatedAt"),
         pinned: object.get("pinned").and_then(Value::as_bool),
+        trashed_at: crate::trash::stored_trashed_at(crate::CorePayloadKind::Note, &object),
         readable: declared_readable(&object),
         raw: raw.to_string(),
     }
@@ -334,6 +342,9 @@ pub fn notebook_parse(id: &str, raw: &str) -> CoreNotebook {
             .and_then(|object| object.get("hideFromAll"))
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        trashed_at: object.as_ref().and_then(|object| {
+            crate::trash::stored_trashed_at(crate::CorePayloadKind::Notebook, object)
+        }),
         readable: object.as_ref().map(declared_readable).unwrap_or(true),
         raw: raw.to_string(),
     }

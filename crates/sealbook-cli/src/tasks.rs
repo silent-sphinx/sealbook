@@ -14,11 +14,10 @@ use jiff::{civil, tz::TimeZone, Span, Timestamp};
 use sealbook_client::{
     default_task_list_id, normalize_due_date, normalize_tags, order_tasks, resolve_task_list_id,
     task_agenda, task_complete, task_export, task_import, task_list_move_plan,
-    task_list_name_by_id, task_list_remove_plan, task_list_write, task_move_plan, task_parse,
-    task_relist_plan, task_remove_plan, task_reopen, task_write, write_batches, CoreRecurrence,
-    CoreRecurrenceFrequency, CoreTask, CoreTaskAgendaItem, CoreTaskClock, CoreTaskDraft,
-    CoreTaskList, CoreTaskListDraft, CoreTaskOrderItem, CoreTaskPlan, CoreTaskWrite,
-    SealbookClient,
+    task_list_name_by_id, task_list_write, task_move_plan, task_parse, task_relist_plan,
+    task_reopen, task_write, write_batches, CoreRecurrence, CoreRecurrenceFrequency, CoreTask,
+    CoreTaskAgendaItem, CoreTaskClock, CoreTaskDraft, CoreTaskList, CoreTaskListDraft,
+    CoreTaskOrderItem, CoreTaskPlan, CoreTaskWrite, SealbookClient,
 };
 use uuid::Uuid;
 
@@ -690,11 +689,13 @@ pub enum TasklistCommand {
         #[arg(long, conflicts_with = "parent")]
         top: bool,
     },
-    /// Delete a list. Its tasks and sub-lists move up to its parent, or to the
-    /// default list from the top level.
+    /// Move a list to the trash, with its tasks and sub-lists.
     Delete {
         #[arg(long)]
         id: String,
+        /// Delete it for good instead of moving it to the trash.
+        #[arg(long)]
+        forever: bool,
     },
 }
 
@@ -745,10 +746,13 @@ pub enum TasksCommand {
         #[arg(long)]
         to_list: Option<String>,
     },
-    /// Delete a task. Its subtasks move up to its parent.
+    /// Move a task to the trash, with its subtasks.
     Delete {
         #[arg(long)]
         id: Uuid,
+        /// Delete it for good instead of moving it to the trash.
+        #[arg(long)]
+        forever: bool,
     },
     /// Open tasks in list order, subtasks under their parent.
     List {
@@ -917,15 +921,9 @@ pub async fn run_lists(client: &mut SealbookClient, command: TasklistCommand) ->
             apply_plan(client, &plan, &now).await?;
             println!("moved task list {id}");
         }
-        TasklistCommand::Delete { id } => {
+        TasklistCommand::Delete { id, forever } => {
             let id = resolve_list(&lists, &id)?;
-            let plan = task_list_remove_plan(&lists, &tasks, &id.to_string());
-            apply_plan(client, &plan, &now).await?;
-            println!(
-                "deleted task list {id}, moved {} task(s) and {} sub-list(s) up",
-                plan.tasks.len(),
-                plan.lists.len()
-            );
+            println!("{}", crate::trash::remove(client, id, forever).await?);
         }
     }
     Ok(())
@@ -1065,14 +1063,9 @@ pub async fn run_tasks(client: &mut SealbookClient, command: TasksCommand) -> Re
             apply_plan(client, &plan, &now).await?;
             println!("moved task {id} ({} written)", plan.tasks.len());
         }
-        TasksCommand::Delete { id } => {
-            let task = found(&tasks, id)?;
-            let plan = task_remove_plan(&tasks, &task.id);
-            apply_plan(client, &plan, &now).await?;
-            println!(
-                "deleted task {id}, moved {} subtask(s) up",
-                plan.tasks.len()
-            );
+        TasksCommand::Delete { id, forever } => {
+            found(&tasks, id)?;
+            println!("{}", crate::trash::remove(client, id, forever).await?);
         }
         TasksCommand::List { list, all } => {
             let list = list.map(|spec| resolve_list(&lists, &spec)).transpose()?;
