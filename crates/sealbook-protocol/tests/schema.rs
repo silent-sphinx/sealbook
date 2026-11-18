@@ -160,19 +160,31 @@ fn every_wire_body_in_the_shared_fixtures_meets_the_schema() {
             "RosterBody",
         ),
         ("pairing/handshake.json", "started/body", "PairJoinRequest"),
-        ("pairing/handshake.json", "join_response", "PairJoinResponse"),
+        (
+            "pairing/handshake.json",
+            "join_response",
+            "PairJoinResponse",
+        ),
         (
             "pairing/handshake.json",
             "pending_response",
             "PairStatusResponse",
         ),
-        ("pairing/handshake.json", "responded/body", "PairRespondRequest"),
+        (
+            "pairing/handshake.json",
+            "responded/body",
+            "PairRespondRequest",
+        ),
         (
             "pairing/handshake.json",
             "responded_response",
             "PairStatusResponse",
         ),
-        ("pairing/handshake.json", "confirm_body", "PairConfirmRequest"),
+        (
+            "pairing/handshake.json",
+            "confirm_body",
+            "PairConfirmRequest",
+        ),
         (
             "pairing/handshake.json",
             "confirmed_response",
