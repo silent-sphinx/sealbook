@@ -1,0 +1,97 @@
+{
+  "description": "Padme lengths (Purbs, 2019), computed independently of the Rust implementation",
+  "vectors": [
+    {
+      "len": 0,
+      "padded": 0
+    },
+    {
+      "len": 1,
+      "padded": 1
+    },
+    {
+      "len": 2,
+      "padded": 2
+    },
+    {
+      "len": 3,
+      "padded": 3
+    },
+    {
+      "len": 7,
+      "padded": 7
+    },
+    {
+      "len": 8,
+      "padded": 8
+    },
+    {
+      "len": 9,
+      "padded": 10
+    },
+    {
+      "len": 100,
+      "padded": 104
+    },
+    {
+      "len": 1000,
+      "padded": 1024
+    },
+    {
+      "len": 1024,
+      "padded": 1024
+    },
+    {
+      "len": 4096,
+      "padded": 4096
+    },
+    {
+      "len": 10000,
+      "padded": 10240
+    },
+    {
+      "len": 65536,
+      "padded": 65536
+    },
+    {
+      "len": 65537,
+      "padded": 67584
+    },
+    {
+      "len": 100000,
+      "padded": 100352
+    },
+    {
+      "len": 1048576,
+      "padded": 1048576
+    },
+    {
+      "len": 3000000,
+      "padded": 3014656
+    },
+    {
+      "len": 4194304,
+      "padded": 4194304
+    },
+    {
+      "len": 4194305,
+      "padded": 4325376
+    },
+    {
+      "len": 10000000,
+      "padded": 10223616
+    },
+    {
+      "len": 12345678,
+      "padded": 12582912
+    },
+    {
+      "len": 100000000,
+      "padded": 100663296
+    },
+    {
+      "len": 209715200,
+      "padded": 209715200
+    }
+  ]
+}

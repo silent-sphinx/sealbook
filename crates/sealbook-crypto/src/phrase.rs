@@ -9,7 +9,7 @@ use zeroize::Zeroize;
 
 use crate::aead::{CollectionKey, COLLECTION_KEY_LEN, NONCE_LEN};
 use crate::error::CryptoError;
-use crate::recovery::RecoveryWrap;
+use crate::hpke_wrap::{WrapBinding, WrapForm};
 use crate::sign::{signing_from_seeds, DeviceSigningPublic, DualSignature, SIGNING_SEED_LEN};
 
 pub const PHRASE_CIPHERSUITE: &str = "aead-phrase-hkdf-sha256";
@@ -21,7 +21,27 @@ const WRAP_INFO: &[u8] = b"sealbook-phrase-wrap-v1";
 const LOOKUP_INFO: &[u8] = b"sealbook-phrase-lookup-v1";
 const MLDSA_SEED_INFO: &[u8] = b"sealbook-phrase-mldsa-v1";
 const ED25519_SEED_INFO: &[u8] = b"sealbook-phrase-ed25519-v1";
-const AAD: &[u8] = b"sealbook-phrase-ck";
+/// The phrase wrap's AAD before it was bound to a collection and epoch. Only
+/// opened, never sealed, so an account whose owner has lost every device can
+/// still recover during the migration.
+const AAD_LEGACY: &[u8] = b"sealbook-phrase-ck";
+const AAD_PREFIX: &[u8] = b"sealbook-phrase-ck-v2";
+
+/// A collection key sealed under a key derived from the recovery phrase.
+#[derive(Clone, Debug)]
+pub struct PhraseWrap {
+    pub nonce: [u8; NONCE_LEN],
+    pub ciphertext: Vec<u8>,
+    pub ciphersuite: String,
+}
+
+fn bound_aad(binding: &WrapBinding) -> Vec<u8> {
+    let mut aad = Vec::with_capacity(AAD_PREFIX.len() + 24);
+    aad.extend_from_slice(AAD_PREFIX);
+    aad.extend_from_slice(binding.collection_id.as_bytes());
+    aad.extend_from_slice(&binding.key_epoch.to_be_bytes());
+    aad
+}
 
 include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/bip39_words.rs"));
 
@@ -107,10 +127,11 @@ fn derive_from_entropy(
 pub fn wrap_for_phrase(
     entropy: &[u8; PHRASE_ENTROPY_LEN],
     key: &CollectionKey,
-) -> Result<RecoveryWrap, CryptoError> {
+    binding: &WrapBinding,
+) -> Result<PhraseWrap, CryptoError> {
     let mut nonce = [0u8; NONCE_LEN];
     rand::thread_rng().fill_bytes(&mut nonce);
-    wrap_for_phrase_with_nonce(entropy, key, &nonce)
+    wrap_for_phrase_with_nonce(entropy, key, binding, &nonce)
 }
 
 /// Wraps under a caller-supplied nonce.
@@ -120,43 +141,82 @@ pub fn wrap_for_phrase(
 pub fn wrap_for_phrase_with_nonce(
     entropy: &[u8; PHRASE_ENTROPY_LEN],
     key: &CollectionKey,
+    binding: &WrapBinding,
     nonce: &[u8; NONCE_LEN],
-) -> Result<RecoveryWrap, CryptoError> {
-    let mut kek = phrase_kek(entropy)?;
-    let cipher = XChaCha20Poly1305::new(Key::from_slice(&kek));
-    let ciphertext = cipher
-        .encrypt(
-            XNonce::from_slice(nonce),
-            Payload {
-                msg: &key.0,
-                aad: AAD,
-            },
-        )
-        .map_err(|_| CryptoError::AeadEncrypt)?;
-    kek.zeroize();
-    Ok(RecoveryWrap {
+) -> Result<PhraseWrap, CryptoError> {
+    let ciphertext = seal_phrase(entropy, key, &bound_aad(binding), nonce)?;
+    Ok(PhraseWrap {
         nonce: *nonce,
         ciphertext,
         ciphersuite: PHRASE_CIPHERSUITE.to_string(),
     })
 }
 
+/// A wrap in the form that carried no binding, for fixtures and for tests of the
+/// migration path. Nothing in the product seals this form any more.
+#[doc(hidden)]
+pub fn wrap_for_phrase_legacy_with_nonce(
+    entropy: &[u8; PHRASE_ENTROPY_LEN],
+    key: &CollectionKey,
+    nonce: &[u8; NONCE_LEN],
+) -> Result<PhraseWrap, CryptoError> {
+    let ciphertext = seal_phrase(entropy, key, AAD_LEGACY, nonce)?;
+    Ok(PhraseWrap {
+        nonce: *nonce,
+        ciphertext,
+        ciphersuite: PHRASE_CIPHERSUITE.to_string(),
+    })
+}
+
+fn seal_phrase(
+    entropy: &[u8; PHRASE_ENTROPY_LEN],
+    key: &CollectionKey,
+    aad: &[u8],
+    nonce: &[u8; NONCE_LEN],
+) -> Result<Vec<u8>, CryptoError> {
+    let mut kek = phrase_kek(entropy)?;
+    let cipher = XChaCha20Poly1305::new(Key::from_slice(&kek));
+    let sealed = cipher
+        .encrypt(XNonce::from_slice(nonce), Payload { msg: &key.0, aad })
+        .map_err(|_| CryptoError::AeadEncrypt);
+    kek.zeroize();
+    sealed
+}
+
+/// Opens a phrase wrap bound to `binding`, and reports which form opened.
+///
+/// The bound form is tried first, then the constant-AAD form that earlier builds
+/// sealed. Core allows the legacy form only while an account is migrating.
 pub fn unwrap_for_phrase(
     entropy: &[u8; PHRASE_ENTROPY_LEN],
-    wrap: &RecoveryWrap,
+    wrap: &PhraseWrap,
+    binding: &WrapBinding,
+) -> Result<(CollectionKey, WrapForm), CryptoError> {
+    if let Ok(key) = open_phrase(entropy, wrap, &bound_aad(binding)) {
+        return Ok((key, WrapForm::Bound));
+    }
+    let key = open_phrase(entropy, wrap, AAD_LEGACY)?;
+    Ok((key, WrapForm::Legacy))
+}
+
+fn open_phrase(
+    entropy: &[u8; PHRASE_ENTROPY_LEN],
+    wrap: &PhraseWrap,
+    aad: &[u8],
 ) -> Result<CollectionKey, CryptoError> {
     let mut kek = phrase_kek(entropy)?;
     let cipher = XChaCha20Poly1305::new(Key::from_slice(&kek));
-    let plaintext = cipher
+    let opened = cipher
         .decrypt(
             XNonce::from_slice(&wrap.nonce),
             Payload {
                 msg: &wrap.ciphertext,
-                aad: AAD,
+                aad,
             },
         )
-        .map_err(|_| CryptoError::AeadDecrypt)?;
+        .map_err(|_| CryptoError::AeadDecrypt);
     kek.zeroize();
+    let plaintext = opened?;
     if plaintext.len() != COLLECTION_KEY_LEN {
         return Err(CryptoError::Encoding);
     }
@@ -243,11 +303,42 @@ mod tests {
         let (phrase, entropy) = generate_phrase().unwrap();
         assert_eq!(phrase.split_whitespace().count(), 24);
         assert_eq!(entropy_from_phrase(&phrase).unwrap(), entropy);
-        let wrap = wrap_for_phrase(&entropy, &key).unwrap();
-        let opened = unwrap_for_phrase(&entropy, &wrap).unwrap();
+        let wrap = wrap_for_phrase(&entropy, &key, &binding(2)).unwrap();
+        let (opened, form) = unwrap_for_phrase(&entropy, &wrap, &binding(2)).unwrap();
         assert_eq!(opened.as_bytes(), key.as_bytes());
+        assert_eq!(form, WrapForm::Bound);
         let other = generate_phrase().unwrap().1;
-        assert!(unwrap_for_phrase(&other, &wrap).is_err());
+        assert!(unwrap_for_phrase(&other, &wrap, &binding(2)).is_err());
+    }
+
+    fn binding(epoch: u64) -> WrapBinding {
+        WrapBinding {
+            collection_id: uuid::Uuid::from_u128(7),
+            key_epoch: epoch,
+        }
+    }
+
+    #[test]
+    fn a_bound_phrase_wrap_does_not_open_for_another_epoch_or_collection() {
+        let key = CollectionKey::generate();
+        let entropy = [5u8; PHRASE_ENTROPY_LEN];
+        let wrap = wrap_for_phrase(&entropy, &key, &binding(2)).unwrap();
+        assert!(unwrap_for_phrase(&entropy, &wrap, &binding(3)).is_err());
+        let other = WrapBinding {
+            collection_id: uuid::Uuid::from_u128(8),
+            key_epoch: 2,
+        };
+        assert!(unwrap_for_phrase(&entropy, &wrap, &other).is_err());
+    }
+
+    #[test]
+    fn a_phrase_wrap_under_the_constant_aad_opens_and_reports_the_legacy_form() {
+        let key = CollectionKey::generate();
+        let entropy = [6u8; PHRASE_ENTROPY_LEN];
+        let legacy = wrap_for_phrase_legacy_with_nonce(&entropy, &key, &[1u8; NONCE_LEN]).unwrap();
+        let (opened, form) = unwrap_for_phrase(&entropy, &legacy, &binding(4)).unwrap();
+        assert_eq!(opened.as_bytes(), key.as_bytes());
+        assert_eq!(form, WrapForm::Legacy);
     }
 
     #[test]

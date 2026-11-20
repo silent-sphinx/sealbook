@@ -5,7 +5,8 @@
   "device_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
   "pin": {
     "roster_seq": 1,
-    "transcript": "4vKPH0zs2-crn6YHWWMOZ8gb2Uxx0bRU4TBhQMDqy2M"
+    "transcript": "4vKPH0zs2-crn6YHWWMOZ8gb2Uxx0bRU4TBhQMDqy2M",
+    "manifest_seq": 0
   },
   "rosters": [
     {

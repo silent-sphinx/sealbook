@@ -1,4 +1,5 @@
 {
+  "now": "2026-10-28T12:00:00Z",
   "constants": {
     "calendar_content_type": "application/sealbook.calendar+json",
     "calendar_event_content_type": "application/sealbook.calendar-event+json",
@@ -9,7 +10,9 @@
       "color",
       "favorite",
       "archived",
-      "hideFromAll"
+      "hideFromAll",
+      "createdAt",
+      "updatedAt"
     ],
     "calendar_event_keys": [
       "@type",
@@ -23,7 +26,9 @@
       "timezone",
       "calendarId",
       "recurrence",
-      "alerts"
+      "alerts",
+      "createdAt",
+      "updatedAt"
     ],
     "default_calendar_id": "00000000-0000-0000-0000-000000000003",
     "default_calendar_name": "Default Calendar",
@@ -104,7 +109,7 @@
         "archived": false,
         "hide_from_all": false
       },
-      "payload": "{\"@type\":\"Calendar\",\"color\":\"#7aa2f7\",\"favorite\":false,\"name\":\"Work\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Calendar\",\"color\":\"#7aa2f7\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"name\":\"Work\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "a name with surrounding space, and a favourite",
@@ -115,7 +120,7 @@
         "archived": false,
         "hide_from_all": false
       },
-      "payload": "{\"@type\":\"Calendar\",\"color\":\"#7aa2f7\",\"favorite\":true,\"name\":\"Work\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Calendar\",\"color\":\"#7aa2f7\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"favorite\":true,\"name\":\"Work\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "a blank colour takes the one every client defaults to",
@@ -126,7 +131,7 @@
         "archived": false,
         "hide_from_all": false
       },
-      "payload": "{\"@type\":\"Calendar\",\"color\":\"#7aa2f7\",\"favorite\":false,\"name\":\"Work\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Calendar\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"name\":\"Work\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "a calendar put away, which is the only time the key is written",
@@ -137,7 +142,7 @@
         "archived": true,
         "hide_from_all": false
       },
-      "payload": "{\"@type\":\"Calendar\",\"archived\":true,\"color\":\"#9ece6a\",\"favorite\":false,\"name\":\"Old Team\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Calendar\",\"archived\":true,\"color\":\"#9ece6a\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"name\":\"Old Team\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "a calendar hidden from the combined view",
@@ -148,7 +153,7 @@
         "archived": false,
         "hide_from_all": true
       },
-      "payload": "{\"@type\":\"Calendar\",\"color\":\"#9ece6a\",\"favorite\":false,\"hideFromAll\":true,\"name\":\"Old Team\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Calendar\",\"color\":\"#9ece6a\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"hideFromAll\":true,\"name\":\"Old Team\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "a rename that keeps the colour, the flags and a key from a later build",
@@ -160,7 +165,7 @@
         "hide_from_all": false,
         "raw": "{\"@type\":\"Calendar\",\"archived\":true,\"color\":\"#9ece6a\",\"favorite\":true,\"name\":\"Old Team\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
       },
-      "payload": "{\"@type\":\"Calendar\",\"archived\":true,\"color\":\"#9ece6a\",\"favorite\":true,\"name\":\"Renamed\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Calendar\",\"archived\":true,\"color\":\"#9ece6a\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"favorite\":true,\"name\":\"Renamed\",\"sharedWith\":[\"someone@example.com\"],\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "taking a calendar back out of the archive clears the key",
@@ -172,7 +177,7 @@
         "hide_from_all": false,
         "raw": "{\"@type\":\"Calendar\",\"archived\":true,\"color\":\"#9ece6a\",\"favorite\":true,\"name\":\"Old Team\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
       },
-      "payload": "{\"@type\":\"Calendar\",\"color\":\"#9ece6a\",\"favorite\":true,\"name\":\"Old Team\",\"sharedWith\":[\"someone@example.com\"],\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Calendar\",\"color\":\"#9ece6a\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"favorite\":true,\"name\":\"Old Team\",\"sharedWith\":[\"someone@example.com\"],\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     }
   ],
   "calendar_parses": [
@@ -292,7 +297,7 @@
         "alerts": [],
         "unreadable_alerts": []
       },
-      "payload": "{\"@type\":\"CalendarEvent\",\"start\":\"2026-10-01T09:00:00.000Z\",\"title\":\"Standup\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"00000000-0000-0000-0000-000000000003\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"start\":\"2026-10-01T09:00:00.000Z\",\"title\":\"Standup\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "an all-day event, whose end is the inclusive last day",
@@ -305,7 +310,7 @@
         "alerts": [],
         "unreadable_alerts": []
       },
-      "payload": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"00000000-0000-0000-0000-000000000003\",\"end\":\"2026-10-03\",\"start\":\"2026-10-01\",\"title\":\"Conference\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"00000000-0000-0000-0000-000000000003\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"end\":\"2026-10-03\",\"start\":\"2026-10-01\",\"title\":\"Conference\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "blank optional fields, which are the same as absent ones",
@@ -323,7 +328,7 @@
         "alerts": [],
         "unreadable_alerts": []
       },
-      "payload": "{\"@type\":\"CalendarEvent\",\"location\":\"Room 3\",\"participants\":[\"alice@example.com\"],\"start\":\"2026-10-01T09:00:00.000Z\",\"title\":\"Standup\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"00000000-0000-0000-0000-000000000003\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"location\":\"Room 3\",\"participants\":[\"alice@example.com\"],\"start\":\"2026-10-01T09:00:00.000Z\",\"title\":\"Standup\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "a weekly rule on five weekdays, every other week, with an end date",
@@ -361,7 +366,7 @@
         ],
         "raw": "{\"@type\":\"CalendarEvent\",\"alerts\":[{\"minutesBefore\":10},{\"at\":\"from a later build\"}],\"calendarId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"conference\":{\"from\":\"a later build\"},\"end\":\"2026-10-01T09:15:00.000Z\",\"location\":\"Room 3\",\"notes\":\"Daily sync\",\"participants\":[\"alice@example.com\",\"bob@example.com\"],\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"until\":\"2026-12-31\",\"weekdays\":[1,2,3,4,5]},\"start\":\"2026-10-01T09:00:00.000Z\",\"timezone\":\"Europe/London\",\"title\":\"Standup\",\"version\":\"1.0\"}"
       },
-      "payload": "{\"@type\":\"CalendarEvent\",\"alerts\":[{\"minutesBefore\":10},{\"at\":\"from a later build\"}],\"calendarId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"conference\":{\"from\":\"a later build\"},\"end\":\"2026-10-01T09:15:00.000Z\",\"location\":\"Room 3\",\"notes\":\"Daily sync\",\"participants\":[\"alice@example.com\",\"bob@example.com\"],\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"until\":\"2026-12-31\",\"weekdays\":[1,2,3,4,5]},\"start\":\"2026-10-01T09:00:00.000Z\",\"timezone\":\"Europe/London\",\"title\":\"Standup\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"CalendarEvent\",\"alerts\":[{\"minutesBefore\":10},{\"at\":\"from a later build\"}],\"calendarId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"conference\":{\"from\":\"a later build\"},\"createdAt\":\"2026-10-28T12:00:00Z\",\"end\":\"2026-10-01T09:15:00.000Z\",\"location\":\"Room 3\",\"notes\":\"Daily sync\",\"participants\":[\"alice@example.com\",\"bob@example.com\"],\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"until\":\"2026-12-31\",\"weekdays\":[1,2,3,4,5]},\"start\":\"2026-10-01T09:00:00.000Z\",\"timezone\":\"Europe/London\",\"title\":\"Standup\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "the third Tuesday of every month, counted out",
@@ -382,7 +387,7 @@
         "alerts": [],
         "unreadable_alerts": []
       },
-      "payload": "{\"@type\":\"CalendarEvent\",\"recurrence\":{\"count\":12,\"frequency\":\"monthly\",\"nthWeekday\":{\"ordinal\":3,\"weekday\":2}},\"start\":\"2026-10-20T16:00:00.000Z\",\"timezone\":\"Europe/London\",\"title\":\"Board\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"00000000-0000-0000-0000-000000000003\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"recurrence\":{\"count\":12,\"frequency\":\"monthly\",\"nthWeekday\":{\"ordinal\":3,\"weekday\":2}},\"start\":\"2026-10-20T16:00:00.000Z\",\"timezone\":\"Europe/London\",\"title\":\"Board\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "an edit that clears the repeat, the guests, the notes and the reminders",
@@ -395,7 +400,7 @@
         "unreadable_alerts": [],
         "raw": "{\"@type\":\"CalendarEvent\",\"alerts\":[{\"minutesBefore\":10},{\"at\":\"from a later build\"}],\"calendarId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"conference\":{\"from\":\"a later build\"},\"end\":\"2026-10-01T09:15:00.000Z\",\"location\":\"Room 3\",\"notes\":\"Daily sync\",\"participants\":[\"alice@example.com\",\"bob@example.com\"],\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"until\":\"2026-12-31\",\"weekdays\":[1,2,3,4,5]},\"start\":\"2026-10-01T09:00:00.000Z\",\"timezone\":\"Europe/London\",\"title\":\"Standup\",\"version\":\"1.0\"}"
       },
-      "payload": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"conference\":{\"from\":\"a later build\"},\"start\":\"2026-10-01T09:00:00.000Z\",\"title\":\"Standup\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"conference\":{\"from\":\"a later build\"},\"createdAt\":\"2026-10-28T12:00:00Z\",\"start\":\"2026-10-01T09:00:00.000Z\",\"title\":\"Standup\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "timed reminders out of order, one twice, one out of range",
@@ -419,7 +424,7 @@
         ],
         "unreadable_alerts": []
       },
-      "payload": "{\"@type\":\"CalendarEvent\",\"alerts\":[{\"minutesBefore\":1440},{\"minutesBefore\":15}],\"start\":\"2026-10-01T09:00:00.000Z\",\"title\":\"Dentist\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"CalendarEvent\",\"alerts\":[{\"minutesBefore\":1440},{\"minutesBefore\":15}],\"calendarId\":\"00000000-0000-0000-0000-000000000003\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"start\":\"2026-10-01T09:00:00.000Z\",\"title\":\"Dentist\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "all-day reminders the day before and on the day, at 09:00",
@@ -437,7 +442,7 @@
         ],
         "unreadable_alerts": []
       },
-      "payload": "{\"@type\":\"CalendarEvent\",\"alerts\":[{\"minutesBefore\":900},{\"minutesBefore\":-540}],\"start\":\"2026-10-01\",\"title\":\"Birthday\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"CalendarEvent\",\"alerts\":[{\"minutesBefore\":900},{\"minutesBefore\":-540}],\"calendarId\":\"00000000-0000-0000-0000-000000000003\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"start\":\"2026-10-01\",\"title\":\"Birthday\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "an edit to an event whose rule this build cannot name",
@@ -450,7 +455,7 @@
         "unreadable_alerts": [],
         "raw": "{\"@type\":\"CalendarEvent\",\"recurrence\":{\"frequency\":\"hourly\",\"interval\":3},\"start\":\"2026-10-01\",\"title\":\"Pay day\",\"version\":\"1.0\"}"
       },
-      "payload": "{\"@type\":\"CalendarEvent\",\"recurrence\":{\"frequency\":\"hourly\",\"interval\":3},\"start\":\"2026-10-01\",\"title\":\"Pay day, moved\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"00000000-0000-0000-0000-000000000003\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"recurrence\":{\"frequency\":\"hourly\",\"interval\":3},\"start\":\"2026-10-01\",\"title\":\"Pay day, moved\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     }
   ],
   "event_parses": [
@@ -504,6 +509,7 @@
         "title": "Untitled event",
         "start": "",
         "participants": [],
+        "calendar_id": "00000000-0000-0000-0000-000000000003",
         "alerts": [],
         "unreadable_alerts": [],
         "readable": true,
@@ -549,6 +555,7 @@
         "title": "Untitled event",
         "start": "",
         "participants": [],
+        "calendar_id": "00000000-0000-0000-0000-000000000003",
         "alerts": [],
         "unreadable_alerts": [],
         "readable": true,
@@ -566,6 +573,7 @@
         "participants": [
           "alice@example.com"
         ],
+        "calendar_id": "00000000-0000-0000-0000-000000000003",
         "alerts": [],
         "unreadable_alerts": [],
         "readable": true,
@@ -581,6 +589,7 @@
         "title": "Pay day",
         "start": "2026-10-01",
         "participants": [],
+        "calendar_id": "00000000-0000-0000-0000-000000000003",
         "unreadable_recurrence": "{\"frequency\":\"hourly\",\"interval\":3}",
         "alerts": [],
         "unreadable_alerts": [],
@@ -597,6 +606,7 @@
         "title": "t",
         "start": "",
         "participants": [],
+        "calendar_id": "00000000-0000-0000-0000-000000000003",
         "recurrence": {
           "frequency": "weekly",
           "weekdays": [
@@ -619,6 +629,7 @@
         "title": "t",
         "start": "2026-10-01",
         "participants": [],
+        "calendar_id": "00000000-0000-0000-0000-000000000003",
         "alerts": [
           {
             "minutes_before": 900,

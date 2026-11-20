@@ -14,10 +14,9 @@ use crate::version::{speaks_protocol, PROTOCOL_VERSION};
 pub const OBJECT_AEAD: &str = "XChaCha20-Poly1305-256";
 pub const TLS_VERSION: &str = "TLS1.3";
 pub const SIGNATURE_ALGORITHMS: [&str; 2] = ["ML-DSA-65", "Ed25519"];
-pub const HPKE_CIPHERSUITE: &str = "hpke-xwing-sha256-chacha20poly1305";
+pub const HPKE_CIPHERSUITE: &str = "hpke-xwing-draft06-sha256-chacha20poly1305";
 pub const OPAQUE_KSF: &str = "argon2id-m65536-t3-p1";
 pub const PHRASE_SCHEME: &str = "hybrid-mldsa65-ed25519-v1";
-pub const RECOVERY_CIPHERSUITE: &str = "aead-recovery-argon2id-m65536-t3-p1";
 
 /// `GET /health/crypto`, with every field optional: a server may be older, or not a
 /// standard build, and a missing field is a finding rather than a parse failure.
@@ -31,7 +30,6 @@ pub struct CryptoProfile {
     pub signature_algorithms: Option<Vec<String>>,
     pub object_aead: Option<String>,
     pub phrase_recovery_scheme: Option<String>,
-    pub recovery_ciphersuite: Option<String>,
     pub opaque_ksf: Option<String>,
     pub opaque_requires_device_proof: Option<bool>,
 }
@@ -316,22 +314,6 @@ pub fn evaluate_crypto_profile(
         ));
     }
 
-    if let Some(got) = reported
-        .recovery_ciphersuite
-        .as_deref()
-        .filter(|v| *v != RECOVERY_CIPHERSUITE)
-    {
-        findings.push(finding(
-            "recovery_ciphersuite",
-            Severity::Warn,
-            RECOVERY_CIPHERSUITE,
-            got,
-            "This server advertises a recovery encryption this app does not recognize. \
-             Recovery from your phrase might fail."
-                .into(),
-        ));
-    }
-
     findings
 }
 
@@ -349,7 +331,6 @@ mod tests {
             signature_algorithms: Some(SIGNATURE_ALGORITHMS.map(String::from).to_vec()),
             object_aead: Some(OBJECT_AEAD.into()),
             phrase_recovery_scheme: Some(PHRASE_SCHEME.into()),
-            recovery_ciphersuite: Some(RECOVERY_CIPHERSUITE.into()),
             opaque_ksf: Some(OPAQUE_KSF.into()),
             opaque_requires_device_proof: Some(true),
         }
@@ -441,17 +422,20 @@ mod tests {
         let mut profile = standard();
         profile.tls_version = Some("TLS1.2".into());
         profile.phrase_recovery_scheme = Some("other".into());
-        profile.recovery_ciphersuite = Some("other".into());
         let findings = evaluate_crypto_profile(&profile, Transport::Native, None);
         assert!(!has_fatal(&findings));
         assert_eq!(
             fields(&findings, Severity::Warn),
-            [
-                "tls_version",
-                "phrase_recovery_scheme",
-                "recovery_ciphersuite"
-            ]
+            ["tls_version", "phrase_recovery_scheme"]
         );
+    }
+
+    #[test]
+    fn a_profile_from_an_older_server_with_a_recovery_ciphersuite_is_still_read() {
+        let old = r#"{"protocol":"sealbook-v1","recovery_ciphersuite":"aead-recovery-argon2id-m65536-t3-p1"}"#;
+        let profile: CryptoProfile = serde_json::from_str(old).unwrap();
+        let findings = evaluate_crypto_profile(&profile, Transport::Native, None);
+        assert!(!findings.iter().any(|f| f.field == "recovery_ciphersuite"));
     }
 
     #[test]
@@ -465,7 +449,7 @@ mod tests {
     #[test]
     fn a_profile_parses_with_unknown_and_missing_fields() {
         let profile: CryptoProfile =
-            serde_json::from_str(r#"{"protocol":"sealbook-v1","new_field":1}"#).unwrap();
+            serde_json::from_str(r#"{"protocol":"sealbook-v2","new_field":1}"#).unwrap();
         assert_eq!(profile.protocol.as_deref(), Some(PROTOCOL_VERSION));
         assert!(profile.object_aead.is_none());
     }

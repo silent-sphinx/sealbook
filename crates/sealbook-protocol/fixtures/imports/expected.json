@@ -38,6 +38,7 @@
         }
       },
       "sealbook:addressBookId": "book",
+      "sealbook:version": "1.1",
       "titles": {
         "t1": {
           "kind": "title",
@@ -66,6 +67,7 @@
         }
       },
       "sealbook:addressBookId": "book",
+      "sealbook:version": "1.1",
       "version": "1.0"
     },
     {
@@ -74,6 +76,7 @@
         "full": "Solo"
       },
       "sealbook:addressBookId": "book",
+      "sealbook:version": "1.1",
       "version": "1.0"
     }
   ],
@@ -315,6 +318,7 @@
         }
       },
       "sealbook:addressBookId": "book",
+      "sealbook:version": "1.1",
       "titles": {
         "t1": {
           "kind": "title",
@@ -343,6 +347,7 @@
         }
       },
       "sealbook:addressBookId": "book",
+      "sealbook:version": "1.1",
       "version": "1.0"
     },
     {
@@ -372,6 +377,7 @@
         }
       },
       "sealbook:addressBookId": "book",
+      "sealbook:version": "1.1",
       "version": "1.0"
     },
     {
@@ -380,6 +386,7 @@
         "full": "Only A Name"
       },
       "sealbook:addressBookId": "book",
+      "sealbook:version": "1.1",
       "version": "1.0"
     }
   ]

@@ -39,7 +39,8 @@ both builds already require for the wasm module and the JNI library.
   crates must give for them: an IKM to its X-Wing public key, a stored device
   wrap to its collection key, fixed seeds to the ML-DSA-65 and Ed25519 public
   keys and a signature that verifies under them, and a fixed phrase to its
-  lookup id, recovery public keys and phrase wrap. Every other test generates
+  lookup id, recovery public keys and the phrase wrap (the unbound form from
+  before protocol v2 and the bound form it writes now). Every other test generates
   fresh keys, so only these notice a dependency changing how it expands a seed,
   which would lock out every stored device secret and every phrase. `hpke`,
   `x-wing`, `ml-kem` and `ml-dsa` are pinned with `=` in the workspace
@@ -62,11 +63,13 @@ both builds already require for the wasm module and the JNI library.
   not JSON. Pins that both the CLI and the web importer still round-trip every
   object a released client could have written.
 - `payloads/calendar-event.json`, `payloads/calendar.json`,
-  `payloads/calendar-archived.json` — the literal output of the writers that
-  predate `sealbook-core`, which was sealbook-web's `putCalendarEvent` and
-  `putCalendar`. Superseded as the calendar document by `payloads/calendars.json`
-  below, and kept because they are the one record of what a released client
-  wrote: each must still read and write back unchanged through core, which
+  `payloads/calendar-archived.json` — the output of the writers that predate
+  `sealbook-core`, which was sealbook-web's `putCalendarEvent` and
+  `putCalendar`, moved to payload 1.1 by hand (the version, the two dates, the
+  event's calendar, no `favorite: false`). Superseded as the calendar document
+  by `payloads/calendars.json` below. The released 1.0 spelling is in
+  `payloads/upgrade.json` now. Each must still read and write back unchanged
+  through core, which
   `calendarParity.test.ts`, Android's `CalendarWireParityTest` and this crate's
   `tests/fixtures.rs` are what assert.
 
@@ -90,10 +93,11 @@ both builds already require for the wasm module and the JNI library.
   rather than bytes, because ML-DSA signing need not be deterministic.
 
 - `rosters/legacy.json` - alpha's genesis roster as a release before key
-  commitments sealed it: no `key_commitment`, signed under the v1 transcript,
-  and the pin a device enrolled then holds on it. Verifies by its MAC alone,
-  and core reports `key_committed: false` for it, which is what each client's
-  warning to rotate is driven by. Built from `chain-with-revoke.json` by the
+  commitments sealed it: no `key_commitment`, not migrated, signed under the v1
+  transcript, and the pin a device enrolled then holds on it. Verifies by its
+  MAC alone, and core reports `key_committed: false` and `migrated: false` for
+  it. The account then owes one rotation whatever the server says: the key it
+  holds is only to be read with, and what it adopts is checked against the vault. Built from `chain-with-revoke.json` by the
   ignored `regenerate_the_legacy_roster_fixture` test, with the same command.
   Read by `sealbook-core`'s roster tests, `sealbook-web/src/lib/client.test.ts`
   and Android's `KeyAdoptionTest`.
@@ -151,7 +155,8 @@ both builds already require for the wasm module and the JNI library.
   plan a rotation makes for it: which rows are re-sealed and at which revision,
   which tombstone the manifest carries, which row is retired, and the sequence
   and epoch the rotation advances to. Alongside it the row a rotation refuses on
-  and the six rosters that decide who keeps a wrap of the new key. Under the
+  and the nine rosters that decide who keeps a wrap of the new key, with the
+  devices to revoke as a list that must be strictly ascending. Under the
   same collection and alpha device as the fixtures above. Pins the one rule no
   server check covers: a rotation refuses on a row it cannot re-seal where every
   other read counts it and carries on, which is the area of the 2026-10-20
@@ -175,8 +180,10 @@ both builds already require for the wasm module and the JNI library.
   previews, the code both sides have to compute from those, and the roster the
   approval extends. Alongside them every refusal either side can raise, the
   forms of the code a user may type, and the lookup paths a typed code resolves
-  to. Under the same collection and alpha device as the fixtures above, with the
-  joining device as delta. Pins the rule the server cannot check for either
+  to. The sealed pin is 48 bytes: the roster sequence, the approving device's
+  manifest sequence and the roster transcript, and the refusals include the old
+  40-byte form and a manifest sequence of 0. Under the same collection and alpha
+  device as the fixtures above, with the joining device as delta. Pins the rule the server cannot check for either
   side: each computes the confirmation code itself and only ever compares the
   server's copy against it, because a server that substituted the joining
   device's keys could show the real code and keep the ones it swapped in. Read
@@ -197,8 +204,8 @@ both builds already require for the wasm module and the JNI library.
 - `auth/account.json` is one signed-in account, and every decision the four
   auth flows make that is not fresh randomness: the usernames and phrases a user
   actually types and what each one is sent or derived as, the path each round
-  posts to, the login responses and which key wrap each has core open, the
-  recovery start response as the server serves it, and every refusal any flow
+  posts to, the login responses and which form of the device wrap each opens and
+  what rotation the server says is owed, the recovery start response as the server serves it, and every refusal any flow
   can raise. Under the same collection and alpha device as the fixtures above.
   Pins the decisions the three clients had each been making for themselves: that
   a username is trimmed before it is sent, that a phrase is lowercased before it
@@ -221,9 +228,13 @@ both builds already require for the wasm module and the JNI library.
   The recovery start response is the generator's output once for the same
   reason: the phrase wrap in it carries a fresh nonce.
 
+- `crypto/padme.json` - lengths and what Padme pads each to, computed
+  independently of the Rust. An attachment is padded to this length before it is
+  chunked. Read by `crates/sealbook-crypto/tests/known_answers.rs`.
+
 - `attachments/attachments.json`
 
-  Pins how an attachment's size becomes a chunk count, the paths of the four
+  Pins how an attachment's size becomes its padded size and chunk count, the paths of the four
   rounds, the nonce header, the per-chunk digests and the content hash rolled
   from them, the sweep's grace period, and what each refusal is called. Read by
   `sealbook-core`'s attachment tests,
@@ -264,6 +275,16 @@ both builds already require for the wasm module and the JNI library.
   ordered, so one payload has one spelling. That is also why it is the only
   fixture with no randomness in it — there is no key, nonce or signature at this
   layer, just the clock, which core takes from its caller and the fixture fixes.
+
+- `payloads/upgrade.json` is the 1.0 to 1.1 payload upgrade, `upgrade(content_type,
+  from)` in core: `upgrades` rows carry a stored payload and the one spelling it
+  comes out as, for every type, an event with no calendar, a Card whose name,
+  photo, nicknames, pronouns and dates exist only under legacy keys, a Card
+  holding both a legacy and a canonical value (the canonical one wins) and a key
+  at each nesting level that has to survive. `untouched` rows come back as
+  `null`: already current, from a later major, of a type core does not know, or
+  not an object. The upgrade is idempotent, invents no date, and is what every
+  rotation applies to a vault. A client that runs it must agree byte for byte.
 
 - `payloads/calendars.json` is the calendar and event plaintext itself, byte
   for byte, as `payloads/notes.json` is for notes: a draft and the one spelling

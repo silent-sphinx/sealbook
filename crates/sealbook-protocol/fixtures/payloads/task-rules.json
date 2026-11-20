@@ -25,7 +25,7 @@
       "writes": [
         {
           "id": "a",
-          "payload": "{\"@type\":\"Task\",\"completedAt\":\"2026-11-02T09:00:00.000Z\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"done\":true,\"dueDate\":\"2026-11-02\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Post letter\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+          "payload": "{\"@type\":\"Task\",\"completedAt\":\"2026-11-02T09:00:00.000Z\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"done\":true,\"dueDate\":\"2026-11-02\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Post letter\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.1\"}"
         }
       ]
     },
@@ -59,15 +59,15 @@
       "writes": [
         {
           "id": "p",
-          "payload": "{\"@type\":\"Task\",\"completions\":[\"2026-11-02T09:00:00.000Z\"],\"createdAt\":\"2026-10-01T00:00:00Z\",\"dueDate\":\"2026-11-09\",\"recurrence\":{\"frequency\":\"weekly\"},\"recurrenceAnchor\":\"2026-11-02\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Water plants\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+          "payload": "{\"@type\":\"Task\",\"completions\":[\"2026-11-02T09:00:00.000Z\"],\"createdAt\":\"2026-10-01T00:00:00Z\",\"dueDate\":\"2026-11-09\",\"recurrence\":{\"frequency\":\"weekly\"},\"recurrenceAnchor\":\"2026-11-02\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Water plants\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.1\"}"
         },
         {
           "id": "c",
-          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"p\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Feed\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"p\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Feed\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.1\"}"
         },
         {
           "id": "g",
-          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"c\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Mist\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"c\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Mist\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.1\"}"
         }
       ]
     },
@@ -89,7 +89,7 @@
       "writes": [
         {
           "id": "p",
-          "payload": "{\"@type\":\"Task\",\"completions\":[\"2026-11-02T09:00:00.000Z\"],\"createdAt\":\"2026-10-01T00:00:00Z\",\"dueDate\":\"2026-11-09\",\"recurrence\":{\"frequency\":\"weekly\"},\"recurrenceAnchor\":\"2026-10-05\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Water plants\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+          "payload": "{\"@type\":\"Task\",\"completions\":[\"2026-11-02T09:00:00.000Z\"],\"createdAt\":\"2026-10-01T00:00:00Z\",\"dueDate\":\"2026-11-09\",\"recurrence\":{\"frequency\":\"weekly\"},\"recurrenceAnchor\":\"2026-10-05\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Water plants\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.1\"}"
         }
       ]
     },
@@ -112,7 +112,7 @@
       "writes": [
         {
           "id": "p",
-          "payload": "{\"@type\":\"Task\",\"completions\":[\"2026-11-02T09:00:00.000Z\"],\"createdAt\":\"2026-10-01T00:00:00Z\",\"recurrence\":{\"frequency\":\"weekly\"},\"recurrenceAnchor\":\"2026-11-02T17:30:00Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Water plants\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+          "payload": "{\"@type\":\"Task\",\"completions\":[\"2026-11-02T09:00:00.000Z\"],\"createdAt\":\"2026-10-01T00:00:00Z\",\"recurrence\":{\"frequency\":\"weekly\"},\"recurrenceAnchor\":\"2026-11-02T17:30:00Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Water plants\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.1\"}"
         }
       ]
     },
@@ -134,7 +134,7 @@
       "writes": [
         {
           "id": "p",
-          "payload": "{\"@type\":\"Task\",\"completedAt\":\"2026-11-02T09:00:00.000Z\",\"completions\":[\"2026-11-02T09:00:00.000Z\"],\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"done\":true,\"dueDate\":\"2026-11-02\",\"recurrence\":{\"count\":1,\"frequency\":\"daily\"},\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Course\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+          "payload": "{\"@type\":\"Task\",\"completedAt\":\"2026-11-02T09:00:00.000Z\",\"completions\":[\"2026-11-02T09:00:00.000Z\"],\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"done\":true,\"dueDate\":\"2026-11-02\",\"recurrence\":{\"count\":1,\"frequency\":\"daily\"},\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Course\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.1\"}"
         }
       ]
     },
@@ -156,7 +156,7 @@
       "writes": [
         {
           "id": "u",
-          "payload": "{\"@type\":\"Task\",\"completedAt\":\"2026-11-02T09:00:00.000Z\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"done\":true,\"dueDate\":\"2026-11-02\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+          "payload": "{\"@type\":\"Task\",\"completedAt\":\"2026-11-02T09:00:00.000Z\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"done\":true,\"dueDate\":\"2026-11-02\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.1\"}"
         }
       ]
     }
@@ -190,7 +190,7 @@
       "task_writes": [
         {
           "id": "c",
-          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"root\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"root\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.1\"}"
         }
       ],
       "list_writes": [],
@@ -227,11 +227,11 @@
       "task_writes": [
         {
           "id": "p",
-          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"home\",\"taskListId\":\"work\",\"title\":\"Parent\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"home\",\"taskListId\":\"work\",\"title\":\"Parent\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.1\"}"
         },
         {
           "id": "c",
-          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"p\",\"taskListId\":\"work\",\"title\":\"\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"p\",\"taskListId\":\"work\",\"title\":\"\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.1\"}"
         }
       ],
       "list_writes": [],
@@ -266,7 +266,7 @@
       "task_writes": [
         {
           "id": "c",
-          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.1\"}"
         }
       ],
       "list_writes": [],
@@ -331,11 +331,11 @@
       "task_writes": [
         {
           "id": "p",
-          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"root\",\"taskListId\":\"work\",\"title\":\"Parent\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"root\",\"taskListId\":\"work\",\"title\":\"Parent\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.1\"}"
         },
         {
           "id": "c",
-          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"p\",\"taskListId\":\"work\",\"title\":\"\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"p\",\"taskListId\":\"work\",\"title\":\"\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.1\"}"
         }
       ],
       "list_writes": [],
@@ -409,13 +409,13 @@
       "task_writes": [
         {
           "id": "a",
-          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"taskListId\":\"work\",\"title\":\"A\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"taskListId\":\"work\",\"title\":\"A\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.1\"}"
         }
       ],
       "list_writes": [
         {
           "id": "sub",
-          "payload": "{\"@type\":\"TaskList\",\"name\":\"Sub\",\"parentId\":\"work\",\"version\":\"1.0\"}"
+          "payload": "{\"@type\":\"TaskList\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"name\":\"Sub\",\"parentId\":\"work\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.1\"}"
         }
       ],
       "removed_tasks": [],
@@ -460,13 +460,13 @@
       "task_writes": [
         {
           "id": "b",
-          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"B\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"B\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.1\"}"
         }
       ],
       "list_writes": [
         {
           "id": "proj",
-          "payload": "{\"@type\":\"TaskList\",\"name\":\"Project\",\"version\":\"1.0\"}"
+          "payload": "{\"@type\":\"TaskList\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"name\":\"Project\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.1\"}"
         }
       ],
       "removed_tasks": [],
@@ -542,7 +542,7 @@
       "list_writes": [
         {
           "id": "sub",
-          "payload": "{\"@type\":\"TaskList\",\"name\":\"Sub\",\"parentId\":\"work\",\"version\":\"1.0\"}"
+          "payload": "{\"@type\":\"TaskList\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"name\":\"Sub\",\"parentId\":\"work\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.1\"}"
         }
       ],
       "removed_tasks": [],
@@ -848,17 +848,17 @@
   "imports": [
     {
       "case": "an export reads back parents first",
-      "text": "{\n  \"@type\": \"sealbook-task-export\",\n  \"exportedAt\": \"2026-11-02T09:00:00.000Z\",\n  \"lists\": [\n    {\n      \"id\": \"work\",\n      \"name\": \"Work\"\n    }\n  ],\n  \"tasks\": [\n    {\n      \"id\": \"c\",\n      \"listName\": \"Work\",\n      \"parentId\": \"p\",\n      \"recurrence\": {\n        \"frequency\": \"fortnightly\"\n      },\n      \"title\": \"Child\"\n    },\n    {\n      \"createdAt\": \"2026-10-01T00:00:00Z\",\n      \"dueDate\": \"2026-11-02\",\n      \"id\": \"p\",\n      \"listName\": \"Default Task List\",\n      \"priority\": 2,\n      \"recurrence\": {\n        \"frequency\": \"weekly\",\n        \"interval\": 2\n      },\n      \"tags\": [\n        \"home\"\n      ],\n      \"title\": \"Parent\"\n    }\n  ],\n  \"version\": 1\n}",
+      "text": "{\n  \"@type\": \"SealbookTasksExport\",\n  \"exportedAt\": \"2026-11-02T09:00:00.000Z\",\n  \"lists\": [\n    {\n      \"id\": \"work\",\n      \"name\": \"Work\"\n    }\n  ],\n  \"tasks\": [\n    {\n      \"id\": \"c\",\n      \"listName\": \"Work\",\n      \"parentId\": \"p\",\n      \"recurrence\": {\n        \"frequency\": \"fortnightly\"\n      },\n      \"title\": \"Child\"\n    },\n    {\n      \"createdAt\": \"2026-10-01T00:00:00Z\",\n      \"dueDate\": \"2026-11-02\",\n      \"id\": \"p\",\n      \"listName\": \"Default Task List\",\n      \"priority\": 2,\n      \"recurrence\": {\n        \"frequency\": \"weekly\",\n        \"interval\": 2\n      },\n      \"tags\": [\n        \"home\"\n      ],\n      \"title\": \"Parent\"\n    }\n  ],\n  \"version\": \"1.1\"\n}",
       "refused": false,
       "skipped": 0,
       "tasks": [
         {
           "source_id": "p",
-          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-01T00:00:00Z\",\"dueDate\":\"2026-11-02\",\"priority\":2,\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2},\"tags\":[\"home\"],\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Parent\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-01T00:00:00Z\",\"dueDate\":\"2026-11-02\",\"priority\":2,\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2},\"tags\":[\"home\"],\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Parent\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.1\"}"
         },
         {
           "source_id": "c",
-          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"p\",\"recurrence\":{\"frequency\":\"fortnightly\"},\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Child\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"p\",\"recurrence\":{\"frequency\":\"fortnightly\"},\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Child\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.1\"}"
         }
       ]
     },
@@ -870,15 +870,15 @@
       "tasks": [
         {
           "source_id": "b",
-          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"B\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"B\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.1\"}"
         },
         {
           "source_id": "a",
-          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"b\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"A\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"parentId\":\"b\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"A\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.1\"}"
         },
         {
           "source_id": "c",
-          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"C\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.0\"}"
+          "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-11-02T09:00:00.000Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"C\",\"updatedAt\":\"2026-11-02T09:00:00.000Z\",\"version\":\"1.1\"}"
         }
       ]
     },

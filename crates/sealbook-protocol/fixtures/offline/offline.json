@@ -253,7 +253,7 @@
       "remote": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"elsewhere\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-02T11:00:00.000Z\",\"version\":\"1.0\"}",
       "outcome": {
         "Merged": {
-          "payload": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"elsewhere\",\"title\":\"Plan A\",\"updatedAt\":\"2026-11-02T11:00:00.000Z\",\"version\":\"1.0\"}",
+          "payload": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"elsewhere\",\"title\":\"Plan A\",\"updatedAt\":\"2026-11-02T11:00:00.000Z\",\"version\":\"1.1\"}",
           "overwrote": false
         }
       }
@@ -266,7 +266,7 @@
       "remote": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\\nthree\\nFOUR\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-02T11:00:00.000Z\",\"version\":\"1.0\"}",
       "outcome": {
         "Merged": {
-          "payload": "{\"@type\":\"Note\",\"body\":\"ONE\\ntwo\\nthree\\nFOUR\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-02T11:00:00.000Z\",\"version\":\"1.0\"}",
+          "payload": "{\"@type\":\"Note\",\"body\":\"ONE\\ntwo\\nthree\\nFOUR\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-02T11:00:00.000Z\",\"version\":\"1.1\"}",
           "overwrote": false
         }
       }
@@ -280,7 +280,7 @@
       "outcome": {
         "Conflict": {
           "payload": null,
-          "copy": "{\"@type\":\"Note\",\"body\":\"one\\nTWO\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan (conflict, 2026-11-03)\",\"updatedAt\":\"2026-11-02T10:00:00.000Z\",\"version\":\"1.0\"}"
+          "copy": "{\"@type\":\"Note\",\"body\":\"one\\nTWO\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan (conflict, 2026-11-03)\",\"updatedAt\":\"2026-11-02T10:00:00.000Z\",\"version\":\"1.1\"}"
         }
       }
     },
@@ -292,8 +292,8 @@
       "remote": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\\nthree\\nFOUR\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan B\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
       "outcome": {
         "Conflict": {
-          "payload": "{\"@type\":\"Note\",\"body\":\"ONE\\ntwo\\nthree\\nFOUR\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan B\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
-          "copy": "{\"@type\":\"Note\",\"body\":\"ONE\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan A (conflict, 2026-11-03)\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}"
+          "payload": "{\"@type\":\"Note\",\"body\":\"ONE\\ntwo\\nthree\\nFOUR\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan B\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.1\"}",
+          "copy": "{\"@type\":\"Note\",\"body\":\"ONE\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan A (conflict, 2026-11-03)\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.1\"}"
         }
       }
     },
@@ -313,7 +313,7 @@
       "remote": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Renamed\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
       "outcome": {
         "Merged": {
-          "payload": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Renamed\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\",\"x-future\":{\"kept\":true}}",
+          "payload": "{\"@type\":\"Note\",\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Renamed\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.1\",\"x-future\":{\"kept\":true}}",
           "overwrote": false
         }
       }
@@ -326,7 +326,7 @@
       "remote": "{\"@type\":\"Note\",\"attachments\":[{\"adk\":\"k\",\"byteSize\":10,\"chunkCount\":1,\"chunkSize\":10,\"contentHash\":\"h\",\"filename\":\"p2.jpg\",\"id\":\"p2\",\"mimeType\":\"image/jpeg\"}],\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
       "outcome": {
         "Merged": {
-          "payload": "{\"@type\":\"Note\",\"attachments\":[{\"adk\":\"k\",\"byteSize\":10,\"chunkCount\":1,\"chunkSize\":10,\"contentHash\":\"h\",\"filename\":\"p2.jpg\",\"id\":\"p2\",\"mimeType\":\"image/jpeg\"},{\"adk\":\"k\",\"byteSize\":10,\"chunkCount\":1,\"chunkSize\":10,\"contentHash\":\"h\",\"filename\":\"p3.jpg\",\"id\":\"p3\",\"mimeType\":\"image/jpeg\"}],\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+          "payload": "{\"@type\":\"Note\",\"attachments\":[{\"adk\":\"k\",\"byteSize\":10,\"chunkCount\":1,\"chunkSize\":10,\"contentHash\":\"h\",\"filename\":\"p2.jpg\",\"id\":\"p2\",\"mimeType\":\"image/jpeg\"},{\"adk\":\"k\",\"byteSize\":10,\"chunkCount\":1,\"chunkSize\":10,\"contentHash\":\"h\",\"filename\":\"p3.jpg\",\"id\":\"p3\",\"mimeType\":\"image/jpeg\"}],\"body\":\"one\\ntwo\\nthree\\nfour\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.1\"}",
           "overwrote": false
         }
       }
@@ -340,7 +340,7 @@
       "outcome": {
         "Conflict": {
           "payload": null,
-          "copy": "{\"@type\":\"Card\",\"name\":{\"full\":\"Ada King (conflict, 2026-11-03)\"},\"version\":\"1.0\"}"
+          "copy": "{\"@type\":\"Card\",\"name\":{\"full\":\"Ada King (conflict, 2026-11-03)\"},\"sealbook:addressBookId\":\"00000000-0000-0000-0000-000000000001\",\"sealbook:version\":\"1.1\",\"version\":\"1.0\"}"
         }
       }
     },
@@ -352,7 +352,7 @@
       "remote": "{\"@type\":\"Notebook\",\"name\":\"Office\",\"version\":\"1.0\"}",
       "outcome": {
         "Merged": {
-          "payload": "{\"@type\":\"Notebook\",\"name\":\"Work (old)\",\"version\":\"1.0\"}",
+          "payload": "{\"@type\":\"Notebook\",\"name\":\"Work (old)\",\"version\":\"1.1\"}",
           "overwrote": true
         }
       }
@@ -365,7 +365,7 @@
       "remote": "{\"@type\":\"Settings\",\"accent\":\"green\",\"contactMode\":\"detailed\",\"features\":[\"contacts\",\"notes\"],\"version\":\"1.0\"}",
       "outcome": {
         "Merged": {
-          "payload": "{\"@type\":\"Settings\",\"accent\":\"rose\",\"contactMode\":\"basic\",\"features\":[\"contacts\",\"notes\"],\"version\":\"1.0\"}",
+          "payload": "{\"@type\":\"Settings\",\"accent\":\"rose\",\"contactMode\":\"basic\",\"features\":[\"contacts\",\"notes\"],\"version\":\"1.1\"}",
           "overwrote": true
         }
       }
@@ -378,7 +378,7 @@
       "remote": "{\"@type\":\"Task\",\"dueDate\":\"2026-11-05\",\"notes\":\"x\\ny\",\"title\":\"Call\"}",
       "outcome": {
         "Merged": {
-          "payload": "{\"@type\":\"Task\",\"notes\":\"x\\ny\",\"title\":\"Call\"}",
+          "payload": "{\"@type\":\"Task\",\"notes\":\"x\\ny\",\"title\":\"Call\",\"version\":\"1.1\"}",
           "overwrote": false
         }
       }
@@ -391,7 +391,7 @@
       "remote": "{\"@type\":\"Bookmark\",\"title\":\"A\",\"updatedAt\":\"2026-11-02T00:00:00.000Z\",\"url\":\"https://a.example\"}",
       "outcome": {
         "Merged": {
-          "payload": "{\"@type\":\"Bookmark\",\"title\":\"A\",\"updatedAt\":\"2026-11-03T00:00:00.000Z\",\"url\":\"https://a.example\"}",
+          "payload": "{\"@type\":\"Bookmark\",\"title\":\"A\",\"updatedAt\":\"2026-11-03T00:00:00.000Z\",\"url\":\"https://a.example\",\"version\":\"1.1\"}",
           "overwrote": false
         }
       }
@@ -526,7 +526,7 @@
             "id": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
             "content_type": "application/sealbook.note+json",
             "tombstone": false,
-            "payload": "{\"@type\":\"Note\",\"body\":\"one\\nTWO\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan (renamed)\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+            "payload": "{\"@type\":\"Note\",\"body\":\"one\\nTWO\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan (renamed)\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.1\"}",
             "expect_revision": 9,
             "settles": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
             "copy": false
@@ -574,10 +574,10 @@
       "plan": {
         "writes": [
           {
-            "id": "6b4eb821-9013-8091-9425-38f89f031596",
+            "id": "0af9bdcb-7d9a-8db2-b80f-dcaaf7dada70",
             "content_type": "application/sealbook.note+json",
             "tombstone": false,
-            "payload": "{\"@type\":\"Note\",\"body\":\"one\\nTWO\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan (conflict, 2026-11-03)\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",
+            "payload": "{\"@type\":\"Note\",\"body\":\"one\\nTWO\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan (conflict, 2026-11-03)\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.1\"}",
             "settles": "0a6f4c1e-1b2c-4d3e-8f40-000000000001",
             "copy": true,
             "notice": "\"Plan\" was changed on this device and on another one. This device's version was saved as \"Plan (conflict, 2026-11-03)\"."

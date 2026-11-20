@@ -44,7 +44,7 @@ fn parse_cost(part: Option<&str>, prefix: char) -> Result<u32, CryptoError> {
 
 /// The AES-256 key a host seals its at-rest records under. Argon2id makes a
 /// stolen record expensive to guess against, and the HKDF step separates this
-/// key from the recovery wrap's, which stretches the same password the same way.
+/// key from any other key stretched from the same password the same way.
 pub fn local_storage_key(
     password: &[u8],
     salt: &[u8],
@@ -94,9 +94,10 @@ mod tests {
     }
 
     #[test]
-    fn it_is_not_the_recovery_wrap_key() {
-        // Same password, salt and Argon2id cost as the recovery wrap: only the
-        // HKDF label keeps the two keys apart.
+    fn it_is_not_the_raw_argon2id_output() {
+        // Same password, salt and Argon2id cost: only the HKDF step keeps this key
+        // apart from the bare stretch, which a caller could derive for something
+        // else.
         let local = local_storage_key(b"correct horse", &SALT, LOCAL_STORAGE_KDF).unwrap();
         let stretched = {
             let mut out = [0u8; LOCAL_STORAGE_KEY_LEN];

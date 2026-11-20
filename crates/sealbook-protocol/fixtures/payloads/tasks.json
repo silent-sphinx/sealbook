@@ -28,7 +28,9 @@
       "parentId",
       "color",
       "archived",
-      "hideFromAll"
+      "hideFromAll",
+      "createdAt",
+      "updatedAt"
     ],
     "default_list_id": "00000000-0000-0000-0000-000000000006",
     "default_list_name": "Default Task List",
@@ -48,7 +50,7 @@
         "tags": [],
         "task_list_id": "00000000-0000-0000-0000-000000000006"
       },
-      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "a title and notes are trimmed",
@@ -60,7 +62,7 @@
         "tags": [],
         "task_list_id": "00000000-0000-0000-0000-000000000006"
       },
-      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"notes\":\"before the 1st\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"notes\":\"before the 1st\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "a blank list resolves to the default",
@@ -72,7 +74,7 @@
         "tags": [],
         "task_list_id": "   "
       },
-      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "a due day, a priority, tags trimmed and de-duplicated",
@@ -91,7 +93,7 @@
         ],
         "task_list_id": "00000000-0000-0000-0000-000000000006"
       },
-      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"dueDate\":\"2026-11-01\",\"priority\":2,\"tags\":[\"Home\",\"money\"],\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"dueDate\":\"2026-11-01\",\"priority\":2,\"tags\":[\"Home\",\"money\"],\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "a due value that names no day writes no key",
@@ -105,7 +107,7 @@
         "tags": [],
         "task_list_id": "00000000-0000-0000-0000-000000000006"
       },
-      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "a completion time is written only on a done task",
@@ -118,7 +120,7 @@
         "tags": [],
         "task_list_id": "00000000-0000-0000-0000-000000000006"
       },
-      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "a done task keeps its completion time",
@@ -131,7 +133,7 @@
         "tags": [],
         "task_list_id": "00000000-0000-0000-0000-000000000006"
       },
-      "payload": "{\"@type\":\"Task\",\"completedAt\":\"2026-10-27T08:00:00.000Z\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"done\":true,\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Task\",\"completedAt\":\"2026-10-27T08:00:00.000Z\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"done\":true,\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "a recurring task with its anchor",
@@ -153,7 +155,7 @@
         },
         "recurrence_anchor": "2026-10-20T09:00:00.000Z"
       },
-      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"dueDate\":\"2026-11-03T09:00:00.000Z\",\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"weekdays\":[1,3]},\"recurrenceAnchor\":\"2026-10-20T09:00:00.000Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"dueDate\":\"2026-11-03T09:00:00.000Z\",\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"weekdays\":[1,3]},\"recurrenceAnchor\":\"2026-10-20T09:00:00.000Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "an anchor without a rule is not written",
@@ -166,7 +168,7 @@
         "task_list_id": "00000000-0000-0000-0000-000000000006",
         "recurrence_anchor": "2026-10-20"
       },
-      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "completions are trimmed and kept newest first",
@@ -190,7 +192,7 @@
           ]
         }
       },
-      "payload": "{\"@type\":\"Task\",\"completions\":[\"2026-10-20T09:00:00.000Z\",\"b\"],\"createdAt\":\"2026-10-28T12:00:00Z\",\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"weekdays\":[1,3]},\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Task\",\"completions\":[\"2026-10-20T09:00:00.000Z\",\"b\"],\"createdAt\":\"2026-10-28T12:00:00Z\",\"recurrence\":{\"frequency\":\"weekly\",\"interval\":2,\"weekdays\":[1,3]},\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "an edit keeps a key a later build added",
@@ -220,7 +222,7 @@
         "created_at": "2026-01-01T00:00:00Z",
         "raw": "{\"@type\":\"Task\",\"completedAt\":\"2026-10-27T08:00:00.000Z\",\"completions\":[\"2026-09-27T08:00:00.000Z\",\"2026-08-27T08:00:00.000Z\"],\"createdAt\":\"2026-01-01T00:00:00Z\",\"done\":true,\"dueDate\":\"2026-11-01\",\"notes\":\"before the 1st\",\"parentId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"priority\":3,\"recurrence\":{\"dayOfMonth\":1,\"frequency\":\"monthly\"},\"recurrenceAnchor\":\"2026-09-01\",\"somethingNewer\":{\"from\":\"a later build\"},\"tags\":[\"home\",\"money\"],\"taskListId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-02-02T00:00:00Z\",\"version\":\"1.0\"}"
       },
-      "payload": "{\"@type\":\"Task\",\"completedAt\":\"2026-10-27T08:00:00.000Z\",\"completions\":[\"2026-09-27T08:00:00.000Z\",\"2026-08-27T08:00:00.000Z\"],\"createdAt\":\"2026-01-01T00:00:00Z\",\"done\":true,\"dueDate\":\"2026-11-01\",\"notes\":\"before the 1st\",\"parentId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"priority\":3,\"recurrence\":{\"dayOfMonth\":1,\"frequency\":\"monthly\"},\"recurrenceAnchor\":\"2026-09-01\",\"somethingNewer\":{\"from\":\"a later build\"},\"tags\":[\"home\",\"money\"],\"taskListId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"title\":\"Renamed\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Task\",\"completedAt\":\"2026-10-27T08:00:00.000Z\",\"completions\":[\"2026-09-27T08:00:00.000Z\",\"2026-08-27T08:00:00.000Z\"],\"createdAt\":\"2026-01-01T00:00:00Z\",\"done\":true,\"dueDate\":\"2026-11-01\",\"notes\":\"before the 1st\",\"parentId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"priority\":3,\"recurrence\":{\"dayOfMonth\":1,\"frequency\":\"monthly\"},\"recurrenceAnchor\":\"2026-09-01\",\"somethingNewer\":{\"from\":\"a later build\"},\"tags\":[\"home\",\"money\"],\"taskListId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"title\":\"Renamed\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "an edit that reopens the task",
@@ -249,7 +251,7 @@
         "created_at": "2026-01-01T00:00:00Z",
         "raw": "{\"@type\":\"Task\",\"completedAt\":\"2026-10-27T08:00:00.000Z\",\"completions\":[\"2026-09-27T08:00:00.000Z\",\"2026-08-27T08:00:00.000Z\"],\"createdAt\":\"2026-01-01T00:00:00Z\",\"done\":true,\"dueDate\":\"2026-11-01\",\"notes\":\"before the 1st\",\"parentId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"priority\":3,\"recurrence\":{\"dayOfMonth\":1,\"frequency\":\"monthly\"},\"recurrenceAnchor\":\"2026-09-01\",\"somethingNewer\":{\"from\":\"a later build\"},\"tags\":[\"home\",\"money\"],\"taskListId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-02-02T00:00:00Z\",\"version\":\"1.0\"}"
       },
-      "payload": "{\"@type\":\"Task\",\"completions\":[\"2026-09-27T08:00:00.000Z\",\"2026-08-27T08:00:00.000Z\"],\"createdAt\":\"2026-01-01T00:00:00Z\",\"dueDate\":\"2026-11-01\",\"notes\":\"before the 1st\",\"parentId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"priority\":3,\"recurrence\":{\"dayOfMonth\":1,\"frequency\":\"monthly\"},\"recurrenceAnchor\":\"2026-09-01\",\"somethingNewer\":{\"from\":\"a later build\"},\"tags\":[\"home\",\"money\"],\"taskListId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Task\",\"completions\":[\"2026-09-27T08:00:00.000Z\",\"2026-08-27T08:00:00.000Z\"],\"createdAt\":\"2026-01-01T00:00:00Z\",\"dueDate\":\"2026-11-01\",\"notes\":\"before the 1st\",\"parentId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"priority\":3,\"recurrence\":{\"dayOfMonth\":1,\"frequency\":\"monthly\"},\"recurrenceAnchor\":\"2026-09-01\",\"somethingNewer\":{\"from\":\"a later build\"},\"tags\":[\"home\",\"money\"],\"taskListId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "an untitled task saved unchanged stays untitled",
@@ -264,7 +266,7 @@
         "created_at": "2026-01-01T00:00:00Z",
         "raw": "{\"@type\":\"Task\",\"dueDate\":\"2026-11-01\",\"createdAt\":\"2026-01-01T00:00:00Z\"}"
       },
-      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"dueDate\":\"2026-11-01\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"dueDate\":\"2026-11-01\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "a newer minor keeps its version, its keys and the keys inside its repeat rule",
@@ -301,7 +303,7 @@
         "recurrence_anchor": "2026-11-01",
         "raw": "{\"@type\":\"Task\",\"title\":\"t\",\"dueDate\":\"2026-11-01\",\"recurrence\":{\"frequency\":\"hourly\",\"interval\":3},\"recurrenceAnchor\":\"2026-11-01\"}"
       },
-      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"dueDate\":\"2026-11-01\",\"recurrence\":{\"frequency\":\"hourly\",\"interval\":3},\"recurrenceAnchor\":\"2026-11-01\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"t\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"dueDate\":\"2026-11-01\",\"recurrence\":{\"frequency\":\"hourly\",\"interval\":3},\"recurrenceAnchor\":\"2026-11-01\",\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"t\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "a rule's out-of-range days are not written",
@@ -327,7 +329,7 @@
           }
         }
       },
-      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"dueDate\":\"2026-11-01\",\"recurrence\":{\"frequency\":\"monthly\",\"interval\":2,\"weekdays\":[1]},\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"dueDate\":\"2026-11-01\",\"recurrence\":{\"frequency\":\"monthly\",\"interval\":2,\"weekdays\":[1]},\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"Pay rent\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "keys unknown inside nthWeekday are written back",
@@ -350,7 +352,7 @@
         },
         "raw": "{\"@type\":\"Task\",\"title\":\"t\",\"dueDate\":\"2026-11-03\",\"recurrence\":{\"frequency\":\"monthly\",\"nthWeekday\":{\"ordinal\":1,\"weekday\":2,\"futureNth\":\"x\"}}}"
       },
-      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"dueDate\":\"2026-11-03\",\"recurrence\":{\"frequency\":\"monthly\",\"nthWeekday\":{\"futureNth\":\"x\",\"ordinal\":1,\"weekday\":2}},\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"t\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Task\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"dueDate\":\"2026-11-03\",\"recurrence\":{\"frequency\":\"monthly\",\"nthWeekday\":{\"futureNth\":\"x\",\"ordinal\":1,\"weekday\":2}},\"taskListId\":\"00000000-0000-0000-0000-000000000006\",\"title\":\"t\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     }
   ],
   "parses": [
@@ -760,7 +762,7 @@
         "archived": false,
         "hide_from_all": false
       },
-      "payload": "{\"@type\":\"TaskList\",\"name\":\"Home\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"TaskList\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"name\":\"Home\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "a name with surrounding space, under another list",
@@ -770,7 +772,7 @@
         "archived": false,
         "hide_from_all": false
       },
-      "payload": "{\"@type\":\"TaskList\",\"name\":\"Home\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"TaskList\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"name\":\"Home\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "a coloured top-level list",
@@ -780,7 +782,7 @@
         "archived": false,
         "hide_from_all": false
       },
-      "payload": "{\"@type\":\"TaskList\",\"color\":\"#112233\",\"name\":\"Home\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"TaskList\",\"color\":\"#112233\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"name\":\"Home\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "a rename keeps the parent, the colour and a later build's key",
@@ -792,7 +794,7 @@
         "hide_from_all": false,
         "raw": "{\"@type\":\"TaskList\",\"color\":\"#112233\",\"name\":\"Home\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sortKey\":\"from a later build\",\"version\":\"1.0\"}"
       },
-      "payload": "{\"@type\":\"TaskList\",\"color\":\"#112233\",\"name\":\"Renamed\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sortKey\":\"from a later build\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"TaskList\",\"color\":\"#112233\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"name\":\"Renamed\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sortKey\":\"from a later build\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "moving to the top level clears the parent",
@@ -803,7 +805,7 @@
         "hide_from_all": false,
         "raw": "{\"@type\":\"TaskList\",\"color\":\"#112233\",\"name\":\"Home\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sortKey\":\"from a later build\",\"version\":\"1.0\"}"
       },
-      "payload": "{\"@type\":\"TaskList\",\"color\":\"#112233\",\"name\":\"Home\",\"sortKey\":\"from a later build\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"TaskList\",\"color\":\"#112233\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"name\":\"Home\",\"sortKey\":\"from a later build\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "an archived list",
@@ -812,7 +814,7 @@
         "archived": true,
         "hide_from_all": false
       },
-      "payload": "{\"@type\":\"TaskList\",\"archived\":true,\"name\":\"Home\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"TaskList\",\"archived\":true,\"createdAt\":\"2026-10-28T12:00:00Z\",\"name\":\"Home\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "a list hidden from the overview",
@@ -821,7 +823,7 @@
         "archived": false,
         "hide_from_all": true
       },
-      "payload": "{\"@type\":\"TaskList\",\"hideFromAll\":true,\"name\":\"Home\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"TaskList\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"hideFromAll\":true,\"name\":\"Home\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "showing a list again drops the hidden flag",
@@ -831,7 +833,7 @@
         "hide_from_all": false,
         "raw": "{\"name\":\"Home\",\"hideFromAll\":true}"
       },
-      "payload": "{\"@type\":\"TaskList\",\"name\":\"Home\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"TaskList\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"name\":\"Home\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "restoring a list drops the archived flag",
@@ -841,7 +843,7 @@
         "hide_from_all": false,
         "raw": "{\"name\":\"Home\",\"archived\":true}"
       },
-      "payload": "{\"@type\":\"TaskList\",\"name\":\"Home\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"TaskList\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"name\":\"Home\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     }
   ],
   "list_parses": [

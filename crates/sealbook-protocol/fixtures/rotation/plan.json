@@ -14,40 +14,40 @@
       "id": "a1a1a1a1-a1a1-a1a1-a1a1-a1a1a1a1a1a1",
       "revision": 7,
       "tombstone": false,
-      "nonce": "fvfiCRCPu-AqpMxz1zsu5YoHHHm7zqmm",
-      "ciphertext": "07gggYUGpkeQluNW1Ow2cXn-DTAMqeSNFDTTV8xIFufERIsFqqJI-h0CTGsSExHBeJRmPNG0Wc-jOT2Lig9tOSCw9l1jqumqgqLBo92U0e0VjbuaU8LWH4a2-NAF6qDB3J61r3OHiobUGIxsw19aLGfITf5twcK_xwuaiHKv63qg5N4ewTfg1hsD9HWLiIIkRfgyP8T2lR8-bYi4mT0suZZjSQjQ8wfD0l11oOSZkjIKCeJXLK8gUO-Mtsy1k5BT36lNbh6RJqkWMNsdjiwtNSI0aNmc2rTRNEHGwepydqpMLf6Y9wh_8vOB7ADk2GCB6SMePHaBwADnBvn-BoRVIq9OK5C_7HzaOPGZUqbijFQ",
+      "nonce": "UjnaJ96EKELtXpat6xcJ0YVuBQxrb0WQ",
+      "ciphertext": "n4pz-a5F4CymTsw9OvtO744zCwRE7SosSgzG-9VZypG538lz4XPhqiilTLTPBiBVO6CqbGgZiZ6uC44I1X2koWsZt0P6s0BzYbo8JUJfo874yev5t_WUjr0f0uS49aJ561l_YVE6sM2qc6FZClKn1-IQBjWuWqdvAIiVzHCqGxbHrCxvPqrWdkXgoyEFBhBbgcdYAzNd23st2_rUdNmIQWTklCTZ3R26fRq9zfELofesIUHZNjo2p1is_UVXp89HP2I5P1WHRgoJtDSLlgz0qhsPyWPUyanMG26h9YIhGIWTlH5lJfoGyBdz5BJm_enkbFCiXa1NI8QOUmOGXnMFNUNsbVyUhMfQRddYX8xjtsI",
       "padded_size": 256
     },
     {
       "id": "a2a2a2a2-a2a2-a2a2-a2a2-a2a2a2a2a2a2",
       "revision": 3,
       "tombstone": false,
-      "nonce": "C8xoRdxBvmHKqF_9YI6ChARs2-QgC0EE",
-      "ciphertext": "PmyQGZOnSyCOZRoqAjlIwcO5Ld2aZFPHmg8gbZ9H1LxaTF6PlwZ1W6_IUTWVEiGWz7THyAVx59wSFI-si8ntAGaGWQpZV1W7QwmYtR1Xpr99XMuaRLwfQVHNg3zmon-kGhLHlAhyQMovxNS3iW1UYQNBKbYb6Lj3-xgwkkbT4mCeCz3nKOhrp7ItNnSXc3RZYn9J3pHKKtIkVY78ndVXv0RSBDs-NzRpSJU5OHSGXCrIjsO6kVZbHI_SoDM9i_ovYajMaQiTnbiobHDFzp_-t4lRE1wf-AlqGJhx1bUN11AwNfuABU97SHExt5tl_mTSz9KKAfmk-NbiKVmtJEvsnMRrT5bRYlvIktorb0AiKW4",
+      "nonce": "iaSdj7U47aAaDKm_X4WpLz0A2ZJvEDia",
+      "ciphertext": "oDTKUHXtu5wybpRp6k-l2ExOhiqjRblXNbnPpZQknM6pvWK8vMPDkm9jrB0sr8u-cgNJO-pgujPWqgdUZSACOdf8wRK-rC5ugeQG4lMn52BMbQfqUXqSPe4nwnZ2xbqtUAOVQTh4GupqoD6v7jGGNxlRuLmwfXolVR0h5_pcAZrlSyHQVswFSLw5OmvePw7IC8do3NnP4zrTxpZ6x12wnLKVaGuw441KaWbhiLvdQdd5iJldG6rCaVy-fIiiwv7axR_DQhhIniUk2Lwi4HxSndVMo8uObwkdX1H-kHxDL_kk9y7oGALovmsKAjW0Mv6PglLLNYKvlrd4QwKJobKrd-IqbAo3GqUfHxLoIo3YvA8",
       "padded_size": 256
     },
     {
       "id": "a3a3a3a3-a3a3-a3a3-a3a3-a3a3a3a3a3a3",
       "revision": 4,
       "tombstone": true,
-      "nonce": "cNREJeFzT68kTRT_OPwr8D7rKSI-sDXJ",
-      "ciphertext": "NP1fOqOQ8degpmtgNLNyRwsbCkqpp2Yvxsg3H8pNay7dRUat5CWTl-PbRuYgle_1m8rY31jokVlHWZjuYSpFvEGYKREnUflBsTSzMNUkrcfUIga0qTJXWti8ajWn434t2pO4RmjH5DwWpS9LJN3Gi_I-AsfNRSFV8FfiG259DkgySAJE7g6v0A1GwxBUNXjPwPf4u_TIAwS8F419bM780TCwdyHBWUQADhDPqwp48b9STivCCe75aEGuVX4qr6BbsXRwGt-4uAg4ZyFETQqmAdHvbN72g_bnSjolRnEQgpRWDFvgwoiasYg_awJFbmD5c9AR-cRygcCbBcz0xyeZYPR1hvjFZwnfmgBUhiyt6Jc",
+      "nonce": "k_a0muBw_N_P2BH_iWQJHnpSdde8JpCk",
+      "ciphertext": "yRFsC0EyWPitvqq4NA7pNVNoOYR82mXhKMblnNOZPSAhCis8ifVhVGwWIljUBE-1T_rBhFTr0nfleDKELpedGTMgDR6wQeI-jx04Zq8eDXNEAkhlzz3PJy4TYqE9_lixWSof4_SO6qw4JRHRJ7TmYeCAY7cW944UsIOubt6WmXoex5L7Nmn1k6iyAgQ7a9ytVl-HBwZXiB_aCcw7L5qw3HMoZnUA774ir0VJu_iMwc4ONfxF-laYtfJkpagmPDefRY7ntUFBRFfG9HqPuVO8ebcTKyYG6OBgLgZAvvhFZPd2jq5qkH7PLXtnlN91-DnfheTs6hYPj0Zr16l-iKMDMoxKz_2U3npWzIIGsbKXOmE",
       "padded_size": 256
     },
     {
       "id": "a4a4a4a4-a4a4-a4a4-a4a4-a4a4a4a4a4a4",
       "revision": 5,
       "tombstone": false,
-      "nonce": "7bmvXfgnfsidw6tiXFfM89cmwoUldda5",
-      "ciphertext": "twGDe6kgcQ2qmfCqmeOJkQFWn6Bk7lTA-eMrj9WW3QWn-jbrzzZyXS7fzzltFTvEUNwKGREhN7tMQuP9LoK_qpfvoTnc2RHBM6KyVRlaPbRENE2F0qCZzcdzPwwfeApaZqZr2Emb190NAGo9GRli49JFt43XgWKhKPgJSWO-BBuEKjV-cUH04lJo5HlLVvneLtzijPoHWSbY8XUsiHRLXQNnSHwAi6qJOaxvMsD0HHeXwDN8x3JPMX5UyK6teHKku_6wmOe9fAMsux9KFotBUNIH8g6KJ_lcuGuA6a0WaqoUvgRSHlbPJAS_7p_WwCKFf5YaUxEap3EaHEsHyxwxaM0J7KbKGIxR_y1zpY2ruwg",
+      "nonce": "GvZ74N4IzHlFJzh5Lk_nsy1Cal1YBujh",
+      "ciphertext": "UaAg7JvBDuGbI_3-znYFSlZfLLNlStIiQC5ycfo_LF3y9wkwSaCjQ0grJJcxCi1zTui1zMWU2eC-SOfZ-7kfCidVnOfhB-kfQicnBNZWZHHgWqgf5YFHLfzfyVai7axrieBwV46Xr-242d9tUz-36XZMx1mN0GmBT-CJTSPPuo-0JmqRAKlT79TNDP5JeN_LlTgQO1QeIPjXbngzCPsb4kYI-jPfVYU4wsC5cLskdSHoW1ZDa-uUo4qGQ1uKtNmeNGgwbpjH5DPIehDik0jz82nctZx_G2gBruBKJhLbR_NOq8E2Bp1aCE8JnNBKaG3b53g-y27bQ-ErLZTL98l-o5NT0CbWl9eXe-EuGeTztls",
       "padded_size": 256
     },
     {
       "id": "a6a6a6a6-a6a6-a6a6-a6a6-a6a6a6a6a6a6",
       "revision": 2,
       "tombstone": true,
-      "nonce": "vfmEphu_PZkZj_fyuhttZBDM77G1gNbx",
-      "ciphertext": "vWRRPo8EF2FfiIH411XaYvEuS4VUVsM6GGpWNGrgkjqxbpQYEu__jE2qzSb3IdB39QRTm0EcOGEV7awOdlK22dsP1y_zgHCHBgX__Mf24-8PstK2aeppwrqJyJ7Wm6fCoa6BUKOHTg_nh78Xwf5lvij_SmH95yzq4ElN6-nywX3ZjwxRwEVZNx412LS2CdFpfLqWJa1N_Q4kQgjEIY3Jae5ewhe6EyHmuEn-_KLcqqjzguRgUTiAsFKAF3whv7SWY3n79uRkr8XHEWDz_wfAZVInj0XihPwRjqsUrFzOmHw_mB2Xreeu9yWyGIdGIrgd2lMVhquBxpBMZ9ZDzqH3Z1nfL_SOuILcb8W3mL0krus",
+      "nonce": "j9Kfq6aGrpotFoIR1F5NiCcn4gMn4DVS",
+      "ciphertext": "kVASxsS3waJ2LoCN3grrceyW_vWn11U7zHHVirOULZ7ISZRb4NhQJMaXGhBmsgZQ4LbnAAXtYMuLMsHDvxX5fABAO6If2PmVYdWSiK7ibdks2emkqZVO48P-DSNkoMeXqXuH8Lg6B8-cFtQFNMHBZiZvq4xPu1fYjlfX8d_KNshMGFelxUwN863GRsKiqRcOtXW6RLPdEblc9f4yB_HxsYTf3iJvDgD0ChippMyrQq2eg3jSTrcL9RO7V2o5QvA8V8WoFC93W3Hp885yQu5SIidUIfBPDE708lojJfB9jqnWxKLgFuEf8Omlliy5qeG14Xw-k7576-PEDrrShfaynRZp_a96WOTxGN9Y3Lc2cVE",
       "padded_size": 256
     }
   ],
@@ -71,7 +71,7 @@
         "id": "a3a3a3a3-a3a3-a3a3-a3a3-a3a3a3a3a3a3",
         "revision": 4,
         "tombstone": true,
-        "content_digest": "wLFj1erEaZk4BI_rovgtfnNyjGihkmDF3xSwUK34vGU"
+        "content_digest": "YEn2Thc9T-T6ww75cQKnApjknqRBrM9v-0PbzQBc9og"
       }
     ],
     "retired": [
@@ -87,8 +87,8 @@
     "id": "a5a5a5a5-a5a5-a5a5-a5a5-a5a5a5a5a5a5",
     "revision": 6,
     "tombstone": false,
-    "nonce": "Oe41urTn7gvHDI6tuxaq56vW7if_f5L8",
-    "ciphertext": "_XcLBtRpP94mnxSAzcuXaow0f8JoF4uqLCnIwDGfLPus_qz8W7TYWc07sfA-3beCoylqln9a377TkLP25d_T9mdG1dZ66xT3ANhZEQVXVnz8b8n0Xh6nRJk_gbHnRhFegfxWdad2I_hDVyWJyTNtaVFI2YqrFXbmItFYLyMppomEHK-CY1DmTeoZ45rZIOlsqwxD_H1Ph8tfgraFv1Vf4BF5RVieXCfTO2GXqu9F8AamPE3UFJEPTMvKiGAqQjX6bqI9MQGY1POW8h-8vhFEDbeuv8wNODzHM-G4BP5FrMoLMmVUENdeIMJ7XFFxNdJXg6lTZ3w9ja16TalOrqbxb0ObvIBUTbAyYVo8LDz0Gbk",
+    "nonce": "6Lvwzo3ca4hpLNqhrg1LpcD4tWvzJzp5",
+    "ciphertext": "7fmptZvLaFVQCfPtZkXRTPW8CmCOkN24oI_5mLS9jMIpLVtp9tMccuhei8o_E4KyPTigBY0xeQzTye9xRunKuqDd8Uvf31E-MnHTwaJgGs_m--IugZeTGkx6Nvyx2nhD74IuPOuKlKEV-96ts6xjlrGLs3KuV5CP-CLIHTCOCRWB9iAUmBSE6RR93dGd5lfW66YrTMNfyy4WQ7FWgrHdyqC89ai7IcF2p7TpT-G04JJY-SpLYGnIUf4iJQOOO88EAyL2dmPvDtM4TFvXxfKKI-IDL8tmzil6a0eLnLBWlJncfkGZU3vslGUfC0ha2E69e-TSuRH-3v5yLkjx9RlD7sncsH_BIyh_wDZZXkvt4nY",
     "padded_size": 256
   },
   "refusal": {
@@ -123,7 +123,7 @@
         "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
         "cccccccc-cccc-cccc-cccc-cccccccccccc"
       ],
-      "revoke": null,
+      "revoke": [],
       "keep": [
         "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
         "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
@@ -137,7 +137,9 @@
         "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
         "cccccccc-cccc-cccc-cccc-cccccccccccc"
       ],
-      "revoke": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      "revoke": [
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+      ],
       "keep": [
         "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
         "cccccccc-cccc-cccc-cccc-cccccccccccc"
@@ -150,7 +152,9 @@
         "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
         "cccccccc-cccc-cccc-cccc-cccccccccccc"
       ],
-      "revoke": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "revoke": [
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+      ],
       "keep": null,
       "refusal": {
         "refusal": "RevokingSelf"
@@ -162,7 +166,9 @@
         "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
         "cccccccc-cccc-cccc-cccc-cccccccccccc"
       ],
-      "revoke": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "revoke": [
+        "dddddddd-dddd-dddd-dddd-dddddddddddd"
+      ],
       "keep": null,
       "refusal": {
         "refusal": "NotInRoster"
@@ -172,7 +178,9 @@
       "roster": [
         "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
       ],
-      "revoke": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      "revoke": [
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+      ],
       "keep": null,
       "refusal": {
         "refusal": "LastDevice"
@@ -180,10 +188,55 @@
     },
     {
       "roster": [
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
         "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
         "cccccccc-cccc-cccc-cccc-cccccccccccc"
       ],
-      "revoke": null,
+      "revoke": [
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        "cccccccc-cccc-cccc-cccc-cccccccccccc"
+      ],
+      "keep": [
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+      ],
+      "refusal": null
+    },
+    {
+      "roster": [
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        "cccccccc-cccc-cccc-cccc-cccccccccccc"
+      ],
+      "revoke": [
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+      ],
+      "keep": null,
+      "refusal": {
+        "refusal": "RevokedOutOfOrder"
+      }
+    },
+    {
+      "roster": [
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        "cccccccc-cccc-cccc-cccc-cccccccccccc"
+      ],
+      "revoke": [
+        "cccccccc-cccc-cccc-cccc-cccccccccccc",
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+      ],
+      "keep": null,
+      "refusal": {
+        "refusal": "RevokedOutOfOrder"
+      }
+    },
+    {
+      "roster": [
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        "cccccccc-cccc-cccc-cccc-cccccccccccc"
+      ],
+      "revoke": [],
       "keep": null,
       "refusal": {
         "refusal": "NotEnrolled"

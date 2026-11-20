@@ -62,7 +62,7 @@
         "contact_mode": "basic",
         "accent": "blue"
       },
-      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"blue\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":true,\"calendar\":true,\"contacts\":true,\"notes\":true,\"tasks\":true},\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"blue\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":true,\"calendar\":true,\"contacts\":true,\"notes\":true,\"tasks\":true},\"version\":\"1.1\"}"
     },
     {
       "case": "some features off, detailed contacts, rose",
@@ -81,7 +81,7 @@
         "contact_mode": "detailed",
         "accent": "rose"
       },
-      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"rose\",\"contactMode\":\"detailed\",\"features\":{\"bookmarks\":true,\"calendar\":true,\"contacts\":true,\"notes\":false,\"tasks\":false},\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"rose\",\"contactMode\":\"detailed\",\"features\":{\"bookmarks\":true,\"calendar\":true,\"contacts\":true,\"notes\":false,\"tasks\":false},\"version\":\"1.1\"}"
     },
     {
       "case": "every feature off is repaired to the first",
@@ -112,7 +112,7 @@
         "contact_mode": "basic",
         "accent": "blue"
       },
-      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"blue\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":false,\"calendar\":false,\"contacts\":true,\"notes\":false,\"tasks\":false},\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"blue\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":false,\"calendar\":false,\"contacts\":true,\"notes\":false,\"tasks\":false},\"version\":\"1.1\"}"
     },
     {
       "case": "an unknown mode and accent are the defaults",
@@ -143,7 +143,7 @@
         "contact_mode": "Detailed",
         "accent": "teal"
       },
-      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"blue\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":true,\"calendar\":true,\"contacts\":true,\"notes\":true,\"tasks\":true},\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"blue\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":true,\"calendar\":true,\"contacts\":true,\"notes\":true,\"tasks\":true},\"version\":\"1.1\"}"
     },
     {
       "case": "a feature the draft does not name is on",
@@ -158,7 +158,7 @@
         "contact_mode": "basic",
         "accent": "blue"
       },
-      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"blue\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":true,\"calendar\":false,\"contacts\":true,\"notes\":true,\"tasks\":true},\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"blue\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":true,\"calendar\":false,\"contacts\":true,\"notes\":true,\"tasks\":true},\"version\":\"1.1\"}"
     },
     {
       "case": "flags of any type from a newer build survive, with other keys",
@@ -195,7 +195,7 @@
         "accent": "green",
         "raw": "{\"@type\":\"AccountSettings\",\"version\":\"1.0\",\"features\":{\"contacts\":true,\"journal\":false,\"labs\":\"beta\",\"depth\":3},\"contactMode\":\"basic\",\"accent\":\"blue\",\"theme\":\"dark\"}"
       },
-      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"green\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":true,\"calendar\":true,\"contacts\":true,\"depth\":3,\"journal\":false,\"labs\":\"beta\",\"notes\":true,\"tasks\":true},\"theme\":\"dark\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"green\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":true,\"calendar\":true,\"contacts\":true,\"depth\":3,\"journal\":false,\"labs\":\"beta\",\"notes\":true,\"tasks\":true},\"theme\":\"dark\",\"version\":\"1.1\"}"
     },
     {
       "case": "an unknown flag cannot overwrite a known one",
@@ -235,7 +235,7 @@
         "contact_mode": "basic",
         "accent": "blue"
       },
-      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"blue\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":true,\"calendar\":true,\"contacts\":true,\"journal\":true,\"notes\":true,\"tasks\":true},\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"blue\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":true,\"calendar\":true,\"contacts\":true,\"journal\":true,\"notes\":true,\"tasks\":true},\"version\":\"1.1\"}"
     },
     {
       "case": "a known feature the host has no screen for rides in the unknown list",
@@ -259,7 +259,7 @@
         "contact_mode": "basic",
         "accent": "blue"
       },
-      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"blue\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":true,\"calendar\":true,\"contacts\":true,\"journal\":true,\"notes\":true,\"tasks\":false},\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"blue\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":true,\"calendar\":true,\"contacts\":true,\"journal\":true,\"notes\":true,\"tasks\":false},\"version\":\"1.1\"}"
     },
     {
       "case": "an unreadable stored payload is replaced",
@@ -291,7 +291,7 @@
         "accent": "amber",
         "raw": "not json"
       },
-      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"amber\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":true,\"calendar\":true,\"contacts\":true,\"notes\":true,\"tasks\":true},\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"AccountSettings\",\"accent\":\"amber\",\"contactMode\":\"basic\",\"features\":{\"bookmarks\":true,\"calendar\":true,\"contacts\":true,\"notes\":true,\"tasks\":true},\"version\":\"1.1\"}"
     },
     {
       "case": "a newer minor keeps its version and its keys",

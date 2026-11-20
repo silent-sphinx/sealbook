@@ -290,6 +290,25 @@ pub fn padded_len(plaintext_len: usize) -> usize {
         .unwrap_or_else(|| len.next_power_of_two().max(len))
 }
 
+/// The length an attachment is padded to before it is chunked, by the Padme
+/// scheme: keep the top bits of the length and round up to a multiple of the
+/// rest.
+///
+/// With `E = floor(log2 L)` and `S = floor(log2 E) + 1`, the length rounds up to
+/// a multiple of `2^(E - S)`. The overhead is at most about 12 percent and under
+/// 4 percent past 64 KiB, and the server learns the size only to within that
+/// step. Padding to a whole chunk instead would turn a 10 KB photo into 4 MiB.
+pub fn padme_len(len: u64) -> u64 {
+    if len < 2 {
+        return len;
+    }
+    let exponent = len.ilog2();
+    let significant_bits = exponent.ilog2() + 1;
+    let free_bits = exponent - significant_bits;
+    let mask = (1u64 << free_bits) - 1;
+    (len + mask) & !mask
+}
+
 fn pad(plaintext: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(plaintext.len() + PAD_LEN_PREFIX);
     out.extend_from_slice(&(plaintext.len() as u32).to_be_bytes());

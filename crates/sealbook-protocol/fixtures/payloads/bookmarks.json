@@ -21,7 +21,9 @@
       "parentId",
       "color",
       "hideFromAll",
-      "archived"
+      "archived",
+      "createdAt",
+      "updatedAt"
     ],
     "default_collection_id": "00000000-0000-0000-0000-000000000005",
     "default_collection_name": "Default Collection",
@@ -40,7 +42,7 @@
         "tags": [],
         "collection_id": "00000000-0000-0000-0000-000000000005"
       },
-      "payload": "{\"@type\":\"Bookmark\",\"collectionId\":\"00000000-0000-0000-0000-000000000005\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"title\":\"Example\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"url\":\"https://example.com/a\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Bookmark\",\"collectionId\":\"00000000-0000-0000-0000-000000000005\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"title\":\"Example\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"url\":\"https://example.com/a\",\"version\":\"1.1\"}"
     },
     {
       "case": "a bare host is given a scheme, and a title is trimmed",
@@ -51,7 +53,7 @@
         "tags": [],
         "collection_id": "00000000-0000-0000-0000-000000000005"
       },
-      "payload": "{\"@type\":\"Bookmark\",\"collectionId\":\"00000000-0000-0000-0000-000000000005\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"title\":\"Example\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"url\":\"https://example.com/a\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Bookmark\",\"collectionId\":\"00000000-0000-0000-0000-000000000005\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"title\":\"Example\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"url\":\"https://example.com/a\",\"version\":\"1.1\"}"
     },
     {
       "case": "no title is written when none was given",
@@ -62,7 +64,7 @@
         "tags": [],
         "collection_id": "00000000-0000-0000-0000-000000000005"
       },
-      "payload": "{\"@type\":\"Bookmark\",\"collectionId\":\"00000000-0000-0000-0000-000000000005\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"title\":\"\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"url\":\"https://example.com\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Bookmark\",\"collectionId\":\"00000000-0000-0000-0000-000000000005\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"title\":\"\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"url\":\"https://example.com\",\"version\":\"1.1\"}"
     },
     {
       "case": "a blank collection resolves to the default",
@@ -73,7 +75,7 @@
         "tags": [],
         "collection_id": "   "
       },
-      "payload": "{\"@type\":\"Bookmark\",\"collectionId\":\"00000000-0000-0000-0000-000000000005\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"title\":\"\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"url\":\"https://example.com\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Bookmark\",\"collectionId\":\"00000000-0000-0000-0000-000000000005\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"title\":\"\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"url\":\"https://example.com\",\"version\":\"1.1\"}"
     },
     {
       "case": "notes and tags, the tags trimmed and de-duplicated",
@@ -89,7 +91,7 @@
         ],
         "collection_id": "00000000-0000-0000-0000-000000000005"
       },
-      "payload": "{\"@type\":\"Bookmark\",\"collectionId\":\"00000000-0000-0000-0000-000000000005\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"notes\":\"a note\",\"tags\":[\"Rust\",\"web\"],\"title\":\"\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"url\":\"https://example.com\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Bookmark\",\"collectionId\":\"00000000-0000-0000-0000-000000000005\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"notes\":\"a note\",\"tags\":[\"Rust\",\"web\"],\"title\":\"\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"url\":\"https://example.com\",\"version\":\"1.1\"}"
     },
     {
       "case": "an edit keeps a key a later build added",
@@ -105,7 +107,7 @@
         "created_at": "2026-01-01T00:00:00Z",
         "raw": "{\"@type\":\"Bookmark\",\"collectionId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"notes\":\"worth keeping\",\"somethingNewer\":{\"from\":\"a later build\"},\"tags\":[\"rust\",\"web\"],\"title\":\"Example\",\"updatedAt\":\"2026-02-02T00:00:00Z\",\"url\":\"https://example.com/a\",\"version\":\"1.0\"}"
       },
-      "payload": "{\"@type\":\"Bookmark\",\"collectionId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"notes\":\"worth keeping\",\"somethingNewer\":{\"from\":\"a later build\"},\"tags\":[\"rust\",\"web\"],\"title\":\"Renamed\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"url\":\"https://example.com/a\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Bookmark\",\"collectionId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"notes\":\"worth keeping\",\"somethingNewer\":{\"from\":\"a later build\"},\"tags\":[\"rust\",\"web\"],\"title\":\"Renamed\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"url\":\"https://example.com/a\",\"version\":\"1.1\"}"
     },
     {
       "case": "an edit that clears the notes and tags",
@@ -118,7 +120,7 @@
         "created_at": "2026-01-01T00:00:00Z",
         "raw": "{\"@type\":\"Bookmark\",\"collectionId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"notes\":\"worth keeping\",\"somethingNewer\":{\"from\":\"a later build\"},\"tags\":[\"rust\",\"web\"],\"title\":\"Example\",\"updatedAt\":\"2026-02-02T00:00:00Z\",\"url\":\"https://example.com/a\",\"version\":\"1.0\"}"
       },
-      "payload": "{\"@type\":\"Bookmark\",\"collectionId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"somethingNewer\":{\"from\":\"a later build\"},\"title\":\"Example\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"url\":\"https://example.com/a\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Bookmark\",\"collectionId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"somethingNewer\":{\"from\":\"a later build\"},\"title\":\"Example\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"url\":\"https://example.com/a\",\"version\":\"1.1\"}"
     },
     {
       "case": "an untitled bookmark saved unchanged stays untitled",
@@ -131,7 +133,7 @@
         "created_at": "2026-01-01T00:00:00Z",
         "raw": "{\"@type\":\"Bookmark\",\"url\":\"https://example.com\",\"createdAt\":\"2026-01-01T00:00:00Z\"}"
       },
-      "payload": "{\"@type\":\"Bookmark\",\"collectionId\":\"00000000-0000-0000-0000-000000000005\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"title\":\"\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"url\":\"https://example.com\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"Bookmark\",\"collectionId\":\"00000000-0000-0000-0000-000000000005\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"title\":\"\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"url\":\"https://example.com\",\"version\":\"1.1\"}"
     },
     {
       "case": "a newer minor keeps its version and its keys",
@@ -309,7 +311,7 @@
         "hide_from_all": false,
         "archived": false
       },
-      "payload": "{\"@type\":\"BookmarkCollection\",\"name\":\"Work\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"BookmarkCollection\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"name\":\"Work\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "a name with surrounding space, under another collection",
@@ -319,7 +321,7 @@
         "hide_from_all": false,
         "archived": false
       },
-      "payload": "{\"@type\":\"BookmarkCollection\",\"name\":\"Work\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"BookmarkCollection\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"name\":\"Work\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "a coloured top-level collection",
@@ -329,7 +331,7 @@
         "hide_from_all": false,
         "archived": false
       },
-      "payload": "{\"@type\":\"BookmarkCollection\",\"color\":\"#112233\",\"name\":\"Work\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"BookmarkCollection\",\"color\":\"#112233\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"name\":\"Work\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "a rename keeps the parent, the colour and a later build's key",
@@ -341,7 +343,7 @@
         "archived": false,
         "raw": "{\"@type\":\"BookmarkCollection\",\"color\":\"#112233\",\"name\":\"Work\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sortKey\":\"from a later build\",\"version\":\"1.0\"}"
       },
-      "payload": "{\"@type\":\"BookmarkCollection\",\"color\":\"#112233\",\"name\":\"Renamed\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sortKey\":\"from a later build\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"BookmarkCollection\",\"color\":\"#112233\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"name\":\"Renamed\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sortKey\":\"from a later build\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "a collection hidden from all bookmarks",
@@ -350,7 +352,7 @@
         "hide_from_all": true,
         "archived": false
       },
-      "payload": "{\"@type\":\"BookmarkCollection\",\"hideFromAll\":true,\"name\":\"Work\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"BookmarkCollection\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"hideFromAll\":true,\"name\":\"Work\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "moving to the top level clears the parent",
@@ -361,7 +363,7 @@
         "archived": false,
         "raw": "{\"@type\":\"BookmarkCollection\",\"color\":\"#112233\",\"name\":\"Work\",\"parentId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"sortKey\":\"from a later build\",\"version\":\"1.0\"}"
       },
-      "payload": "{\"@type\":\"BookmarkCollection\",\"color\":\"#112233\",\"name\":\"Work\",\"sortKey\":\"from a later build\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"BookmarkCollection\",\"color\":\"#112233\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"name\":\"Work\",\"sortKey\":\"from a later build\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "an archived collection",
@@ -370,7 +372,7 @@
         "hide_from_all": false,
         "archived": true
       },
-      "payload": "{\"@type\":\"BookmarkCollection\",\"archived\":true,\"name\":\"Work\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"BookmarkCollection\",\"archived\":true,\"createdAt\":\"2026-10-28T12:00:00Z\",\"name\":\"Work\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     },
     {
       "case": "restoring a collection drops the archived flag",
@@ -380,7 +382,7 @@
         "archived": false,
         "raw": "{\"name\":\"Work\",\"archived\":true}"
       },
-      "payload": "{\"@type\":\"BookmarkCollection\",\"name\":\"Work\",\"version\":\"1.0\"}"
+      "payload": "{\"@type\":\"BookmarkCollection\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"name\":\"Work\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     }
   ],
   "collection_parses": [

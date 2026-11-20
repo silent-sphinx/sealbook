@@ -34,7 +34,8 @@
           "table": "list_writes",
           "op": "task_list.write",
           "args": [
-            "draft"
+            "draft",
+            "$now"
           ],
           "expect": "payload"
         },
@@ -83,7 +84,8 @@
           "table": "collection_writes",
           "op": "bookmark_collection.write",
           "args": [
-            "draft"
+            "draft",
+            "$now"
           ],
           "expect": "payload"
         },
@@ -136,7 +138,8 @@
             "color",
             "archived",
             "hide_from_all",
-            "previous"
+            "previous",
+            "$now"
           ],
           "expect": "payload"
         },
@@ -167,7 +170,8 @@
           "table": "calendar_writes",
           "op": "calendar.write",
           "args": [
-            "draft"
+            "draft",
+            "$now"
           ],
           "expect": "payload"
         },
@@ -184,7 +188,8 @@
           "table": "event_writes",
           "op": "event.write",
           "args": [
-            "draft"
+            "draft",
+            "$now"
           ],
           "expect": "payload"
         },
@@ -226,7 +231,8 @@
           "table": "address_book_writes",
           "op": "address_book.write",
           "args": [
-            "draft"
+            "draft",
+            "$now"
           ],
           "expect": "payload"
         },
@@ -356,7 +362,8 @@
           "table": "tasks_list_writes",
           "op": "task_list.write",
           "args": [
-            "draft"
+            "draft",
+            "now"
           ],
           "expect": "payload"
         },
@@ -391,7 +398,8 @@
           "table": "bookmarks_collection_writes",
           "op": "bookmark_collection.write",
           "args": [
-            "draft"
+            "draft",
+            "now"
           ],
           "expect": "payload"
         },
@@ -435,7 +443,8 @@
           "table": "calendars_calendar_writes",
           "op": "calendar.write",
           "args": [
-            "draft"
+            "draft",
+            "now"
           ],
           "expect": "payload"
         },
@@ -452,7 +461,8 @@
           "table": "calendars_event_writes",
           "op": "event.write",
           "args": [
-            "draft"
+            "draft",
+            "now"
           ],
           "expect": "payload"
         },
@@ -489,7 +499,8 @@
           "table": "contacts_address_book_writes",
           "op": "address_book.write",
           "args": [
-            "draft"
+            "draft",
+            "now"
           ],
           "expect": "payload"
         },
@@ -591,6 +602,29 @@
             "outcomes"
           ],
           "expect": "result"
+        }
+      ]
+    },
+    {
+      "file": "payloads/upgrade.json",
+      "tables": [
+        {
+          "table": "upgrades",
+          "op": "payload.upgrade",
+          "args": [
+            "content_type",
+            "from"
+          ],
+          "expect": "to"
+        },
+        {
+          "table": "untouched",
+          "op": "payload.upgrade",
+          "args": [
+            "content_type",
+            "raw"
+          ],
+          "expect": "none"
         }
       ]
     }

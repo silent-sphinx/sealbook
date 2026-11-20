@@ -12,19 +12,25 @@ use uuid::Uuid;
 
 /// Plaintext bytes per attachment chunk.
 ///
-/// A whole attachment is sliced into chunks of this size (the final chunk may be
-/// shorter) and each is sealed independently with `sealbook_crypto::encrypt_chunk`.
-/// The value trades upload round trips against per-request size and the
-/// granularity at which the server can infer an attachment's length: at 4 MiB a
-/// 200 MiB photo is 50 chunks and its size leaks only to within 4 MiB.
+/// An attachment is first padded to `sealbook_crypto::padme_len` of its size, then
+/// sliced into chunks of this size; every chunk but the last is exactly this
+/// long, and the last is zero-filled up to the padded total. Each chunk is
+/// sealed independently with `sealbook_crypto::encrypt_chunk`. The value trades
+/// upload round trips against per-request size: at 4 MiB a 200 MiB photo is
+/// about 50 chunks. What the server learns of the length is the padded total,
+/// which Padme keeps to within about 12 percent.
 pub const ATTACHMENT_CHUNK_SIZE: usize = 4 * 1024 * 1024;
 
-/// Largest plaintext a single attachment may carry.
+/// Largest plaintext a single attachment may carry, before padding.
 ///
-/// Unlike `MAX_PADDED_OBJECT_SIZE`, this is not a padding bucket and need not be
-/// a power of two: attachment chunks are never padded. It bounds one photo, not
-/// a whole account; the per-account ceiling is the server's attachment quota.
+/// Not a padding bucket and need not be a power of two. It bounds one photo, not
+/// a whole account; the per-account ceiling is the server's attachment quota,
+/// which counts the padded ciphertext.
 pub const MAX_ATTACHMENT_SIZE: usize = 200 * 1024 * 1024;
+
+/// Largest padded attachment the server accepts: the plaintext ceiling plus the
+/// most Padme adds, an eighth.
+pub const MAX_PADDED_ATTACHMENT_SIZE: usize = MAX_ATTACHMENT_SIZE + MAX_ATTACHMENT_SIZE / 8;
 
 /// AEAD tag bytes added to each sealed chunk, used to size the upload body limit
 /// and the server's per-chunk ciphertext check.
@@ -40,7 +46,6 @@ pub const ATTACHMENT_CHUNK_TAG_LEN: usize = 16;
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CreateAttachmentRequest {
     pub attachment_id: Uuid,
-    pub total_plaintext_size: u64,
     pub chunk_size: u32,
     pub chunk_count: u32,
     /// The device's authorisation for this create.
@@ -49,7 +54,7 @@ pub struct CreateAttachmentRequest {
 
 /// A device's signature over one attachment create, commit or delete.
 ///
-/// The challenge comes from `POST /v1/attachments/challenge` and is single use.
+/// The challenge comes from `POST /v2/attachments/challenge` and is single use.
 /// A session token alone cannot create, commit or delete an attachment: the
 /// signature is over the operation, the collection and the attachment, made with
 /// the device's own signing keys.

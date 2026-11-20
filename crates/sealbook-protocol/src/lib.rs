@@ -10,7 +10,7 @@ pub use attachment::{
     AttachmentListEntry, AttachmentMetaResponse, AttachmentOpAuth, CommitAttachmentResponse,
     CreateAttachmentRequest, CreateAttachmentResponse, ListAttachmentsResponse,
     ATTACHMENT_CHUNK_SIZE, ATTACHMENT_CHUNK_TAG_LEN, ATTACHMENT_STATE_COMMITTED,
-    ATTACHMENT_STATE_PENDING, MAX_ATTACHMENT_SIZE,
+    ATTACHMENT_STATE_PENDING, MAX_ATTACHMENT_SIZE, MAX_PADDED_ATTACHMENT_SIZE,
 };
 
 use base64url::b64;
@@ -18,8 +18,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub use version::{
-    merge_payload, payload_schema_readable, speaks_protocol, ProtocolReport,
-    PAYLOAD_SCHEMA_VERSION, PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS,
+    merge_payload, payload_schema_readable, route, speaks_protocol, ProtocolReport,
+    PAYLOAD_SCHEMA_VERSION, PROTOCOL_VERSION, RETIRED_ROUTE_MESSAGE, RETIRED_ROUTE_PREFIX,
+    ROUTE_PREFIX, SUPPORTED_PROTOCOL_VERSIONS,
 };
 
 pub const SEALED_CONTENT_TYPE: &str = "application/vnd.sealbook.sealed";
@@ -42,7 +43,7 @@ pub const ADDRESS_BOOK_ID_PROP: &str = "sealbook:addressBookId";
 /// export from the CLI and one from `sealbook-web` are the same document;
 /// `sealbook-web` mirrors them in `src/lib/accountExport.ts`.
 pub const ACCOUNT_EXPORT_TYPE: &str = "SealbookAccountExport";
-pub const ACCOUNT_EXPORT_VERSION: &str = "1.0";
+pub const ACCOUNT_EXPORT_VERSION: &str = "1.1";
 
 /// Smallest and largest padded plaintext an object may carry.
 ///
@@ -168,6 +169,11 @@ pub struct RosterBody {
     /// rosters sealed before it existed.
     #[serde(default, skip_serializing_if = "Vec::is_empty", with = "b64")]
     pub key_commitment: Vec<u8>,
+    /// Sealed by protocol v2, under its own transcript label. The signed marker
+    /// that the account has migrated: the chain refuses an older roster after one.
+    /// Absent on rosters sealed by protocol v1.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub migrated: bool,
     pub signature: DualSignatureBody,
     #[serde(with = "b64")]
     pub mac: Vec<u8>,
@@ -197,6 +203,7 @@ impl RosterBody {
                 RosterSignerBody::Phrase => sealbook_crypto::RosterSigner::Phrase,
             },
             key_commitment: self.key_commitment.clone(),
+            migrated: self.migrated,
             signature: sealbook_crypto::DualSignature {
                 mldsa: self.signature.mldsa.clone(),
                 ed25519: self.signature.ed25519.clone(),
@@ -206,7 +213,7 @@ impl RosterBody {
     }
 
     /// Signs and MACs a roster over `devices`, committing to `key` as the key of
-    /// `key_epoch`.
+    /// `key_epoch`. Always sealed as migrated: protocol v1 rosters are only read.
     #[allow(clippy::too_many_arguments)]
     pub fn seal(
         collection_id: Uuid,
@@ -228,6 +235,7 @@ impl RosterBody {
             signer,
             key_commitment: sealbook_crypto::key_commitment(key, collection_id, key_epoch)?
                 .to_vec(),
+            migrated: true,
             signature: DualSignatureBody {
                 mldsa: Vec::new(),
                 ed25519: Vec::new(),
@@ -303,6 +311,7 @@ impl RosterBody {
                 sealbook_crypto::RosterSigner::Phrase => RosterSignerBody::Phrase,
             },
             key_commitment: roster.key_commitment,
+            migrated: roster.migrated,
             signature: DualSignatureBody {
                 mldsa: roster.signature.mldsa,
                 ed25519: roster.signature.ed25519,
@@ -352,8 +361,6 @@ pub struct RegisterFinishRequest {
     pub username: String,
     #[serde(with = "b64")]
     pub upload: Vec<u8>,
-    #[serde(with = "b64")]
-    pub kdf_salt: Vec<u8>,
     pub device: DevicePublicKeys,
     /// Chosen by the client, like the device id, so that the initial manifest can
     /// be signed over it before the account exists. A duplicate is a `409`.
@@ -440,21 +447,27 @@ pub struct LoginFinishResponse {
     pub account_id: Uuid,
     pub collection_id: Uuid,
     pub session_token: String,
-    #[serde(with = "b64")]
-    pub kdf_salt: Vec<u8>,
     pub key_wraps: Vec<KeyWrapBody>,
     /// The epoch these wraps belong to, so a client starts in sync and only
     /// re-fetches its wrap when a rotation actually happens.
     pub key_epoch: u64,
-    /// True when a recovery enrolled a device and the collection key has still
-    /// not been rotated, so the phrase used then — and any other copy of it —
-    /// can still open this vault. The client must finish that rotation before
-    /// the account can be written to again.
-    ///
-    /// `#[serde(default)]` so a client built before this field existed still
-    /// deserializes a response carrying it.
-    #[serde(default)]
-    pub recovery_pending: bool,
+    /// Set when the collection key must be rotated before the account can be
+    /// written to again, and why, so the client shows the right message. It is a
+    /// hint: the client's own roster check decides whether a rotation is owed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation_owed: Option<RotationOwed>,
+}
+
+/// Why a rotation is owed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum RotationOwed {
+    /// A recovery enrolled a device and the key has not been rotated, so the
+    /// phrase used then, and any other copy of it, can still open this vault.
+    Recovery,
+    /// The account has not yet moved to this protocol version.
+    Upgrade,
 }
 
 /// One object as the manifest commits to it.
@@ -771,7 +784,7 @@ pub struct RotatedObject {
 /// Every operation that must invalidate the old key goes through this one
 /// request, because they all require the same work and only a client can do it:
 ///
-/// * revoking a device (`revoke_device_id`), which already holds the old key;
+/// * revoking devices (`revoke_device_ids`), which already hold the old key;
 /// * changing the recovery phrase, since a rotation always issues a new one;
 /// * finishing a recovery, where the phrase that was just used — and anyone who
 ///   has ever seen it — must stop being able to decrypt.
@@ -780,12 +793,11 @@ pub struct RotatedObject {
 pub struct RotateRequest {
     /// Must be exactly one greater than the collection's current epoch.
     pub key_epoch: u64,
-    /// The device to revoke as part of this rotation, if any. It must not be the
-    /// device making the request.
-    pub revoke_device_id: Option<Uuid>,
-    #[serde(with = "b64")]
-    pub kdf_salt: Vec<u8>,
-    /// One wrap per device that keeps access, plus `recovery` and `phrase`.
+    /// The devices to revoke as part of this rotation, strictly ascending. None may
+    /// be the device making the request. Empty means nothing is revoked, as in a
+    /// phrase or migration rotation.
+    pub revoke_device_ids: Vec<Uuid>,
+    /// One wrap per device that keeps access, plus `phrase`.
     pub key_wraps: Vec<KeyWrapBody>,
     /// Rotating the key invalidates the old recovery phrase, so a new one is
     /// issued as part of the same operation.
@@ -971,18 +983,10 @@ pub struct RecoverFinishRequest {
     pub wrap: KeyWrapBody,
     /// The current roster plus the recovering device, signed by the phrase key.
     pub roster: RosterBody,
-    /// The replacement password, as an OPAQUE registration upload, plus the KDF
-    /// salt and the collection-key wrap re-made under it. `phrase_proof` covers
-    /// all of it, so none of it can be substituted in flight.
+    /// The replacement password, as an OPAQUE registration upload. `phrase_proof`
+    /// covers it, so it cannot be substituted in flight.
     #[serde(with = "b64")]
     pub upload: Vec<u8>,
-    #[serde(with = "b64")]
-    pub kdf_salt: Vec<u8>,
-    #[serde(with = "b64")]
-    pub recovery_nonce: Vec<u8>,
-    #[serde(with = "b64")]
-    pub recovery_wrapped_ck: Vec<u8>,
-    pub recovery_ciphersuite: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1037,13 +1041,6 @@ pub struct ChangePasswordRequest {
     pub signature: DualSignatureBody,
     #[serde(with = "b64")]
     pub upload: Vec<u8>,
-    #[serde(with = "b64")]
-    pub kdf_salt: Vec<u8>,
-    #[serde(with = "b64")]
-    pub recovery_nonce: Vec<u8>,
-    #[serde(with = "b64")]
-    pub recovery_wrapped_ck: Vec<u8>,
-    pub recovery_ciphersuite: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -177,7 +177,7 @@
       "rename": null,
       "kind": "firefox",
       "platform": "macOS",
-      "payload": "{\"@type\":\"DeviceLabel\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"kind\":\"firefox\",\"name\":\"Amber Beacon\",\"platform\":\"macOS\",\"version\":\"1.0\"}",
+      "payload": "{\"@type\":\"DeviceLabel\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"kind\":\"firefox\",\"name\":\"Amber Beacon\",\"platform\":\"macOS\",\"version\":\"1.1\"}",
       "reused_object": false
     },
     {
@@ -207,7 +207,7 @@
       "rename": null,
       "kind": "web",
       "platform": "Firefox on Linux",
-      "payload": "{\"@type\":\"DeviceLabel\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"kind\":\"web\",\"name\":\"Work laptop\",\"pinned\":true,\"platform\":\"Firefox on Linux\",\"version\":\"1.0\"}",
+      "payload": "{\"@type\":\"DeviceLabel\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"kind\":\"web\",\"name\":\"Work laptop\",\"pinned\":true,\"platform\":\"Firefox on Linux\",\"version\":\"1.1\"}",
       "reused_object": true
     },
     {
@@ -237,7 +237,7 @@
       "rename": "  Office   iMac ",
       "kind": "unknown",
       "platform": "",
-      "payload": "{\"@type\":\"DeviceLabel\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"kind\":\"web\",\"name\":\"Office iMac\",\"pinned\":true,\"platform\":\"Firefox on macOS\",\"version\":\"1.0\"}",
+      "payload": "{\"@type\":\"DeviceLabel\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"kind\":\"web\",\"name\":\"Office iMac\",\"pinned\":true,\"platform\":\"Firefox on macOS\",\"version\":\"1.1\"}",
       "reused_object": true
     },
     {
@@ -267,7 +267,7 @@
       "rename": "   ",
       "kind": "unknown",
       "platform": "",
-      "payload": "{\"@type\":\"DeviceLabel\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"kind\":\"web\",\"name\":\"Amber Beacon\",\"pinned\":true,\"platform\":\"Firefox on macOS\",\"version\":\"1.0\"}",
+      "payload": "{\"@type\":\"DeviceLabel\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"kind\":\"web\",\"name\":\"Amber Beacon\",\"pinned\":true,\"platform\":\"Firefox on macOS\",\"version\":\"1.1\"}",
       "reused_object": true
     },
     {
@@ -277,7 +277,7 @@
       "rename": "Old phone",
       "kind": "unknown",
       "platform": "",
-      "payload": "{\"@type\":\"DeviceLabel\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"name\":\"Old phone\",\"version\":\"1.0\"}",
+      "payload": "{\"@type\":\"DeviceLabel\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"name\":\"Old phone\",\"version\":\"1.1\"}",
       "reused_object": false
     },
     {
@@ -287,7 +287,7 @@
       "rename": "A name that goes on far longer than anyone would want to read",
       "kind": "unknown",
       "platform": "",
-      "payload": "{\"@type\":\"DeviceLabel\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"name\":\"A name that goes on far longer than anyo\",\"version\":\"1.0\"}",
+      "payload": "{\"@type\":\"DeviceLabel\",\"deviceId\":\"5ea1b00c-0000-4000-8000-000000000001\",\"name\":\"A name that goes on far longer than anyo\",\"version\":\"1.1\"}",
       "reused_object": false
     }
   ],

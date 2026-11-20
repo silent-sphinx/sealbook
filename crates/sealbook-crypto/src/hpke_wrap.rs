@@ -11,7 +11,11 @@ use zeroize::Zeroize;
 use crate::aead::CollectionKey;
 use crate::error::CryptoError;
 
-pub const XWING_CIPHERSUITE: &str = "hpke-xwing-sha256-chacha20poly1305";
+/// Names the X-Wing draft revision, which is draft-connolly-cfrg-xwing-kem-06 as
+/// the pinned `x-wing` crate implements it. The final RFC changes the encoding
+/// and the combiner, so moving to it is a new suite and a rotation, not a silent
+/// mismatch on every stored wrap.
+pub const XWING_CIPHERSUITE: &str = "hpke-xwing-draft06-sha256-chacha20poly1305";
 pub const XWING_PUBLIC_KEY_LEN: usize = 1216;
 pub const XWING_ENCAPSULATED_KEY_LEN: usize = 1120;
 pub const HPKE_AEAD_TAG_LEN: usize = 16;
@@ -133,21 +137,51 @@ pub fn wrap_for_device(
     })
 }
 
-/// Opens a device wrap bound to `binding`.
+/// The wrap form from before binding, for fixtures and migration tests only.
+/// Nothing in a product path may make one: it is replayable across epochs.
+#[doc(hidden)]
+pub fn wrap_for_device_legacy(
+    recipient_pk: &DeviceHpkePublic,
+    key: &CollectionKey,
+) -> Result<DeviceHpkeWrap, CryptoError> {
+    let pk = <Kem as KemTrait>::PublicKey::from_bytes(&recipient_pk.0)?;
+    let (encapped, ciphertext) = hpke::single_shot_seal::<Aead, Kdf, Kem>(
+        &OpModeS::Base,
+        &pk,
+        HPKE_INFO_LEGACY,
+        &key.0,
+        HPKE_AAD_LEGACY,
+    )?;
+    Ok(DeviceHpkeWrap {
+        enc: encapped.to_bytes().to_vec(),
+        ciphertext,
+        ciphersuite: XWING_CIPHERSUITE,
+    })
+}
+
+/// Which form of a wrap opened.
 ///
-/// Wraps made before binding existed carry no collection or epoch, so they are
-/// still opened, but only once the bound form has failed. A client treats that as
-/// a legacy wrap it should replace at the next rotation. Until every wrap has been
-/// replaced, a server could serve the legacy form to skip the binding; the
-/// roster's key-epoch check is what stops a stale roster being accepted.
+/// A wrap made before binding existed carries no collection or epoch, so it can
+/// be replayed from another collection or epoch. It is still opened, but only
+/// once the bound form has failed, and the caller is told which one it got so
+/// that it can refuse the legacy form outside a migration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WrapForm {
+    Bound,
+    Legacy,
+}
+
+/// Opens a device wrap bound to `binding`, and reports which form opened.
 pub fn unwrap_for_device(
     secret: &DeviceHpkeSecret,
     wrap: &DeviceHpkeWrap,
     binding: &WrapBinding,
-) -> Result<CollectionKey, CryptoError> {
-    let bytes = open_secret(secret, wrap, HPKE_INFO, &binding.aad())
-        .or_else(|_| open_secret(secret, wrap, HPKE_INFO_LEGACY, HPKE_AAD_LEGACY))?;
-    Ok(CollectionKey::from_bytes(bytes))
+) -> Result<(CollectionKey, WrapForm), CryptoError> {
+    if let Ok(bytes) = open_secret(secret, wrap, HPKE_INFO, &binding.aad()) {
+        return Ok((CollectionKey::from_bytes(bytes), WrapForm::Bound));
+    }
+    let bytes = open_secret(secret, wrap, HPKE_INFO_LEGACY, HPKE_AAD_LEGACY)?;
+    Ok((CollectionKey::from_bytes(bytes), WrapForm::Legacy))
 }
 
 pub fn seal_login_challenge(
@@ -170,13 +204,18 @@ pub fn generate_login_challenge() -> [u8; 32] {
     challenge
 }
 
+/// Binds the login session key to the challenge that only the device's HPKE key
+/// can open, so it proves the device was present.
+///
+/// It adds no post-quantum secrecy to the token: the challenge goes back in
+/// plaintext in `LoginStartRequest.challenge`, so the key's secrecy is TLS's.
 pub fn hybrid_session_key(
     opaque_session: &[u8],
     challenge: &[u8; 32],
 ) -> Result<[u8; 32], CryptoError> {
     let hk = Hkdf::<Sha256>::new(Some(challenge), opaque_session);
     let mut out = [0u8; 32];
-    hk.expand(b"sealbook-login-session-pq-v1", &mut out)
+    hk.expand(b"sealbook-login-session-v2", &mut out)
         .map_err(|_| CryptoError::Hkdf)?;
     Ok(out)
 }
@@ -248,8 +287,9 @@ mod tests {
         let (sk, pk) = generate_device_hpke().unwrap();
         let key = CollectionKey::generate();
         let wrap = wrap_for_device(&pk, &key, &binding(2)).unwrap();
-        let opened = unwrap_for_device(&sk, &wrap, &binding(2)).unwrap();
+        let (opened, form) = unwrap_for_device(&sk, &wrap, &binding(2)).unwrap();
         assert_eq!(opened.as_bytes(), key.as_bytes());
+        assert_eq!(form, WrapForm::Bound);
         assert_eq!(wrap.ciphersuite, XWING_CIPHERSUITE);
     }
 
@@ -267,12 +307,18 @@ mod tests {
     }
 
     #[test]
-    fn a_wrap_made_before_binding_still_opens() {
+    fn the_ciphersuite_names_the_draft() {
+        assert!(XWING_CIPHERSUITE.contains("draft06"));
+    }
+
+    #[test]
+    fn a_wrap_made_before_binding_opens_and_reports_the_legacy_form() {
         let (sk, pk) = generate_device_hpke().unwrap();
         let key = CollectionKey::generate();
         let legacy = seal_secret(&pk, &key.0, HPKE_INFO_LEGACY, HPKE_AAD_LEGACY).unwrap();
-        let opened = unwrap_for_device(&sk, &legacy, &binding(5)).unwrap();
+        let (opened, form) = unwrap_for_device(&sk, &legacy, &binding(5)).unwrap();
         assert_eq!(opened.as_bytes(), key.as_bytes());
+        assert_eq!(form, WrapForm::Legacy);
     }
 
     #[test]

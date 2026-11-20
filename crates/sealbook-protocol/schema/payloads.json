@@ -113,6 +113,11 @@
           "description": "An accent key or a CSS colour.",
           "type": "string"
         },
+        "createdAt": {
+          "description": "Absent on an object written before payload 1.1: unknown, never invented.",
+          "format": "date-time",
+          "type": "string"
+        },
         "hideFromAll": {
           "description": "Written only when true.",
           "type": "boolean"
@@ -125,6 +130,11 @@
           "format": "date-time",
           "type": "string"
         },
+        "updatedAt": {
+          "description": "Absent as for createdAt.",
+          "format": "date-time",
+          "type": "string"
+        },
         "version": {
           "$ref": "#/$defs/Version"
         }
@@ -132,7 +142,9 @@
       "required": [
         "@type",
         "version",
-        "name"
+        "name",
+        "createdAt",
+        "updatedAt"
       ],
       "type": "object",
       "x-sealbook-conditionally-owned": [
@@ -272,6 +284,11 @@
           "description": "An accent key or a CSS colour.",
           "type": "string"
         },
+        "createdAt": {
+          "description": "Absent on an object written before payload 1.1: unknown, never invented.",
+          "format": "date-time",
+          "type": "string"
+        },
         "hideFromAll": {
           "description": "Written only when true.",
           "type": "boolean"
@@ -289,6 +306,11 @@
           "format": "date-time",
           "type": "string"
         },
+        "updatedAt": {
+          "description": "Absent as for createdAt.",
+          "format": "date-time",
+          "type": "string"
+        },
         "version": {
           "$ref": "#/$defs/Version"
         }
@@ -296,7 +318,9 @@
       "required": [
         "@type",
         "version",
-        "name"
+        "name",
+        "createdAt",
+        "updatedAt"
       ],
       "type": "object",
       "x-sealbook-conditionally-owned": [
@@ -314,10 +338,16 @@
           "type": "boolean"
         },
         "color": {
-          "description": "A CSS colour.",
+          "description": "An accent key or a CSS colour. Absent reads as the default colour.",
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "Absent on an object written before payload 1.1: unknown, never invented.",
+          "format": "date-time",
           "type": "string"
         },
         "favorite": {
+          "description": "Written only when true.",
           "type": "boolean"
         },
         "hideFromAll": {
@@ -332,6 +362,11 @@
           "format": "date-time",
           "type": "string"
         },
+        "updatedAt": {
+          "description": "Absent as for createdAt.",
+          "format": "date-time",
+          "type": "string"
+        },
         "version": {
           "$ref": "#/$defs/Version"
         }
@@ -340,8 +375,8 @@
         "@type",
         "version",
         "name",
-        "color",
-        "favorite"
+        "createdAt",
+        "updatedAt"
       ],
       "type": "object",
       "x-sealbook-conditionally-owned": [
@@ -380,8 +415,13 @@
           "type": "array"
         },
         "calendarId": {
-          "description": "Absent is no calendar.",
+          "description": "Carried as stored when it is not a UUID. An event stored without one is read as being in the default calendar.",
           "format": "uuid",
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "Absent on an object written before payload 1.1: unknown, never invented.",
+          "format": "date-time",
           "type": "string"
         },
         "end": {
@@ -426,6 +466,11 @@
           "format": "date-time",
           "type": "string"
         },
+        "updatedAt": {
+          "description": "Absent as for createdAt.",
+          "format": "date-time",
+          "type": "string"
+        },
         "version": {
           "$ref": "#/$defs/Version"
         }
@@ -434,7 +479,10 @@
         "@type",
         "version",
         "title",
-        "start"
+        "start",
+        "calendarId",
+        "createdAt",
+        "updatedAt"
       ],
       "type": "object",
       "x-sealbook-conditionally-owned": [
@@ -775,6 +823,9 @@
           "format": "date-time",
           "type": "string"
         },
+        "sealbook:version": {
+          "$ref": "#/$defs/Version"
+        },
         "speakToAs": {
           "properties": {
             "pronouns": {
@@ -811,7 +862,8 @@
           "type": "string"
         },
         "version": {
-          "$ref": "#/$defs/Version"
+          "const": "1.0",
+          "description": "The JSContact version. Sealbook's schema version is sealbook:version."
         }
       },
       "required": [
@@ -820,7 +872,8 @@
         "name",
         "sealbook:addressBookId",
         "created",
-        "updated"
+        "updated",
+        "sealbook:version"
       ],
       "type": "object",
       "x-sealbook-conditionally-owned": [
@@ -949,6 +1002,11 @@
           "description": "An accent key or a CSS colour.",
           "type": "string"
         },
+        "createdAt": {
+          "description": "Absent on an object written before payload 1.1: unknown, never invented.",
+          "format": "date-time",
+          "type": "string"
+        },
         "hideFromAll": {
           "description": "Written only when true.",
           "type": "boolean"
@@ -961,6 +1019,11 @@
           "format": "date-time",
           "type": "string"
         },
+        "updatedAt": {
+          "description": "Absent as for createdAt.",
+          "format": "date-time",
+          "type": "string"
+        },
         "version": {
           "$ref": "#/$defs/Version"
         }
@@ -968,7 +1031,9 @@
       "required": [
         "@type",
         "version",
-        "name"
+        "name",
+        "createdAt",
+        "updatedAt"
       ],
       "type": "object",
       "x-sealbook-conditionally-owned": [
@@ -1365,6 +1430,11 @@
           "description": "An accent key or a CSS colour.",
           "type": "string"
         },
+        "createdAt": {
+          "description": "Absent on an object written before payload 1.1: unknown, never invented.",
+          "format": "date-time",
+          "type": "string"
+        },
         "hideFromAll": {
           "description": "Written only when true.",
           "type": "boolean"
@@ -1382,6 +1452,11 @@
           "format": "date-time",
           "type": "string"
         },
+        "updatedAt": {
+          "description": "Absent as for createdAt.",
+          "format": "date-time",
+          "type": "string"
+        },
         "version": {
           "$ref": "#/$defs/Version"
         }
@@ -1389,7 +1464,9 @@
       "required": [
         "@type",
         "version",
-        "name"
+        "name",
+        "createdAt",
+        "updatedAt"
       ],
       "type": "object",
       "x-sealbook-conditionally-owned": [
@@ -1408,11 +1485,18 @@
   "description": "The plaintext inside each sealed object, by content type.",
   "title": "Sealbook stored payloads",
   "x-sealbook-rules": [
+    "Header: @type and version are required on every payload. A Card's own version is RFC 9553's, always 1.0, and its Sealbook schema version is sealbook:version.",
+    "Metadata: createdAt and updatedAt are written by every write from payload 1.1, and may be absent on an older object. Readers treat absent as unknown, and a date sort puts unknown last.",
+    "Trash: trashedAt is optional and owned only by core's trash module.",
+    "Flags: archived, hideFromAll, pinned, done and favorite are written only when true. Absent is false.",
+    "Nesting: parentId is optional. Missing, the item's own id or a cycle reads as top level.",
+    "A payload declaring 1.0 or no version is read as 1.1: an event with no calendar is in the default one, and a Card's legacy keys are read under their canonical ones. Keys the schema does not name survive.",
     "Describes what a writer produces. Readers are lenient: a field of the wrong type reads as absent, and a payload that is not an object still lists under a fallback title.",
     "A key the writer does not own is carried through an edit unchanged, so every payload accepts additional properties.",
     "An optional field that is absent is omitted, never written as null.",
     "A writer refuses to edit a payload whose version declares a major it does not read, and keeps a later minor of its own major.",
     "Keys of the JSContact maps (e1, e2, ...) are read in natural order, so e2 precedes e10.",
-    "format is an annotation: core writes the timestamps and ids it is given without checking them."
+    "format is an annotation: core writes the timestamps and ids it is given without checking them.",
+    "Container link: required on every item, under a key that depends on the type: Note notebookId, Bookmark collectionId, Task taskListId, CalendarEvent calendarId, Card sealbook:addressBookId."
   ]
 }

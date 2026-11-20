@@ -9,24 +9,23 @@ pub mod local_storage;
 pub mod opaque;
 pub mod pairing;
 pub mod phrase;
-pub mod recovery;
 pub mod roster;
 pub mod sign;
 pub mod transcript;
 
 pub use aead::{
     attachment_chunk_aad, decrypt_chunk, decrypt_object, encrypt_chunk, encrypt_object, object_aad,
-    padded_len, AttachmentHasher, AttachmentKey, CollectionKey, EncryptedChunk, EncryptedObject,
-    ATTACHMENT_KEY_LEN, COLLECTION_KEY_LEN, NONCE_LEN,
+    padded_len, padme_len, AttachmentHasher, AttachmentKey, CollectionKey, EncryptedChunk,
+    EncryptedObject, ATTACHMENT_KEY_LEN, COLLECTION_KEY_LEN, NONCE_LEN,
 };
 pub use decoy::{decoy_seed, DECOY_KEY_LEN, DECOY_SEED_LEN};
 pub use error::CryptoError;
 pub use hpke_wrap::{
     ct_eq, device_hpke_keypair_from_ikm, device_hpke_public_from_ikm, generate_device_hpke,
     generate_login_challenge, hybrid_session_key, open_login_challenge, seal_login_challenge,
-    unwrap_for_device, validate_device_hpke_public, wrap_for_device, DeviceHpkePublic,
-    DeviceHpkeSecret, DeviceHpkeWrap, WrapBinding, HPKE_AEAD_TAG_LEN, XWING_CIPHERSUITE,
-    XWING_ENCAPSULATED_KEY_LEN, XWING_PUBLIC_KEY_LEN,
+    unwrap_for_device, validate_device_hpke_public, wrap_for_device, wrap_for_device_legacy,
+    DeviceHpkePublic, DeviceHpkeSecret, DeviceHpkeWrap, WrapBinding, WrapForm, HPKE_AEAD_TAG_LEN,
+    XWING_CIPHERSUITE, XWING_ENCAPSULATED_KEY_LEN, XWING_PUBLIC_KEY_LEN,
 };
 pub use local_storage::{
     local_storage_key, LOCAL_STORAGE_KDF, LOCAL_STORAGE_KEY_LEN, SUPPORTED_LOCAL_STORAGE_KDFS,
@@ -38,13 +37,9 @@ pub use pairing::{
 pub use phrase::{
     dummy_phrase_recovery_public, entropy_from_phrase, generate_phrase, phrase_lookup_id,
     phrase_recovery_keys, phrase_recovery_public, sign_phrase_recovery, unwrap_for_phrase,
-    verify_phrase_recovery, wrap_for_phrase, wrap_for_phrase_with_nonce, PHRASE_CIPHERSUITE,
-    PHRASE_ENTROPY_LEN, PHRASE_LOOKUP_ID_LEN, PHRASE_SCHEME,
-};
-pub use recovery::{
-    generate_kdf_salt, is_supported_recovery_ciphersuite, unwrap_collection_key,
-    wrap_collection_key, RecoveryWrap, KDF_SALT_LEN, RECOVERY_CIPHERSUITE,
-    SUPPORTED_RECOVERY_CIPHERSUITES,
+    verify_phrase_recovery, wrap_for_phrase, wrap_for_phrase_legacy_with_nonce,
+    wrap_for_phrase_with_nonce, PhraseWrap, PHRASE_CIPHERSUITE, PHRASE_ENTROPY_LEN,
+    PHRASE_LOOKUP_ID_LEN, PHRASE_SCHEME,
 };
 pub use roster::{
     key_commitment, roster_mac, roster_transcript, verify_roster_chain, verify_roster_key,
@@ -62,6 +57,6 @@ pub use transcript::{
     login_transcript, manifest_bucket_digest, manifest_bucket_of, manifest_digest, manifest_root,
     manifest_transcript, pair_grant_transcript, password_change_payload,
     phrase_recovery_start_transcript, phrase_recovery_transcript, recovery_password_payload,
-    rotated_objects_digest, rotation_recovery_payload, username_change_payload,
-    ManifestDigestEntry, ObjectDigestEntry, WrapDigestEntry, MANIFEST_BUCKETS,
+    rotated_objects_digest, rotation_phrase_payload, username_change_payload, ManifestDigestEntry,
+    ObjectDigestEntry, WrapDigestEntry, MANIFEST_BUCKETS,
 };

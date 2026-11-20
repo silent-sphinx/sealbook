@@ -19,6 +19,10 @@
 //! key is accepted only when it matches the commitment of a roster reached along
 //! signed steps. Rosters sealed before the commitment existed have none and use
 //! the v1 transcript; they are checked by MAC alone until the next step.
+//!
+//! A roster sealed by protocol v2 is signed over a third label, which is the signed
+//! marker that its account has migrated. The chain refuses an older roster after
+//! one of these, so a server cannot step an account back onto the old rules.
 
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
@@ -60,6 +64,9 @@ pub struct Roster {
     pub signer: RosterSigner,
     /// [`key_commitment`] for this roster's epoch, or empty on a legacy roster.
     pub key_commitment: Vec<u8>,
+    /// Sealed by protocol v2, under its own transcript label. Always carries a
+    /// key commitment.
+    pub migrated: bool,
     pub signature: DualSignature,
     pub mac: Vec<u8>,
 }
@@ -68,7 +75,8 @@ pub struct Roster {
 /// the same set always yields the same transcript however it was listed.
 ///
 /// An empty `key_commitment` gives the v1 transcript, which is what rosters
-/// sealed before the commitment existed were signed over.
+/// sealed before the commitment existed were signed over. `migrated` selects the
+/// protocol v2 label, which a roster without a commitment cannot use.
 #[allow(clippy::too_many_arguments)]
 pub fn roster_transcript(
     collection_id: Uuid,
@@ -79,11 +87,15 @@ pub fn roster_transcript(
     phrase_ed25519_pk: &[u8],
     signer: RosterSigner,
     key_commitment: &[u8],
+    migrated: bool,
 ) -> [u8; 32] {
     let mut sorted: Vec<&RosterDevice> = devices.iter().collect();
     sorted.sort_by_key(|device| *device.device_id.as_bytes());
     let mut h = Sha256::new();
-    if key_commitment.is_empty() {
+    if migrated {
+        h.update(b"sealbook-roster-v3");
+        absorb(&mut h, key_commitment);
+    } else if key_commitment.is_empty() {
         h.update(b"sealbook-roster-v1");
     } else {
         h.update(b"sealbook-roster-v2");
@@ -122,6 +134,7 @@ impl Roster {
             &self.phrase_ed25519_pk,
             self.signer,
             &self.key_commitment,
+            self.migrated,
         )
     }
 
@@ -296,6 +309,14 @@ pub fn verify_roster_step(
                     "a roster after one with a key commitment must carry one too",
                 ));
             }
+            if previous.migrated && !next.migrated {
+                return Err(roster_err(
+                    "a roster after a migrated one must be migrated too",
+                ));
+            }
+            if next.migrated && next.key_commitment.is_empty() {
+                return Err(roster_err("a migrated roster must carry a key commitment"));
+            }
             verify_signed_by(collection_id, previous, next)
         }
         None => {
@@ -409,6 +430,18 @@ mod tests {
         by: &Member,
         key: &CollectionKey,
     ) -> Roster {
+        signed_as(collection, seq, devices, phrase, by, key, false)
+    }
+
+    fn signed_as(
+        collection: Uuid,
+        seq: u64,
+        devices: Vec<RosterDevice>,
+        phrase: &DeviceSigningPublic,
+        by: &Member,
+        key: &CollectionKey,
+        migrated: bool,
+    ) -> Roster {
         let mut roster = Roster {
             roster_seq: seq,
             key_epoch: 1,
@@ -417,6 +450,7 @@ mod tests {
             phrase_ed25519_pk: phrase.ed25519_pk.clone(),
             signer: RosterSigner::Device(by.device.device_id),
             key_commitment: key_commitment(key, collection, 1).unwrap().to_vec(),
+            migrated,
             signature: DualSignature {
                 mldsa: Vec::new(),
                 ed25519: Vec::new(),
@@ -427,6 +461,106 @@ mod tests {
         roster.signature = sign(&by.secrets, &transcript).unwrap();
         roster.mac = roster_mac(key, &transcript).unwrap().to_vec();
         roster
+    }
+
+    #[test]
+    fn a_v1_roster_after_a_migrated_one_is_refused() {
+        let collection = Uuid::new_v4();
+        let key = CollectionKey::generate();
+        let (_, phrase) = generate_device_signing().unwrap();
+        let a = member();
+        let migrated = signed_as(
+            collection,
+            1,
+            vec![a.device.clone()],
+            &phrase,
+            &a,
+            &key,
+            true,
+        );
+        verify_roster_step(collection, None, &migrated).unwrap();
+
+        let back = signed_as(
+            collection,
+            2,
+            vec![a.device.clone()],
+            &phrase,
+            &a,
+            &key,
+            false,
+        );
+        assert!(verify_roster_step(collection, Some(&migrated), &back).is_err());
+
+        let forward = signed_as(
+            collection,
+            2,
+            vec![a.device.clone()],
+            &phrase,
+            &a,
+            &key,
+            true,
+        );
+        verify_roster_step(collection, Some(&migrated), &forward).unwrap();
+    }
+
+    #[test]
+    fn a_v1_roster_may_step_onto_a_migrated_one() {
+        let collection = Uuid::new_v4();
+        let key = CollectionKey::generate();
+        let (_, phrase) = generate_device_signing().unwrap();
+        let a = member();
+        let old = signed(collection, 1, vec![a.device.clone()], &phrase, &a, &key);
+        let new = signed_as(
+            collection,
+            2,
+            vec![a.device.clone()],
+            &phrase,
+            &a,
+            &key,
+            true,
+        );
+        verify_roster_step(collection, Some(&old), &new).unwrap();
+    }
+
+    #[test]
+    fn a_migrated_roster_needs_a_key_commitment() {
+        let collection = Uuid::new_v4();
+        let key = CollectionKey::generate();
+        let (_, phrase) = generate_device_signing().unwrap();
+        let a = member();
+        let old = signed(collection, 1, vec![a.device.clone()], &phrase, &a, &key);
+        let mut bare = signed_as(
+            collection,
+            2,
+            vec![a.device.clone()],
+            &phrase,
+            &a,
+            &key,
+            true,
+        );
+        bare.key_commitment.clear();
+        let transcript = bare.transcript(collection);
+        bare.signature = sign(&a.secrets, &transcript).unwrap();
+        assert!(verify_roster_step(collection, Some(&old), &bare).is_err());
+    }
+
+    #[test]
+    fn a_migrated_roster_is_signed_over_its_own_label() {
+        let collection = Uuid::new_v4();
+        let key = CollectionKey::generate();
+        let (_, phrase) = generate_device_signing().unwrap();
+        let a = member();
+        let v1 = signed(collection, 1, vec![a.device.clone()], &phrase, &a, &key);
+        let v2 = signed_as(
+            collection,
+            1,
+            vec![a.device.clone()],
+            &phrase,
+            &a,
+            &key,
+            true,
+        );
+        assert_ne!(v1.transcript(collection), v2.transcript(collection));
     }
 
     #[test]

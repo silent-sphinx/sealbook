@@ -61,7 +61,7 @@
           "type": "integer"
         },
         "version": {
-          "description": "Written as 1.0. A reader refuses another major and accepts a later minor.",
+          "description": "Written as 1.1. A reader refuses another major and accepts a later minor.",
           "pattern": "^[0-9]+\\.[0-9]+$",
           "type": "string"
         }
@@ -73,6 +73,106 @@
         "account",
         "objectCount",
         "objects"
+      ],
+      "type": "object"
+    },
+    "BookmarksExport": {
+      "description": "Every bookmark, and the collections, as a JSON file. An import also reads a bare array of bookmarks, and a file tagged sealbook-bookmark-export with a numeric version.",
+      "properties": {
+        "@type": {
+          "const": "SealbookBookmarksExport"
+        },
+        "bookmarks": {
+          "items": {
+            "properties": {
+              "collectionId": {
+                "description": "The bookmark's collection in the vault it came from.",
+                "format": "uuid",
+                "type": "string"
+              },
+              "collectionName": {
+                "description": "The collection's name, for a person reading the file.",
+                "type": "string"
+              },
+              "createdAt": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "notes": {
+                "type": "string"
+              },
+              "tags": {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 32,
+                "type": "array"
+              },
+              "title": {
+                "type": "string"
+              },
+              "updatedAt": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "url",
+              "title",
+              "collectionId",
+              "collectionName"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "collections": {
+          "items": {
+            "properties": {
+              "color": {
+                "description": "An accent key or a CSS colour.",
+                "type": "string"
+              },
+              "id": {
+                "description": "The collection.",
+                "format": "uuid",
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "parentId": {
+                "description": "The collection this one sits under.",
+                "format": "uuid",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "exportedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "version": {
+          "const": "1.1",
+          "description": "An import does not read it."
+        }
+      },
+      "required": [
+        "@type",
+        "version",
+        "exportedAt",
+        "bookmarks",
+        "collections"
       ],
       "type": "object"
     },
@@ -118,8 +218,11 @@
       "type": "object"
     },
     "NotesExport": {
-      "description": "Every note, and the notebooks, as a JSON backup. An import also reads a bare array of notes.",
+      "description": "Every note, and the notebooks, as a JSON backup. An import also reads a bare array of notes, and a file with no @type or a version of 1.0.",
       "properties": {
+        "@type": {
+          "const": "SealbookNotesExport"
+        },
         "exportedAt": {
           "format": "date-time",
           "type": "string"
@@ -187,11 +290,12 @@
           "type": "array"
         },
         "version": {
-          "const": "1.0",
+          "const": "1.1",
           "description": "An import does not read it."
         }
       },
       "required": [
+        "@type",
         "version",
         "exportedAt",
         "notebooks",
@@ -203,7 +307,7 @@
       "description": "Every task, and the task lists, as a JSON file. An import also reads a bare array of tasks, and files every task under the one list it is given.",
       "properties": {
         "@type": {
-          "const": "sealbook-task-export"
+          "const": "SealbookTasksExport"
         },
         "exportedAt": {
           "format": "date-time",
@@ -274,8 +378,8 @@
           "type": "array"
         },
         "version": {
-          "const": 1,
-          "description": "An import does not read it."
+          "const": "1.1",
+          "description": "An import does not read it. A file tagged sealbook-task-export with a numeric version is read too."
         }
       },
       "required": [

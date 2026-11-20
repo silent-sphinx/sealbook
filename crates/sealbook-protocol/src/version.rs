@@ -19,7 +19,24 @@
 //!   misread what it does understand.
 
 /// Wire protocol generation, reported by `GET /health/crypto`.
-pub const PROTOCOL_VERSION: &str = "sealbook-v1";
+pub const PROTOCOL_VERSION: &str = "sealbook-v2";
+
+/// The route prefix every versioned endpoint is mounted under. The server's router
+/// and every client's request builders take it from here, so the two cannot drift.
+pub const ROUTE_PREFIX: &str = "/v2";
+
+/// The prefix of protocol v1, retired. A server answers it with
+/// [`RETIRED_ROUTE_MESSAGE`] rather than a bare not-found, so an old client shows
+/// the person something they can act on.
+pub const RETIRED_ROUTE_PREFIX: &str = "/v1";
+
+pub const RETIRED_ROUTE_MESSAGE: &str =
+    "This server speaks Sealbook protocol v2. Update this app to keep using it.";
+
+/// `path` under [`ROUTE_PREFIX`], for a path written with a leading slash.
+pub fn route(path: &str) -> String {
+    format!("{ROUTE_PREFIX}{path}")
+}
 
 /// The generations this build can talk to, newest first.
 ///
@@ -50,7 +67,7 @@ pub struct ProtocolReport {
 /// field that an older reader can leave alone. Clients preserve fields they do
 /// not recognise, so a minor addition survives a round trip through a build
 /// that predates it.
-pub const PAYLOAD_SCHEMA_VERSION: &str = "1.0";
+pub const PAYLOAD_SCHEMA_VERSION: &str = "1.1";
 
 /// Whether a payload declaring `version` can be read by this build.
 ///
@@ -131,8 +148,15 @@ mod tests {
     }
 
     #[test]
+    fn routes_are_built_under_the_one_prefix() {
+        assert_eq!(route("/attachments/challenge"), "/v2/attachments/challenge");
+        assert_ne!(ROUTE_PREFIX, RETIRED_ROUTE_PREFIX);
+    }
+
+    #[test]
     fn an_unknown_protocol_is_refused() {
-        assert!(!speaks_protocol("sealbook-v2"));
+        assert!(!speaks_protocol("sealbook-v1"));
+        assert!(!speaks_protocol("sealbook-v3"));
         assert!(!speaks_protocol(""));
     }
 

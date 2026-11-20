@@ -1,0 +1,148 @@
+{
+  "upgrades": [
+    {
+      "case": "a note declaring 1.0",
+      "content_type": "application/sealbook.note+json",
+      "from": "{\"@type\":\"Note\",\"body\":\"b\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"keepMe\":{\"deep\":[1,{\"also\":true}]},\"notebookId\":\"n\",\"title\":\"T\",\"updatedAt\":\"2026-01-02T00:00:00Z\",\"version\":\"1.0\"}",
+      "to": "{\"@type\":\"Note\",\"body\":\"b\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"keepMe\":{\"deep\":[1,{\"also\":true}]},\"notebookId\":\"n\",\"title\":\"T\",\"updatedAt\":\"2026-01-02T00:00:00Z\",\"version\":\"1.1\"}"
+    },
+    {
+      "case": "a note with no version",
+      "content_type": "application/sealbook.note+json",
+      "from": "{\"@type\":\"Note\",\"body\":\"b\",\"notebookId\":\"n\",\"title\":\"T\"}",
+      "to": "{\"@type\":\"Note\",\"body\":\"b\",\"notebookId\":\"n\",\"title\":\"T\",\"version\":\"1.1\"}"
+    },
+    {
+      "case": "a notebook",
+      "content_type": "application/sealbook.notebook+json",
+      "from": "{\"@type\":\"Notebook\",\"keepMe\":1,\"name\":\"Work\",\"version\":\"1.0\"}",
+      "to": "{\"@type\":\"Notebook\",\"keepMe\":1,\"name\":\"Work\",\"version\":\"1.1\"}"
+    },
+    {
+      "case": "a task",
+      "content_type": "application/sealbook.task+json",
+      "from": "{\"@type\":\"Task\",\"keepMe\":[1],\"taskListId\":\"l\",\"title\":\"T\",\"version\":\"1.0\"}",
+      "to": "{\"@type\":\"Task\",\"keepMe\":[1],\"taskListId\":\"l\",\"title\":\"T\",\"version\":\"1.1\"}"
+    },
+    {
+      "case": "a task list",
+      "content_type": "application/sealbook.task-list+json",
+      "from": "{\"@type\":\"TaskList\",\"keepMe\":{\"a\":1},\"name\":\"L\",\"version\":\"1.0\"}",
+      "to": "{\"@type\":\"TaskList\",\"keepMe\":{\"a\":1},\"name\":\"L\",\"version\":\"1.1\"}"
+    },
+    {
+      "case": "a bookmark",
+      "content_type": "application/sealbook.bookmark+json",
+      "from": "{\"@type\":\"Bookmark\",\"collectionId\":\"c\",\"title\":\"A\",\"url\":\"https://a.example\",\"version\":\"1.0\"}",
+      "to": "{\"@type\":\"Bookmark\",\"collectionId\":\"c\",\"title\":\"A\",\"url\":\"https://a.example\",\"version\":\"1.1\"}"
+    },
+    {
+      "case": "a bookmark collection",
+      "content_type": "application/sealbook.bookmark-collection+json",
+      "from": "{\"@type\":\"BookmarkCollection\",\"archived\":true,\"name\":\"C\",\"version\":\"1.0\"}",
+      "to": "{\"@type\":\"BookmarkCollection\",\"archived\":true,\"name\":\"C\",\"version\":\"1.1\"}"
+    },
+    {
+      "case": "an event in no calendar",
+      "content_type": "application/sealbook.calendar-event+json",
+      "from": "{\"@type\":\"CalendarEvent\",\"keepMe\":{\"x\":[{\"y\":1}]},\"start\":\"2026-10-01T09:00:00.000Z\",\"title\":\"Standup\",\"version\":\"1.0\"}",
+      "to": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"00000000-0000-0000-0000-000000000003\",\"keepMe\":{\"x\":[{\"y\":1}]},\"start\":\"2026-10-01T09:00:00.000Z\",\"title\":\"Standup\",\"version\":\"1.1\"}"
+    },
+    {
+      "case": "an event with a blank calendar",
+      "content_type": "application/sealbook.calendar-event+json",
+      "from": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"  \",\"start\":\"2026-10-01\",\"title\":\"Standup\",\"version\":\"1.0\"}",
+      "to": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"00000000-0000-0000-0000-000000000003\",\"start\":\"2026-10-01\",\"title\":\"Standup\",\"version\":\"1.1\"}"
+    },
+    {
+      "case": "an event already in a calendar",
+      "content_type": "application/sealbook.calendar-event+json",
+      "from": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"start\":\"2026-10-01\",\"title\":\"Standup\",\"version\":\"1.0\"}",
+      "to": "{\"@type\":\"CalendarEvent\",\"calendarId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"start\":\"2026-10-01\",\"title\":\"Standup\",\"version\":\"1.1\"}"
+    },
+    {
+      "case": "a calendar with favorite false",
+      "content_type": "application/sealbook.calendar+json",
+      "from": "{\"@type\":\"Calendar\",\"color\":\"#7aa2f7\",\"favorite\":false,\"name\":\"Work\",\"version\":\"1.0\"}",
+      "to": "{\"@type\":\"Calendar\",\"color\":\"#7aa2f7\",\"name\":\"Work\",\"version\":\"1.1\"}"
+    },
+    {
+      "case": "a calendar with favorite true",
+      "content_type": "application/sealbook.calendar+json",
+      "from": "{\"@type\":\"Calendar\",\"color\":\"#7aa2f7\",\"favorite\":true,\"name\":\"Work\",\"version\":\"1.0\"}",
+      "to": "{\"@type\":\"Calendar\",\"color\":\"#7aa2f7\",\"favorite\":true,\"name\":\"Work\",\"version\":\"1.1\"}"
+    },
+    {
+      "case": "an address book",
+      "content_type": "application/sealbook.addressbook+json",
+      "from": "{\"@type\":\"AddressBook\",\"keepMe\":true,\"name\":\"People\",\"version\":\"1.0\"}",
+      "to": "{\"@type\":\"AddressBook\",\"keepMe\":true,\"name\":\"People\",\"version\":\"1.1\"}"
+    },
+    {
+      "case": "a card with every field only under a legacy key",
+      "content_type": "application/jscontact+json",
+      "from": "{\"@type\":\"Card\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"emails\":{\"e1\":{\"address\":\"ada@analytical.example\"}},\"fullName\":\"Ada Lovelace\",\"nicknames\":{\"n1\":{\"name\":\"Ada\"}},\"photo\":\"data:image/png;base64,AAAA\",\"pronouns\":\"she/her\",\"sealbook:addressBookId\":\"00000000-0000-0000-0000-000000000001\",\"uid\":\"urn:uuid:keep-me\",\"updatedAt\":\"2026-02-02T00:00:00Z\",\"version\":\"1.0\"}",
+      "to": "{\"@type\":\"Card\",\"created\":\"2026-01-01T00:00:00Z\",\"emails\":{\"e1\":{\"address\":\"ada@analytical.example\",\"contexts\":{\"private\":true}}},\"media\":{\"avatar\":{\"kind\":\"photo\",\"uri\":\"data:image/png;base64,AAAA\"}},\"name\":{\"full\":\"Ada Lovelace\"},\"nickNames\":{\"n1\":{\"name\":\"Ada\"}},\"sealbook:addressBookId\":\"00000000-0000-0000-0000-000000000001\",\"sealbook:version\":\"1.1\",\"speakToAs\":{\"pronouns\":\"she/her\"},\"uid\":\"urn:uuid:keep-me\",\"updated\":\"2026-02-02T00:00:00Z\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a card with display name, photos and avatar legacy keys",
+      "content_type": "application/jscontact+json",
+      "from": "{\"@type\":\"Card\",\"displayName\":\"Grace Hopper\",\"photos\":{\"p1\":{\"kind\":\"photo\",\"uri\":\"data:image/png;base64,BBBB\"}},\"sealbook:addressBookId\":\"00000000-0000-0000-0000-000000000001\",\"version\":\"1.0\"}",
+      "to": "{\"@type\":\"Card\",\"media\":{\"avatar\":{\"kind\":\"photo\",\"uri\":\"data:image/png;base64,BBBB\"}},\"name\":{\"full\":\"Grace Hopper\"},\"sealbook:addressBookId\":\"00000000-0000-0000-0000-000000000001\",\"sealbook:version\":\"1.1\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a card holding both a legacy and a canonical value",
+      "content_type": "application/jscontact+json",
+      "from": "{\"@type\":\"Card\",\"avatar\":\"data:image/png;base64,DDDD\",\"created\":\"2026-03-03T00:00:00Z\",\"createdAt\":\"2025-01-01T00:00:00Z\",\"fullName\":\"Legacy Name\",\"media\":{\"avatar\":{\"kind\":\"photo\",\"uri\":\"data:image/png;base64,CCCC\"}},\"name\":{\"full\":\"Canonical Name\"},\"nickNames\":{\"n1\":{\"name\":\"Canon\"}},\"nicknames\":{\"n1\":{\"name\":\"Legacy\"}},\"pronouns\":\"he/him\",\"sealbook:addressBookId\":\"00000000-0000-0000-0000-000000000001\",\"speakToAs\":{\"pronouns\":\"they/them\"},\"updated\":\"2026-04-04T00:00:00Z\",\"updatedAt\":\"2025-02-02T00:00:00Z\",\"version\":\"1.0\"}",
+      "to": "{\"@type\":\"Card\",\"created\":\"2026-03-03T00:00:00Z\",\"media\":{\"avatar\":{\"kind\":\"photo\",\"uri\":\"data:image/png;base64,CCCC\"}},\"name\":{\"full\":\"Canonical Name\"},\"nickNames\":{\"n1\":{\"name\":\"Canon\"}},\"sealbook:addressBookId\":\"00000000-0000-0000-0000-000000000001\",\"sealbook:version\":\"1.1\",\"speakToAs\":{\"pronouns\":\"they/them\"},\"updated\":\"2026-04-04T00:00:00Z\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "a card that carries a key the record does not model",
+      "content_type": "application/jscontact+json",
+      "from": "{\"@type\":\"Card\",\"kind\":\"individual\",\"localizations\":{\"de\":{\"name\":{\"full\":\"Behalten\"}}},\"name\":{\"full\":\"Kept\"},\"sealbook:addressBookId\":\"00000000-0000-0000-0000-000000000001\",\"uid\":\"urn:uuid:1234\",\"version\":\"1.0\"}",
+      "to": "{\"@type\":\"Card\",\"kind\":\"individual\",\"localizations\":{\"de\":{\"name\":{\"full\":\"Behalten\"}}},\"name\":{\"full\":\"Kept\"},\"sealbook:addressBookId\":\"00000000-0000-0000-0000-000000000001\",\"sealbook:version\":\"1.1\",\"uid\":\"urn:uuid:1234\",\"version\":\"1.0\"}"
+    }
+  ],
+  "untouched": [
+    {
+      "case": "a payload already at 1.1",
+      "content_type": "application/sealbook.note+json",
+      "raw": "{\"@type\":\"Note\",\"version\":\"1.1\",\"title\":\"T\"}"
+    },
+    {
+      "case": "a payload from a later minor",
+      "content_type": "application/sealbook.note+json",
+      "raw": "{\"@type\":\"Note\",\"version\":\"1.7\",\"title\":\"T\"}"
+    },
+    {
+      "case": "a payload from a later major",
+      "content_type": "application/sealbook.calendar-event+json",
+      "raw": "{\"@type\":\"CalendarEvent\",\"version\":\"2.0\",\"title\":\"T\",\"start\":\"2026-10-01\"}"
+    },
+    {
+      "case": "a card already at 1.1",
+      "content_type": "application/jscontact+json",
+      "raw": "{\"@type\":\"Card\",\"version\":\"1.0\",\"sealbook:version\":\"1.1\",\"name\":{\"full\":\"A\"},\"fullName\":\"Legacy kept until a write\"}"
+    },
+    {
+      "case": "a card from a later Sealbook major",
+      "content_type": "application/jscontact+json",
+      "raw": "{\"@type\":\"Card\",\"version\":\"1.0\",\"sealbook:version\":\"2.0\",\"name\":{\"full\":\"A\"}}"
+    },
+    {
+      "case": "a payload of a type core does not know",
+      "content_type": "application/x-future",
+      "raw": "{\"@type\":\"Hologram\",\"version\":\"1.0\"}"
+    },
+    {
+      "case": "text that is not JSON",
+      "content_type": "application/sealbook.note+json",
+      "raw": "not json"
+    },
+    {
+      "case": "JSON that is not an object",
+      "content_type": "application/sealbook.note+json",
+      "raw": "[1,2]"
+    }
+  ]
+}

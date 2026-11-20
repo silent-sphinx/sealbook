@@ -12,79 +12,93 @@
   "plans": [
     {
       "size": 1,
+      "padded_size": 1,
       "chunk_count": 1,
       "ranges": [
         [
           0,
+          1,
           1
         ]
       ]
     },
     {
       "size": 4194303,
+      "padded_size": 4194304,
       "chunk_count": 1,
       "ranges": [
         [
           0,
-          4194303
+          4194303,
+          4194304
         ]
       ]
     },
     {
       "size": 4194304,
+      "padded_size": 4194304,
       "chunk_count": 1,
       "ranges": [
         [
           0,
+          4194304,
           4194304
         ]
       ]
     },
     {
       "size": 4194305,
+      "padded_size": 4325376,
       "chunk_count": 2,
       "ranges": [
         [
           0,
+          4194304,
           4194304
         ],
         [
           4194304,
-          4194305
+          4194305,
+          131072
         ]
       ]
     },
     {
       "size": 12582912,
+      "padded_size": 12582912,
       "chunk_count": 3,
       "ranges": [
         [
           0,
+          4194304,
           4194304
         ],
         [
           4194304,
-          8388608
+          8388608,
+          4194304
         ],
         [
           8388608,
-          12582912
+          12582912,
+          4194304
         ]
       ]
     },
     {
       "size": 209715200,
+      "padded_size": 209715200,
       "chunk_count": 50
     }
   ],
   "paths": {
-    "create": "/v1/collections/11111111-1111-4111-8111-111111111111/attachments",
-    "chunk": "/v1/collections/11111111-1111-4111-8111-111111111111/attachments/22222222-2222-4222-8222-222222222222/chunks/0",
-    "commit": "/v1/collections/11111111-1111-4111-8111-111111111111/attachments/22222222-2222-4222-8222-222222222222/commit",
-    "meta": "/v1/collections/11111111-1111-4111-8111-111111111111/attachments/22222222-2222-4222-8222-222222222222",
-    "delete": "/v1/collections/11111111-1111-4111-8111-111111111111/attachments/22222222-2222-4222-8222-222222222222",
-    "list": "/v1/collections/11111111-1111-4111-8111-111111111111/attachments",
-    "list_after": "/v1/collections/11111111-1111-4111-8111-111111111111/attachments?after=22222222-2222-4222-8222-222222222222"
+    "create": "/v2/collections/11111111-1111-4111-8111-111111111111/attachments",
+    "chunk": "/v2/collections/11111111-1111-4111-8111-111111111111/attachments/22222222-2222-4222-8222-222222222222/chunks/0",
+    "commit": "/v2/collections/11111111-1111-4111-8111-111111111111/attachments/22222222-2222-4222-8222-222222222222/commit",
+    "meta": "/v2/collections/11111111-1111-4111-8111-111111111111/attachments/22222222-2222-4222-8222-222222222222",
+    "delete": "/v2/collections/11111111-1111-4111-8111-111111111111/attachments/22222222-2222-4222-8222-222222222222",
+    "list": "/v2/collections/11111111-1111-4111-8111-111111111111/attachments",
+    "list_after": "/v2/collections/11111111-1111-4111-8111-111111111111/attachments?after=22222222-2222-4222-8222-222222222222"
   },
   "digests": [
     {
@@ -140,8 +154,8 @@
     "index": 1,
     "chunk_count": 3,
     "plaintext_b64": "YSBjaHVuayBldmVyeSBjbGllbnQgbXVzdCBiZSBhYmxlIHRvIG9wZW4",
-    "nonce": "_wZWM1umHI__CRaLoIHatL2WwWnUBT7W",
-    "ciphertext_b64": "7UyHoeYbfQXI7ZB1qRPr0RWadLIP8ByrDE2vblwg9ZiBFf3i1bftvMT5-PPjNB7tus8CQlpNLiQ5"
+    "nonce": "Tjvnbu-ZFrc5yqRjB8oRPbePmuUUo0PY",
+    "ciphertext_b64": "U1016L6pJkNz8ZSsVd3NJIE8qpjKFeWFfMFmUf8P3HIyFXogjLtZBGXzt2Gr8O5nljtKMdDPPknJ"
   },
   "refusals": [
     {

@@ -80,7 +80,7 @@
       "type": "object"
     },
     "AttachmentOpAuth": {
-      "description": "A device's signature over one attachment create, commit or delete.\n\nThe challenge comes from `POST /v1/attachments/challenge` and is single use.\nA session token alone cannot create, commit or delete an attachment: the\nsignature is over the operation, the collection and the attachment, made with\nthe device's own signing keys.",
+      "description": "A device's signature over one attachment create, commit or delete.\n\nThe challenge comes from `POST /v2/attachments/challenge` and is single use.\nA session token alone cannot create, commit or delete an attachment: the\nsignature is over the operation, the collection and the attachment, made with\nthe device's own signing keys.",
       "properties": {
         "challenge": {
           "$ref": "#/$defs/Base64Url"
@@ -153,21 +153,9 @@
         "challenge": {
           "$ref": "#/$defs/Base64Url"
         },
-        "kdf_salt": {
-          "$ref": "#/$defs/Base64Url"
-        },
         "password_change_id": {
           "format": "uuid",
           "type": "string"
-        },
-        "recovery_ciphersuite": {
-          "type": "string"
-        },
-        "recovery_nonce": {
-          "$ref": "#/$defs/Base64Url"
-        },
-        "recovery_wrapped_ck": {
-          "$ref": "#/$defs/Base64Url"
         },
         "signature": {
           "$ref": "#/$defs/DualSignatureBody"
@@ -180,11 +168,7 @@
         "password_change_id",
         "challenge",
         "signature",
-        "upload",
-        "kdf_salt",
-        "recovery_nonce",
-        "recovery_wrapped_ck",
-        "recovery_ciphersuite"
+        "upload"
       ],
       "type": "object"
     },
@@ -388,16 +372,10 @@
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
-        },
-        "total_plaintext_size": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
         }
       },
       "required": [
         "attachment_id",
-        "total_plaintext_size",
         "chunk_size",
         "chunk_count",
         "auth"
@@ -616,9 +594,6 @@
           "format": "uuid",
           "type": "string"
         },
-        "kdf_salt": {
-          "$ref": "#/$defs/Base64Url"
-        },
         "key_epoch": {
           "description": "The epoch these wraps belong to, so a client starts in sync and only\nre-fetches its wrap when a rotation actually happens.",
           "format": "uint64",
@@ -631,10 +606,16 @@
           },
           "type": "array"
         },
-        "recovery_pending": {
-          "default": false,
-          "description": "True when a recovery enrolled a device and the collection key has still\nnot been rotated, so the phrase used then — and any other copy of it —\ncan still open this vault. The client must finish that rotation before\nthe account can be written to again.\n\n`#[serde(default)]` so a client built before this field existed still\ndeserializes a response carrying it.",
-          "type": "boolean"
+        "rotation_owed": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RotationOwed"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set when the collection key must be rotated before the account can be\nwritten to again, and why, so the client shows the right message. It is a\nhint: the client's own roster check decides whether a rotation is owed."
         },
         "session_token": {
           "type": "string"
@@ -644,7 +625,6 @@
         "account_id",
         "collection_id",
         "session_token",
-        "kdf_salt",
         "key_wraps",
         "key_epoch"
       ],
@@ -1195,24 +1175,12 @@
         "enrollment_signature": {
           "$ref": "#/$defs/DualSignatureBody"
         },
-        "kdf_salt": {
-          "$ref": "#/$defs/Base64Url"
-        },
         "phrase_proof": {
           "$ref": "#/$defs/DualSignatureBody"
-        },
-        "recovery_ciphersuite": {
-          "type": "string"
         },
         "recovery_id": {
           "format": "uuid",
           "type": "string"
-        },
-        "recovery_nonce": {
-          "$ref": "#/$defs/Base64Url"
-        },
-        "recovery_wrapped_ck": {
-          "$ref": "#/$defs/Base64Url"
         },
         "roster": {
           "$ref": "#/$defs/RosterBody",
@@ -1220,7 +1188,7 @@
         },
         "upload": {
           "$ref": "#/$defs/Base64Url",
-          "description": "The replacement password, as an OPAQUE registration upload, plus the KDF\nsalt and the collection-key wrap re-made under it. `phrase_proof` covers\nall of it, so none of it can be substituted in flight."
+          "description": "The replacement password, as an OPAQUE registration upload. `phrase_proof`\ncovers it, so it cannot be substituted in flight."
         },
         "username": {
           "type": "string"
@@ -1238,11 +1206,7 @@
         "enrollment_signature",
         "wrap",
         "roster",
-        "upload",
-        "kdf_salt",
-        "recovery_nonce",
-        "recovery_wrapped_ck",
-        "recovery_ciphersuite"
+        "upload"
       ],
       "type": "object"
     },
@@ -1343,9 +1307,6 @@
         "enrollment_signature": {
           "$ref": "#/$defs/DualSignatureBody"
         },
-        "kdf_salt": {
-          "$ref": "#/$defs/Base64Url"
-        },
         "key_wraps": {
           "items": {
             "$ref": "#/$defs/KeyWrapBody"
@@ -1373,7 +1334,6 @@
       "required": [
         "username",
         "upload",
-        "kdf_salt",
         "device",
         "collection_id",
         "enrollment_signature",
@@ -1447,6 +1407,10 @@
         },
         "mac": {
           "$ref": "#/$defs/Base64Url"
+        },
+        "migrated": {
+          "description": "Sealed by protocol v2, under its own transcript label. The signed marker\nthat the account has migrated: the chain refuses an older roster after one.\nAbsent on rosters sealed by protocol v1.",
+          "type": "boolean"
         },
         "phrase_ed25519_pk": {
           "$ref": "#/$defs/Base64Url"
@@ -1547,7 +1511,7 @@
       ]
     },
     "RotateRequest": {
-      "description": "Replaces the collection key, re-wrapping it for everyone who keeps access and\nre-encrypting every object under it.\n\nEvery operation that must invalidate the old key goes through this one\nrequest, because they all require the same work and only a client can do it:\n\n* revoking a device (`revoke_device_id`), which already holds the old key;\n* changing the recovery phrase, since a rotation always issues a new one;\n* finishing a recovery, where the phrase that was just used — and anyone who\n  has ever seen it — must stop being able to decrypt.",
+      "description": "Replaces the collection key, re-wrapping it for everyone who keeps access and\nre-encrypting every object under it.\n\nEvery operation that must invalidate the old key goes through this one\nrequest, because they all require the same work and only a client can do it:\n\n* revoking devices (`revoke_device_ids`), which already hold the old key;\n* changing the recovery phrase, since a rotation always issues a new one;\n* finishing a recovery, where the phrase that was just used — and anyone who\n  has ever seen it — must stop being able to decrypt.",
       "properties": {
         "drop_tombstones": {
           "default": [],
@@ -1558,9 +1522,6 @@
           },
           "type": "array"
         },
-        "kdf_salt": {
-          "$ref": "#/$defs/Base64Url"
-        },
         "key_epoch": {
           "description": "Must be exactly one greater than the collection's current epoch.",
           "format": "uint64",
@@ -1568,7 +1529,7 @@
           "type": "integer"
         },
         "key_wraps": {
-          "description": "One wrap per device that keeps access, plus `recovery` and `phrase`.",
+          "description": "One wrap per device that keeps access, plus `phrase`.",
           "items": {
             "$ref": "#/$defs/KeyWrapBody"
           },
@@ -1587,13 +1548,13 @@
           "$ref": "#/$defs/PhraseRecoveryBody",
           "description": "Rotating the key invalidates the old recovery phrase, so a new one is\nissued as part of the same operation."
         },
-        "revoke_device_id": {
-          "description": "The device to revoke as part of this rotation, if any. It must not be the\ndevice making the request.",
-          "format": "uuid",
-          "type": [
-            "string",
-            "null"
-          ]
+        "revoke_device_ids": {
+          "description": "The devices to revoke as part of this rotation, strictly ascending. None may\nbe the device making the request. Empty means nothing is revoked, as in a\nphrase or migration rotation.",
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "type": "array"
         },
         "roster": {
           "$ref": "#/$defs/RosterBody",
@@ -1605,7 +1566,7 @@
       },
       "required": [
         "key_epoch",
-        "kdf_salt",
+        "revoke_device_ids",
         "key_wraps",
         "phrase_recovery",
         "objects",
@@ -1676,6 +1637,21 @@
       ],
       "type": "object"
     },
+    "RotationOwed": {
+      "description": "Why a rotation is owed.",
+      "oneOf": [
+        {
+          "const": "recovery",
+          "description": "A recovery enrolled a device and the key has not been rotated, so the\nphrase used then, and any other copy of it, can still open this vault.",
+          "type": "string"
+        },
+        {
+          "const": "upgrade",
+          "description": "The account has not yet moved to this protocol version.",
+          "type": "string"
+        }
+      ]
+    },
     "SimpleStatusResponse": {
       "properties": {
         "status": {
@@ -1690,6 +1666,6 @@
   },
   "$id": "urn:sealbook:schema:wire",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "Requests and responses of protocol sealbook-v1.",
+  "description": "Requests and responses of protocol sealbook-v2.",
   "title": "Sealbook wire types"
 }

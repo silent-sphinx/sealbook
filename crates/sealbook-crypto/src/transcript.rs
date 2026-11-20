@@ -175,22 +175,22 @@ pub fn account_op_transcript(
 
 /// Digest of what a device signs to create, commit or delete an attachment.
 ///
-/// Binds the collection and attachment, and for a create the declared size and
-/// chunking, so a signature for one attachment cannot be replayed on another or
-/// with different parameters. Commit and delete pass zeros for the sizes; the
-/// operation name in [`account_op_transcript`] is what tells the three apart.
+/// Binds the collection and attachment and the chunking, so a signature for one
+/// attachment cannot be replayed on another or with different parameters. The
+/// plaintext length is not here: the true length is `byteSize` inside the sealed
+/// record, and a figure the server is told in the clear is one it can check
+/// nothing against. Commit and delete pass zeros for the chunking; the operation
+/// name in [`account_op_transcript`] is what tells the three apart.
 pub fn attachment_op_payload(
     collection_id: Uuid,
     attachment_id: Uuid,
-    total_plaintext_size: u64,
     chunk_size: u32,
     chunk_count: u32,
 ) -> [u8; 32] {
     let mut h = Sha256::new();
-    h.update(b"sealbook-op-attachment-v1");
+    h.update(b"sealbook-op-attachment-v2");
     h.update(collection_id.as_bytes());
     h.update(attachment_id.as_bytes());
-    h.update(total_plaintext_size.to_be_bytes());
     h.update(chunk_size.to_be_bytes());
     h.update(chunk_count.to_be_bytes());
     h.finalize().into()
@@ -207,23 +207,13 @@ pub fn username_change_payload(new_username: &str, upload: &[u8]) -> [u8; 32] {
 
 /// Digest of the payload of a password change.
 ///
-/// This binds the new password verifier *and* the replacement recovery wrap, so a
-/// caller cannot substitute key material the account holder never produced —
-/// which was the way a stolen token could destroy password-based recovery.
-pub fn password_change_payload(
-    upload: &[u8],
-    kdf_salt: &[u8],
-    recovery_nonce: &[u8],
-    recovery_wrapped_ck: &[u8],
-    recovery_ciphersuite: &str,
-) -> [u8; 32] {
+/// It binds the new OPAQUE upload and nothing else: the password no longer wraps
+/// a copy of the collection key, so there is no recovery material for a stolen
+/// token to substitute.
+pub fn password_change_payload(upload: &[u8]) -> [u8; 32] {
     let mut h = Sha256::new();
-    h.update(b"sealbook-op-password-v1");
+    h.update(b"sealbook-op-password-v2");
     absorb(&mut h, upload);
-    absorb(&mut h, kdf_salt);
-    absorb(&mut h, recovery_nonce);
-    absorb(&mut h, recovery_wrapped_ck);
-    absorb(&mut h, recovery_ciphersuite.as_bytes());
     h.finalize().into()
 }
 
@@ -232,28 +222,23 @@ pub fn delete_account_payload() -> [u8; 32] {
     Sha256::digest(b"sealbook-op-delete-v1").into()
 }
 
-/// Digest of the account-level recovery material a rotation installs.
+/// Digest of the account-level phrase material a rotation installs.
 ///
-/// A rotation replaces the password KDF salt and the entire recovery-phrase
-/// verification record. Neither of those is a key wrap, so neither was covered by
-/// `key_wraps_digest`, and both went into `accounts` unauthenticated. Anything
-/// able to modify a rotation request body — a tampering reverse proxy, say, which
-/// in `proxy` TLS mode terminates the connection clients verify — could therefore
-/// substitute a `lookup_id` and phrase verification key it controls, and then
-/// enrol a device of its own through the recovery flow.
-///
-/// `password_change_payload` already binds its replacement recovery material for
-/// exactly this reason. This is the same commitment for the rotation path.
-pub fn rotation_recovery_payload(
-    kdf_salt: &[u8],
+/// A rotation replaces the entire recovery-phrase verification record. None of
+/// that is a key wrap, so none of it was covered by `key_wraps_digest`, and all of
+/// it went into `accounts` unauthenticated. Anything able to modify a rotation
+/// request body, a tampering reverse proxy for one, which in `proxy` TLS mode
+/// terminates the connection clients verify, could therefore substitute a
+/// `lookup_id` and phrase verification key it controls, and then enrol a device of
+/// its own through the recovery flow.
+pub fn rotation_phrase_payload(
     phrase_mldsa_pk: &[u8],
     phrase_ed25519_pk: &[u8],
     phrase_lookup_id: &[u8],
     phrase_scheme: &str,
 ) -> [u8; 32] {
     let mut h = Sha256::new();
-    h.update(b"sealbook-rotation-recovery-v1");
-    absorb(&mut h, kdf_salt);
+    h.update(b"sealbook-rotation-phrase-v2");
     absorb(&mut h, phrase_mldsa_pk);
     absorb(&mut h, phrase_ed25519_pk);
     absorb(&mut h, phrase_lookup_id);
@@ -261,31 +246,36 @@ pub fn rotation_recovery_payload(
     h.finalize().into()
 }
 
-/// Signed by the rotating device, binding the whole rotation: which device is
+/// Signed by the rotating device, binding the whole rotation: which devices are
 /// being removed, the new key epoch, every new wrap, every re-encrypted object,
-/// and the recovery material the rotation installs. Without this a stolen session
+/// and the phrase material the rotation installs. Without this a stolen session
 /// token alone could re-key the vault.
+///
+/// `revoke_device_ids` is hashed exactly as sent: a count, then the ids. It does not
+/// sort or deduplicate, so one signature matches one request body. The sender sends
+/// the list sorted and strictly ascending, and the receiver refuses any other order.
+/// An empty list revokes nothing, as a phrase or migration rotation does.
 pub fn key_rotation_transcript(
     collection_id: Uuid,
-    revoked_device_id: Option<Uuid>,
+    revoke_device_ids: &[Uuid],
     key_epoch: u64,
     wraps_digest: &[u8; 32],
     objects_digest: &[u8; 32],
     manifest_digest: &[u8; 32],
-    recovery_payload: &[u8; 32],
+    phrase_payload: &[u8; 32],
 ) -> [u8; 32] {
     let mut h = Sha256::new();
-    h.update(b"sealbook-key-rotation-v1");
+    h.update(b"sealbook-key-rotation-v2");
     h.update(collection_id.as_bytes());
-    // A presence byte, so "rotate without revoking" cannot collide with revoking
-    // some device whose id happens to be all zeroes.
-    h.update([u8::from(revoked_device_id.is_some())]);
-    h.update(revoked_device_id.unwrap_or(Uuid::nil()).as_bytes());
+    h.update((revoke_device_ids.len() as u64).to_be_bytes());
+    for id in revoke_device_ids {
+        h.update(id.as_bytes());
+    }
     h.update(key_epoch.to_be_bytes());
     h.update(wraps_digest);
     h.update(objects_digest);
     h.update(manifest_digest);
-    h.update(recovery_payload);
+    h.update(phrase_payload);
     h.finalize().into()
 }
 
@@ -381,25 +371,14 @@ pub fn login_transcript(
 /// Digest of the credentials a recovery installs.
 ///
 /// A recovery replaces the password, because the phrase exists for the case where
-/// the password is the thing that was lost. That makes the new OPAQUE record, the
-/// KDF salt and the re-made password wrap of the collection key part of what the
-/// phrase has to vouch for: unbound, anything able to rewrite the request body
-/// could swap in a password of its own and take the account. This is
+/// the password is the thing that was lost. That makes the new OPAQUE record part
+/// of what the phrase has to vouch for: unbound, anything able to rewrite the
+/// request body could swap in a password of its own and take the account. This is
 /// `password_change_payload`'s reasoning applied to the recovery path.
-pub fn recovery_password_payload(
-    upload: &[u8],
-    kdf_salt: &[u8],
-    recovery_nonce: &[u8],
-    recovery_wrapped_ck: &[u8],
-    recovery_ciphersuite: &str,
-) -> [u8; 32] {
+pub fn recovery_password_payload(upload: &[u8]) -> [u8; 32] {
     let mut h = Sha256::new();
-    h.update(b"sealbook-recovery-password-v1");
+    h.update(b"sealbook-recovery-password-v2");
     absorb(&mut h, upload);
-    absorb(&mut h, kdf_salt);
-    absorb(&mut h, recovery_nonce);
-    absorb(&mut h, recovery_wrapped_ck);
-    absorb(&mut h, recovery_ciphersuite.as_bytes());
     h.finalize().into()
 }
 
@@ -460,9 +439,6 @@ mod tests {
     fn recovery_transcript_binds_the_password_it_installs() {
         let recovery_id = Uuid::new_v4();
         let device_id = Uuid::new_v4();
-        let payload = |upload: &[u8], salt: &[u8]| {
-            recovery_password_payload(upload, salt, b"nonce", b"wrapped", "suite")
-        };
         let sign = |payload: &[u8; 32]| {
             phrase_recovery_transcript(
                 "alice",
@@ -475,16 +451,11 @@ mod tests {
                 payload,
             )
         };
-        let base = sign(&payload(b"upload", b"salt"));
+        let base = sign(&recovery_password_payload(b"upload"));
         assert_ne!(
             base,
-            sign(&payload(b"other", b"salt")),
+            sign(&recovery_password_payload(b"other")),
             "the new password verifier must be bound"
-        );
-        assert_ne!(
-            base,
-            sign(&payload(b"upload", b"salt2")),
-            "the new kdf salt must be bound"
         );
         // Length prefixing: a byte moved across a field boundary must show up.
         assert_ne!(
@@ -496,9 +467,36 @@ mod tests {
                 b"mldsa",
                 b"ed",
                 b"xwing",
-                &payload(b"upload", b"salt"),
+                &recovery_password_payload(b"upload"),
             ),
             base,
+        );
+    }
+
+    #[test]
+    fn the_password_payloads_bind_only_the_upload_and_are_labelled_v2() {
+        assert_ne!(password_change_payload(b"a"), password_change_payload(b"b"));
+        assert_ne!(
+            password_change_payload(b"a"),
+            recovery_password_payload(b"a"),
+            "a change and a recovery must not share a digest"
+        );
+    }
+
+    #[test]
+    fn an_attachment_payload_binds_chunking_and_not_the_plaintext_size() {
+        let collection = Uuid::new_v4();
+        let attachment = Uuid::new_v4();
+        let base = attachment_op_payload(collection, attachment, 1024, 3);
+        assert_ne!(base, attachment_op_payload(collection, attachment, 2048, 3));
+        assert_ne!(base, attachment_op_payload(collection, attachment, 1024, 4));
+        assert_ne!(
+            base,
+            attachment_op_payload(Uuid::new_v4(), attachment, 1024, 3)
+        );
+        assert_ne!(
+            base,
+            attachment_op_payload(collection, Uuid::new_v4(), 1024, 3)
         );
     }
 
@@ -549,115 +547,113 @@ mod tests {
         let wraps = [1u8; 32];
         let objects = [2u8; 32];
         let manifest = [3u8; 32];
-        let recovery = [4u8; 32];
+        let phrase = [4u8; 32];
         let sign = |collection,
-                    revoked,
+                    revoked: &[Uuid],
                     epoch,
                     wraps: &[u8; 32],
                     objects: &[u8; 32],
                     manifest: &[u8; 32],
-                    recovery: &[u8; 32]| {
-            key_rotation_transcript(
-                collection, revoked, epoch, wraps, objects, manifest, recovery,
-            )
+                    phrase: &[u8; 32]| {
+            key_rotation_transcript(collection, revoked, epoch, wraps, objects, manifest, phrase)
         };
         let base = sign(
             collection,
-            Some(revoked),
+            &[revoked],
             2,
             &wraps,
             &objects,
             &manifest,
-            &recovery,
+            &phrase,
         );
 
         for (changed, why) in [
             (
                 sign(
                     collection,
-                    Some(revoked),
+                    &[revoked],
                     3,
                     &wraps,
                     &objects,
                     &manifest,
-                    &recovery,
+                    &phrase,
                 ),
                 "the key epoch must be bound",
             ),
             (
                 sign(
                     collection,
-                    Some(Uuid::new_v4()),
+                    &[Uuid::new_v4()],
                     2,
                     &wraps,
                     &objects,
                     &manifest,
-                    &recovery,
+                    &phrase,
                 ),
                 "which device is revoked must be bound",
             ),
             (
                 sign(
                     Uuid::new_v4(),
-                    Some(revoked),
+                    &[revoked],
                     2,
                     &wraps,
                     &objects,
                     &manifest,
-                    &recovery,
+                    &phrase,
                 ),
                 "the collection must be bound",
             ),
             (
                 sign(
                     collection,
-                    Some(revoked),
+                    &[revoked],
                     2,
                     &[9u8; 32],
                     &objects,
                     &manifest,
-                    &recovery,
+                    &phrase,
                 ),
                 "the new key wraps must be bound",
             ),
             (
                 sign(
                     collection,
-                    Some(revoked),
+                    &[revoked],
                     2,
                     &wraps,
                     &[9u8; 32],
                     &manifest,
-                    &recovery,
+                    &phrase,
                 ),
                 "the re-encrypted objects must be bound",
             ),
             (
                 sign(
                     collection,
-                    Some(revoked),
+                    &[revoked],
                     2,
                     &wraps,
                     &objects,
                     &[9u8; 32],
-                    &recovery,
+                    &phrase,
                 ),
                 "the manifest must be bound into the rotation",
             ),
             (
                 sign(
                     collection,
-                    Some(revoked),
+                    &[revoked],
                     2,
                     &wraps,
                     &objects,
                     &manifest,
                     &[9u8; 32],
                 ),
-                "the recovery material the rotation installs must be bound",
+                "the phrase material the rotation installs must be bound",
             ),
             (
-                sign(collection, None, 2, &wraps, &objects, &manifest, &recovery),
+                sign(collection, &[], 2, &wraps, &objects, &manifest, &phrase),
                 "revoking a device must not collide with rotating without one",
             ),
         ] {
@@ -665,30 +661,46 @@ mod tests {
         }
     }
 
-    /// Every field of the recovery record has to move the digest, or a tampering
+    #[test]
+    fn the_rotation_transcript_differs_for_none_one_and_two_revoked_devices() {
+        let collection = Uuid::new_v4();
+        let a = Uuid::from_u128(1);
+        let b = Uuid::from_u128(2);
+        let z = [0u8; 32];
+        let sign = |ids: &[Uuid]| key_rotation_transcript(collection, ids, 2, &z, &z, &z, &z);
+        let none = sign(&[]);
+        let one = sign(&[a]);
+        let two = sign(&[a, b]);
+        assert_ne!(none, one);
+        assert_ne!(one, two);
+        assert_ne!(none, two);
+        // Hashed exactly as sent: the receiver, not the transcript, enforces order.
+        assert_ne!(sign(&[a, b]), sign(&[b, a]));
+        assert_ne!(sign(&[a, a]), sign(&[a]));
+        // The nil id is a real id here, not a stand-in for "none".
+        assert_ne!(sign(&[Uuid::nil()]), none);
+    }
+
+    /// Every field of the phrase record has to move the digest, or a tampering
     /// proxy could change the one field the signature happened not to reach.
     #[test]
-    fn rotation_recovery_payload_binds_every_field() {
-        let base = rotation_recovery_payload(b"salt", b"mldsa", b"ed25519", b"lookup", "scheme");
+    fn rotation_phrase_payload_binds_every_field() {
+        let base = rotation_phrase_payload(b"mldsa", b"ed25519", b"lookup", "scheme");
         for (changed, why) in [
             (
-                rotation_recovery_payload(b"SALT", b"mldsa", b"ed25519", b"lookup", "scheme"),
-                "kdf salt",
-            ),
-            (
-                rotation_recovery_payload(b"salt", b"MLDSA", b"ed25519", b"lookup", "scheme"),
+                rotation_phrase_payload(b"MLDSA", b"ed25519", b"lookup", "scheme"),
                 "phrase ml-dsa public key",
             ),
             (
-                rotation_recovery_payload(b"salt", b"mldsa", b"ED25519", b"lookup", "scheme"),
+                rotation_phrase_payload(b"mldsa", b"ED25519", b"lookup", "scheme"),
                 "phrase ed25519 public key",
             ),
             (
-                rotation_recovery_payload(b"salt", b"mldsa", b"ed25519", b"LOOKUP", "scheme"),
+                rotation_phrase_payload(b"mldsa", b"ed25519", b"LOOKUP", "scheme"),
                 "phrase lookup id",
             ),
             (
-                rotation_recovery_payload(b"salt", b"mldsa", b"ed25519", b"lookup", "SCHEME"),
+                rotation_phrase_payload(b"mldsa", b"ed25519", b"lookup", "SCHEME"),
                 "phrase scheme",
             ),
         ] {
@@ -698,8 +710,8 @@ mod tests {
         // Length prefixing, so moving a byte across a field boundary is a
         // different digest rather than the same one.
         assert_ne!(
-            rotation_recovery_payload(b"ab", b"c", b"d", b"e", "f"),
-            rotation_recovery_payload(b"a", b"bc", b"d", b"e", "f"),
+            rotation_phrase_payload(b"ab", b"c", b"d", "e"),
+            rotation_phrase_payload(b"a", b"bc", b"d", "e"),
         );
     }
 
@@ -962,16 +974,11 @@ mod tests {
     }
 
     #[test]
-    fn a_password_change_binds_its_replacement_recovery_wrap() {
-        let base = password_change_payload(b"upload", b"salt", b"nonce", b"wrapped", "suite");
+    fn a_password_change_binds_its_upload() {
         assert_ne!(
-            base,
-            password_change_payload(b"upload", b"salt", b"nonce", b"other", "suite"),
-            "the recovery wrap must be signed, or it can be replaced with garbage"
-        );
-        assert_ne!(
-            base,
-            password_change_payload(b"upload", b"other", b"nonce", b"wrapped", "suite")
+            password_change_payload(b"upload"),
+            password_change_payload(b"other"),
+            "the new verifier must be signed, or it can be replaced with another"
         );
     }
 }

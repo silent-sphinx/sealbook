@@ -9,9 +9,9 @@ use std::path::PathBuf;
 use sealbook_crypto::{
     device_hpke_keypair_from_ikm, entropy_from_phrase, phrase_lookup_id, phrase_recovery_keys,
     sign, signing_from_seeds, unwrap_for_device, unwrap_for_phrase, verify, wrap_for_device,
-    wrap_for_phrase_with_nonce, CollectionKey, DeviceHpkePublic, DeviceHpkeSecret, DeviceHpkeWrap,
-    DeviceSigningPublic, DualSignature, WrapBinding, NONCE_LEN, SIGNING_SEED_LEN,
-    XWING_CIPHERSUITE,
+    wrap_for_phrase_legacy_with_nonce, wrap_for_phrase_with_nonce, CollectionKey, DeviceHpkePublic,
+    DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningPublic, DualSignature, WrapBinding, WrapForm,
+    NONCE_LEN, SIGNING_SEED_LEN, XWING_CIPHERSUITE,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -46,6 +46,30 @@ fn array<const N: usize>(value: &Value, key: &str) -> [u8; N] {
         .unwrap_or_else(|_| panic!("{key} is not {N} bytes"))
 }
 
+#[test]
+fn padme_lengths_match_the_independent_vectors() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../sealbook-protocol/fixtures/crypto/padme.json");
+    let vectors: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    for vector in vectors["vectors"].as_array().unwrap() {
+        let len = vector["len"].as_u64().unwrap();
+        assert_eq!(
+            sealbook_crypto::padme_len(len),
+            vector["padded"].as_u64().unwrap(),
+            "padme_len({len})"
+        );
+    }
+}
+
+#[test]
+fn padme_never_shrinks_and_stays_within_an_eighth() {
+    for len in (1..70_000u64).chain([1 << 20, (1 << 20) + 1, 200 * 1024 * 1024]) {
+        let padded = sealbook_crypto::padme_len(len);
+        assert!(padded >= len);
+        assert!(padded - len <= len / 8 + 1, "{len} -> {padded}");
+    }
+}
+
 fn seq(start: u8) -> [u8; 32] {
     std::array::from_fn(|i| start.wrapping_add(i as u8))
 }
@@ -73,8 +97,9 @@ fn a_stored_device_wrap_opens_to_the_expected_key() {
         collection_id: wrap["collection_id"].as_str().unwrap().parse().unwrap(),
         key_epoch: wrap["key_epoch"].as_u64().unwrap(),
     };
-    let key = unwrap_for_device(&secret, &stored, &binding).expect("the stored wrap opens");
+    let (key, form) = unwrap_for_device(&secret, &stored, &binding).expect("the stored wrap opens");
     assert_eq!(key.as_bytes().as_slice(), bytes(wrap, "key").as_slice());
+    assert_eq!(form, WrapForm::Bound);
 
     let wrong_epoch = WrapBinding {
         key_epoch: binding.key_epoch + 1,
@@ -139,10 +164,28 @@ fn a_stored_phrase_wrap_opens_to_the_expected_key() {
     let entropy = entropy_from_phrase(phrase["phrase"].as_str().unwrap()).unwrap();
     let nonce = array::<NONCE_LEN>(phrase, "wrap_nonce");
     let key = CollectionKey::from_bytes(array(phrase, "wrap_key"));
-    let rebuilt = wrap_for_phrase_with_nonce(&entropy, &key, &nonce).unwrap();
-    assert_eq!(hex::encode(&rebuilt.ciphertext), phrase["wrap_ciphertext"]);
-    let opened = unwrap_for_phrase(&entropy, &rebuilt).unwrap();
+    let binding = WrapBinding {
+        collection_id: phrase["collection_id"].as_str().unwrap().parse().unwrap(),
+        key_epoch: phrase["key_epoch"].as_u64().unwrap(),
+    };
+
+    // The form every account stored before the wrap was bound. It has to keep
+    // opening, and report that it is the legacy form, for as long as the
+    // migration needs it.
+    let legacy = wrap_for_phrase_legacy_with_nonce(&entropy, &key, &nonce).unwrap();
+    assert_eq!(
+        hex::encode(&legacy.ciphertext),
+        phrase["legacy_wrap_ciphertext"]
+    );
+    let (opened, form) = unwrap_for_phrase(&entropy, &legacy, &binding).unwrap();
     assert_eq!(opened.as_bytes(), key.as_bytes());
+    assert_eq!(form, WrapForm::Legacy);
+
+    let bound = wrap_for_phrase_with_nonce(&entropy, &key, &binding, &nonce).unwrap();
+    assert_eq!(hex::encode(&bound.ciphertext), phrase["wrap_ciphertext"]);
+    let (opened, form) = unwrap_for_phrase(&entropy, &bound, &binding).unwrap();
+    assert_eq!(opened.as_bytes(), key.as_bytes());
+    assert_eq!(form, WrapForm::Bound);
 }
 
 /// Rebuilds the fixture. Run only when a pinned crate is changed on purpose:
@@ -179,7 +222,13 @@ fn regenerate_the_crypto_fixture() {
     let (_, recovery) = phrase_recovery_keys(&entropy).unwrap();
     let nonce = [0x60u8; NONCE_LEN];
     let phrase_key = CollectionKey::from_bytes(seq(0x70));
-    let phrase_wrap = wrap_for_phrase_with_nonce(&entropy, &phrase_key, &nonce).unwrap();
+    let phrase_binding = WrapBinding {
+        collection_id: Uuid::from_bytes([0x22; 16]),
+        key_epoch: 4,
+    };
+    let phrase_wrap =
+        wrap_for_phrase_with_nonce(&entropy, &phrase_key, &phrase_binding, &nonce).unwrap();
+    let legacy_wrap = wrap_for_phrase_legacy_with_nonce(&entropy, &phrase_key, &nonce).unwrap();
 
     let fixture = json!({
         "about": "Known answers for the crypto that stored secrets depend on. Read by sealbook-crypto's tests/known_answers.rs; web and Android parity tests run the same values. Regenerate only when a pinned crate is changed on purpose.",
@@ -215,6 +264,9 @@ fn regenerate_the_crypto_fixture() {
             "recovery_ed25519_public": hex::encode(&recovery.ed25519_pk),
             "wrap_key": hex::encode(phrase_key.as_bytes()),
             "wrap_nonce": hex::encode(nonce),
+            "collection_id": phrase_binding.collection_id.to_string(),
+            "key_epoch": phrase_binding.key_epoch,
+            "legacy_wrap_ciphertext": hex::encode(&legacy_wrap.ciphertext),
             "wrap_ciphertext": hex::encode(&phrase_wrap.ciphertext),
         },
     });
