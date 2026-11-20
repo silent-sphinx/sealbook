@@ -2,6 +2,8 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit, Payload},
     Key, XChaCha20Poly1305, XNonce,
 };
+use hkdf::Hkdf;
+use hmac::{Hmac, Mac};
 use rand::RngCore;
 use sha2::{Digest, Sha256};
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -37,6 +39,32 @@ impl CollectionKey {
 
     pub fn as_bytes(&self) -> &[u8; COLLECTION_KEY_LEN] {
         &self.0
+    }
+}
+
+const CONFLICT_ID_LABEL: &[u8] = b"sealbook-conflict-id-v1";
+
+impl CollectionKey {
+    /// The id a conflicted copy is written under, as a version 8 UUID. Keyed
+    /// by the collection key so the server cannot test a guess at the copy's
+    /// content or link the copy to its original, yet still deterministic, so
+    /// a flush retried after a lost response writes the same copy.
+    pub fn conflict_copy_id(&self, id: &str, copy: &str) -> Result<[u8; 16], CryptoError> {
+        let mut subkey = [0u8; 32];
+        Hkdf::<Sha256>::new(None, &self.0)
+            .expand(CONFLICT_ID_LABEL, &mut subkey)
+            .map_err(|_| CryptoError::Hkdf)?;
+        let mut mac =
+            <Hmac<Sha256> as Mac>::new_from_slice(&subkey).map_err(|_| CryptoError::Hkdf)?;
+        subkey.zeroize();
+        mac.update(id.as_bytes());
+        mac.update(copy.as_bytes());
+        let digest = mac.finalize().into_bytes();
+        let mut out = [0u8; 16];
+        out.copy_from_slice(&digest[..16]);
+        out[6] = (out[6] & 0x0f) | 0x80;
+        out[8] = (out[8] & 0x3f) | 0x80;
+        Ok(out)
     }
 }
 

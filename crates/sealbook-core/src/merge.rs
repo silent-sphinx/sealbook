@@ -15,6 +15,7 @@
 
 use std::collections::HashMap;
 
+use sealbook_crypto::CollectionKey;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use uuid::Uuid;
@@ -491,12 +492,14 @@ pub fn conflict_copy(content_type: &str, payload: &str, date: &str) -> String {
 }
 
 /// The id a conflicted copy is written under. Derived from the original and
-/// the copy's content, so a flush retried after a lost response writes the
-/// same copy rather than a second one.
-pub fn conflict_copy_id(id: &str, copy: &str) -> String {
-    let namespace = Uuid::parse_str(id).unwrap_or(Uuid::NAMESPACE_OID);
-    let name = [id.as_bytes(), copy.as_bytes()].concat();
-    Uuid::new_v5(&namespace, &name).to_string()
+/// the copy's content under the collection key, so a flush retried after a
+/// lost response writes the same copy rather than a second one, and the server
+/// can neither confirm a guess at the copy nor link it to the original.
+pub fn conflict_copy_id(key: &CollectionKey, id: &str, copy: &str) -> String {
+    let bytes = key
+        .conflict_copy_id(id, copy)
+        .expect("HKDF and HMAC accept a 32-byte key");
+    Uuid::from_bytes(bytes).to_string()
 }
 
 fn title_key(content_type: &str) -> &'static str {
@@ -585,7 +588,33 @@ mod tests {
     #[test]
     fn a_copy_id_is_the_same_for_the_same_copy() {
         let id = "6f1c1d4e-0000-4000-8000-000000000001";
-        assert_eq!(conflict_copy_id(id, "x"), conflict_copy_id(id, "x"));
-        assert_ne!(conflict_copy_id(id, "x"), conflict_copy_id(id, "y"));
+        let key = CollectionKey::from_bytes([7; 32]);
+        assert_eq!(
+            conflict_copy_id(&key, id, "x"),
+            conflict_copy_id(&key, id, "x")
+        );
+        assert_ne!(
+            conflict_copy_id(&key, id, "x"),
+            conflict_copy_id(&key, id, "y")
+        );
+    }
+
+    #[test]
+    fn a_copy_id_differs_under_a_different_key() {
+        let id = "6f1c1d4e-0000-4000-8000-000000000001";
+        let one = CollectionKey::from_bytes([7; 32]);
+        let other = CollectionKey::from_bytes([8; 32]);
+        assert_ne!(
+            conflict_copy_id(&one, id, "x"),
+            conflict_copy_id(&other, id, "x")
+        );
+    }
+
+    #[test]
+    fn a_copy_id_is_a_version_8_uuid() {
+        let id = "6f1c1d4e-0000-4000-8000-000000000001";
+        let key = CollectionKey::from_bytes([7; 32]);
+        let parsed = Uuid::parse_str(&conflict_copy_id(&key, id, "x")).unwrap();
+        assert_eq!(parsed.get_version_num(), 8);
     }
 }

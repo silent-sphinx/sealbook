@@ -10,6 +10,7 @@
 //! sequence makes that check and the write one step: anything written in
 //! between makes the write a `409`, and the host starts again from the walk.
 
+use sealbook_crypto::CollectionKey;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -90,16 +91,27 @@ pub enum FlushFailure {
 /// Decides every queued write against `vault`, which the host has just
 /// brought up to date. `date` is the host's local `YYYY-MM-DD`, for the title
 /// of a conflicted copy.
-pub fn flush_plan(outbox: &Outbox, vault: &LocalVault, date: &str) -> FlushPlan {
+pub fn flush_plan(
+    outbox: &Outbox,
+    vault: &LocalVault,
+    date: &str,
+    key: &CollectionKey,
+) -> FlushPlan {
     let mut plan = FlushPlan::default();
     for write in &outbox.writes {
         let remote = vault.objects.iter().find(|object| object.id == write.id);
-        plan_one(&mut plan, write, remote, date);
+        plan_one(&mut plan, write, remote, date, key);
     }
     plan
 }
 
-fn plan_one(plan: &mut FlushPlan, write: &PendingWrite, remote: Option<&LocalObject>, date: &str) {
+fn plan_one(
+    plan: &mut FlushPlan,
+    write: &PendingWrite,
+    remote: Option<&LocalObject>,
+    date: &str,
+    key: &CollectionKey,
+) {
     let base_revision = write.base.as_ref().map_or(0, |base| base.revision);
     let title = || {
         let payload = match &write.base {
@@ -168,7 +180,7 @@ fn plan_one(plan: &mut FlushPlan, write: &PendingWrite, remote: Option<&LocalObj
             let remote_title = item_title(&write.content_type, &remote_live.payload);
             let copy_title = item_title(&write.content_type, &copy);
             plan.writes.push(FlushWrite {
-                id: conflict_copy_id(&write.id, &copy),
+                id: conflict_copy_id(key, &write.id, &copy),
                 content_type: write.content_type.clone(),
                 tombstone: false,
                 payload: copy,
@@ -229,10 +241,17 @@ pub fn flush_failure(status: u16) -> FlushFailure {
 pub mod ffi {
     use super::{CoreError, CoreManifestEntry, FlushFailure, FlushGuard, FlushPlan, FlushWrite};
     use crate::offline::{LocalVault, Outbox};
+    use sealbook_crypto::CollectionKey;
 
     #[uniffi::export(name = "flush_plan")]
-    pub fn flush_plan(outbox: Outbox, vault: LocalVault, date: String) -> FlushPlan {
-        super::flush_plan(&outbox, &vault, &date)
+    pub fn flush_plan(
+        outbox: Outbox,
+        vault: LocalVault,
+        date: String,
+        ck_b64: String,
+    ) -> Result<FlushPlan, CoreError> {
+        let key = CollectionKey::from_bytes(crate::roster::collection_key(&ck_b64)?);
+        Ok(super::flush_plan(&outbox, &vault, &date, &key))
     }
 
     #[uniffi::export(name = "write_guard")]

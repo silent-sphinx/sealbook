@@ -8,12 +8,15 @@
 //! `REGENERATE_OFFLINE_FIXTURE=1 cargo test -p sealbook-core --test offline -- --ignored regenerate`
 
 use sealbook_core::*;
+use sealbook_crypto::CollectionKey;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 const FIXTURE: &str = "../sealbook-protocol/fixtures/offline/offline.json";
 
 const DATE: &str = "2026-11-03";
+/// The collection key conflict-copy ids are derived under: 32 bytes of 9.
+const COLLECTION_KEY: &str = "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk";
 const QUEUED_AT: &str = "2026-11-03T09:00:00.000Z";
 
 const NOTE_A: &str = "0a6f4c1e-1b2c-4d3e-8f40-000000000001";
@@ -24,6 +27,7 @@ const NOTEBOOK: &str = "0a6f4c1e-1b2c-4d3e-8f40-000000000010";
 #[derive(Serialize, Deserialize)]
 struct Fixture {
     date: String,
+    collection_key: String,
     outbox: Vec<OutboxCase>,
     merge: Vec<MergeCase>,
     flush: Vec<FlushCase>,
@@ -365,9 +369,14 @@ fn flush_inputs() -> Vec<(String, LocalVault, Vec<PendingWrite>)> {
     ]
 }
 
+fn key() -> CollectionKey {
+    CollectionKey::from_bytes([9; 32])
+}
+
 fn build() -> Fixture {
     Fixture {
         date: DATE.into(),
+        collection_key: COLLECTION_KEY.into(),
         outbox: outbox_inputs()
             .into_iter()
             .map(|(case, vault, pushes)| {
@@ -408,7 +417,7 @@ fn build() -> Fixture {
                     writes,
                     failed: Vec::new(),
                 };
-                let plan = flush_plan(&outbox, &vault, DATE);
+                let plan = flush_plan(&outbox, &vault, DATE, &key());
                 FlushCase {
                     case,
                     vault,
@@ -460,7 +469,7 @@ fn every_merge_gives_what_the_fixture_holds() {
 fn every_flush_plans_what_the_fixture_holds() {
     let fixture = fixture();
     for case in fixture.flush {
-        let plan = flush_plan(&case.outbox, &case.vault, &fixture.date);
+        let plan = flush_plan(&case.outbox, &case.vault, &fixture.date, &key());
         assert_eq!(plan, case.plan, "{}", case.case);
     }
 }

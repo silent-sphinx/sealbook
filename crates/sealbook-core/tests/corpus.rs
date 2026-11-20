@@ -125,6 +125,7 @@ fn call(op: &str, args: &[Value]) -> Value {
             &arg(args, 0),
             &arg(args, 1),
             &arg::<String>(args, 2),
+            &collection_key(&arg::<String>(args, 3)),
         ))),
         "trash.write" => out(trash_write(
             arg(args, 0),
@@ -580,4 +581,10 @@ fn regenerate_the_fuzz_fixture() {
     let text = serde_json::to_string_pretty(&Value::Object(fixture)).expect("serialises");
     std::fs::write(format!("{ROOT}{FUZZ_FILE}"), text + "\n").expect("writes");
     println!("{}", serde_json::to_string_pretty(&tables).expect("tables"));
+}
+
+fn collection_key(ck_b64: &str) -> sealbook_crypto::CollectionKey {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    let bytes = URL_SAFE_NO_PAD.decode(ck_b64).expect("a base64url key");
+    sealbook_crypto::CollectionKey::from_bytes(bytes.try_into().expect("a 32-byte key"))
 }

@@ -1,5 +1,6 @@
 {
   "date": "2026-11-03",
+  "collection_key": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
   "outbox": [
     {
       "case": "a second edit keeps the first base and the first place",
@@ -573,7 +574,7 @@
       "plan": {
         "writes": [
           {
-            "id": "b9db1d12-c7ae-5cd7-bbbd-0fbd619ceadc",
+            "id": "6b4eb821-9013-8091-9425-38f89f031596",
             "content_type": "application/sealbook.note+json",
             "tombstone": false,
             "payload": "{\"@type\":\"Note\",\"body\":\"one\\nTWO\",\"createdAt\":\"2026-11-01T08:00:00.000Z\",\"notebookId\":\"0a6f4c1e-1b2c-4d3e-8f40-000000000010\",\"title\":\"Plan (conflict, 2026-11-03)\",\"updatedAt\":\"2026-11-01T08:00:00.000Z\",\"version\":\"1.0\"}",

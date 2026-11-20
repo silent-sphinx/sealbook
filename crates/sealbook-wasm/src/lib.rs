@@ -3560,8 +3560,10 @@ pub fn core_flush_plan(
     outbox: Ts<sealbook_core::Outbox>,
     vault: Ts<sealbook_core::LocalVault>,
     date: &str,
+    ck_b64: &str,
 ) -> Result<Ts<sealbook_core::FlushPlan>, JsError> {
-    Ok(sealbook_core::flush_plan(&outbox.to_rust()?, &vault.to_rust()?, date).into_ts()?)
+    let key = ck_from_b64(ck_b64)?;
+    Ok(sealbook_core::flush_plan(&outbox.to_rust()?, &vault.to_rust()?, date, &key).into_ts()?)
 }
 
 /// Whether a batch's objects still hold what the plan expected, just before
