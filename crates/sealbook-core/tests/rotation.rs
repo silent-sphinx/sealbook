@@ -17,9 +17,9 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sealbook_core::{
-    manifest_entry_for, open_row, reseal_row, rotation_entries, rotation_plan, rotation_recipients,
-    CoreDevice, CoreError, CoreManifestEntry, CoreSealedRow, ManifestPlan, RotationPlan,
-    RotationRefusal, RotationState, RowOutcome, UnreadableReason,
+    manifest_entry_for, open_row, payload_upgrade, reseal_row, rotation_entries, rotation_plan,
+    rotation_recipients, CoreDevice, CoreError, CoreManifestEntry, CoreSealedRow, ManifestPlan,
+    ResealRow, RotationPlan, RotationRefusal, RotationState, RowOutcome, UnreadableReason,
 };
 use sealbook_crypto::{encrypt_object, object_aad, signing_from_seeds, CollectionKey};
 use sealbook_protocol::envelope::{seal_envelope, seal_tombstone_envelope};
@@ -83,7 +83,7 @@ struct PlannedRow {
 struct RecipientCase {
     /// Which of the fixture's devices the roster lists for this case.
     roster: Vec<Uuid>,
-    revoke: Option<Uuid>,
+    revoke: Vec<Uuid>,
     /// The devices that keep a wrap of the new key, or `None` with a refusal.
     keep: Option<Vec<Uuid>>,
     refusal: Option<RotationRefusal>,
@@ -281,7 +281,7 @@ fn a_row_this_device_cannot_open_refuses_the_whole_rotation() {
 fn the_roster_cases_answer_what_the_fixture_names() {
     let fixture = fixture();
     for case in &fixture.recipients {
-        let answer = rotation_recipients(fixture.device_id, case.revoke, &fixture.roster(case));
+        let answer = rotation_recipients(fixture.device_id, &case.revoke, &fixture.roster(case));
         match (&case.keep, &case.refusal) {
             (Some(keep), None) => assert_eq!(
                 answer
@@ -457,39 +457,59 @@ fn build() -> Fixture {
     let recipients = vec![
         RecipientCase {
             roster: vec![alpha, beta, gamma],
-            revoke: None,
+            revoke: Vec::new(),
             keep: Some(vec![alpha, beta, gamma]),
             refusal: None,
         },
         RecipientCase {
             roster: vec![alpha, beta, gamma],
-            revoke: Some(beta),
+            revoke: vec![beta],
             keep: Some(vec![alpha, gamma]),
             refusal: None,
         },
         RecipientCase {
             roster: vec![alpha, beta, gamma],
-            revoke: Some(alpha),
+            revoke: vec![alpha],
             keep: None,
             refusal: Some(RotationRefusal::RevokingSelf),
         },
         RecipientCase {
             roster: vec![alpha, beta, gamma],
-            revoke: Some(DELTA.parse().unwrap()),
+            revoke: vec![DELTA.parse().unwrap()],
             keep: None,
             refusal: Some(RotationRefusal::NotInRoster),
         },
         RecipientCase {
             roster: vec![beta],
-            revoke: Some(beta),
+            revoke: vec![beta],
             keep: None,
             refusal: Some(RotationRefusal::LastDevice),
+        },
+        RecipientCase {
+            roster: vec![alpha, beta, gamma],
+            revoke: vec![beta, gamma],
+            keep: Some(vec![alpha]),
+            refusal: None,
+        },
+        // The signed transcript hashes the list as sent, so a repeat or a
+        // descending list is refused before anything is signed.
+        RecipientCase {
+            roster: vec![alpha, beta, gamma],
+            revoke: vec![beta, beta],
+            keep: None,
+            refusal: Some(RotationRefusal::RevokedOutOfOrder),
+        },
+        RecipientCase {
+            roster: vec![alpha, beta, gamma],
+            revoke: vec![gamma, beta],
+            keep: None,
+            refusal: Some(RotationRefusal::RevokedOutOfOrder),
         },
         // Signed in on a device the roster does not list: the rotation would
         // wrap the new key for everyone except the device doing it.
         RecipientCase {
             roster: vec![beta, gamma],
-            revoke: None,
+            revoke: Vec::new(),
             keep: None,
             refusal: Some(RotationRefusal::NotEnrolled),
         },
@@ -520,4 +540,230 @@ fn build() -> Fixture {
     };
     fixture.plan = fixture.planned(&plan);
     fixture
+}
+
+/// A collection of the given plaintext envelopes, sealed under `key`, and the
+/// plan that rotates it.
+fn vault_of(
+    key: &CollectionKey,
+    rows: &[(Uuid, Vec<u8>)],
+) -> (Vec<CoreSealedRow>, RotationPlan, String, Uuid) {
+    let collection_id: Uuid = COLLECTION.parse().unwrap();
+    let sealed: Vec<CoreSealedRow> = rows
+        .iter()
+        .enumerate()
+        .map(|(index, (id, plain))| {
+            let aad = object_aad(id.as_bytes(), collection_id.as_bytes());
+            let enc = encrypt_object(key, plain, &aad).unwrap();
+            CoreSealedRow {
+                id: *id,
+                revision: index as u64 + 1,
+                tombstone: false,
+                nonce: b64(&enc.nonce),
+                ciphertext: b64(&enc.ciphertext),
+                padded_size: enc.padded_size as u64,
+            }
+        })
+        .collect();
+    let ck = b64(key.as_bytes());
+    let plan = rotation_plan(
+        &ck,
+        collection_id,
+        &RotationState {
+            manifest_seq: 1,
+            key_epoch: 1,
+            latest_revision: rows.len() as u64,
+            tombstone_floor: 0,
+        },
+        &sealed,
+    )
+    .unwrap();
+    (sealed, plan, ck, collection_id)
+}
+
+fn opened(ck: &str, collection_id: Uuid, row: &CoreSealedRow) -> (String, Vec<u8>) {
+    let aad = object_aad(row.id.as_bytes(), collection_id.as_bytes());
+    let key = CollectionKey::from_bytes(URL_SAFE_NO_PAD.decode(ck).unwrap().try_into().unwrap());
+    let encrypted = sealbook_crypto::EncryptedObject {
+        nonce: URL_SAFE_NO_PAD
+            .decode(&row.nonce)
+            .unwrap()
+            .try_into()
+            .unwrap(),
+        ciphertext: URL_SAFE_NO_PAD.decode(&row.ciphertext).unwrap(),
+        padded_size: row.padded_size as usize,
+    };
+    let plain = sealbook_crypto::decrypt_object(&key, &encrypted, &aad).unwrap();
+    match sealbook_protocol::envelope::open_envelope(&plain) {
+        sealbook_protocol::envelope::Unsealed::Envelope {
+            content_type,
+            payload,
+            ..
+        } => (content_type, payload),
+        _ => panic!("the row's envelope opens"),
+    }
+}
+
+#[test]
+fn a_vault_of_1_0_objects_comes_out_1_1_and_is_counted_once() {
+    let old = CollectionKey::from_bytes([3u8; 32]);
+    let new = CollectionKey::from_bytes([5u8; 32]);
+    let note = br#"{"@type":"Note","version":"1.0","title":"T","body":"b","notebookId":"n"}"#;
+    let event = br#"{"@type":"CalendarEvent","version":"1.0","title":"E","start":"2026-10-01"}"#;
+    let card = br#"{"@type":"Card","version":"1.0","fullName":"Ada","sealbook:addressBookId":"00000000-0000-0000-0000-000000000001"}"#;
+    let current = br#"{"@type":"Note","version":"1.1","title":"already"}"#;
+    let rows = vec![
+        (Uuid::from_u128(1), seal_envelope(NOTE, note)),
+        (
+            Uuid::from_u128(2),
+            seal_envelope("application/sealbook.calendar-event+json", event),
+        ),
+        (Uuid::from_u128(3), seal_envelope(CONTACT, card)),
+        (Uuid::from_u128(4), seal_envelope(NOTE, current)),
+    ];
+    let (_, plan, old_ck, collection_id) = vault_of(&old, &rows);
+    let new_ck = b64(new.as_bytes());
+
+    let mut upgraded = 0;
+    for row in &plan.reseal {
+        let resealed = sealbook_core::reseal_row_upgrading(&old_ck, &new_ck, collection_id, row)
+            .expect("reseals");
+        upgraded += usize::from(resealed.upgraded);
+        let (content_type, payload) = opened(&new_ck, collection_id, &resealed.row);
+        let object: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+        if content_type == CONTACT {
+            assert_eq!(object["version"], "1.0");
+            assert_eq!(object["sealbook:version"], "1.1");
+            assert_eq!(object["name"]["full"], "Ada");
+        } else {
+            assert_eq!(object["version"], "1.1", "{content_type}");
+        }
+    }
+    assert_eq!(upgraded, 3, "the one already current is not counted");
+
+    // A second rotation finds nothing left to move.
+    let again: usize = plan
+        .reseal
+        .iter()
+        .map(|row| {
+            let first = sealbook_core::reseal_row_upgrading(&old_ck, &new_ck, collection_id, row)
+                .unwrap()
+                .row;
+            let next = ResealRow {
+                id: first.id,
+                revision: first.revision + 10,
+                nonce: first.nonce,
+                ciphertext: first.ciphertext,
+                padded_size: first.padded_size,
+            };
+            usize::from(
+                sealbook_core::reseal_row_upgrading(&new_ck, &old_ck, collection_id, &next)
+                    .unwrap()
+                    .upgraded,
+            )
+        })
+        .sum();
+    assert_eq!(again, 0);
+}
+
+#[test]
+fn a_payload_that_is_not_valid_utf8_comes_out_byte_identical() {
+    let old = CollectionKey::from_bytes([3u8; 32]);
+    let new = CollectionKey::from_bytes([5u8; 32]);
+    let rows = [
+        // Not UTF-8, so a plan refuses the whole collection; the row is built
+        // by hand to show the reseal on its own never rewrites it either.
+        (
+            Uuid::from_u128(1),
+            seal_envelope(
+                NOTE,
+                b"\xff\xfe{\"@type\":\"Note\",\"version\":\"1.0\"}\x80",
+            ),
+        ),
+        // Valid UTF-8, not JSON.
+        (Uuid::from_u128(2), seal_envelope(NOTE, b"plain words")),
+        // A type core does not know, so there is nothing to upgrade it by.
+        (
+            Uuid::from_u128(3),
+            seal_envelope(
+                "application/x-future",
+                br#"{"@type":"Note","version":"1.0"}"#,
+            ),
+        ),
+        // A later major, which a write would refuse.
+        (
+            Uuid::from_u128(4),
+            seal_envelope(NOTE, br#"{"@type":"Note","version":"2.0"}"#),
+        ),
+        // A JSON array, which is not a payload.
+        (Uuid::from_u128(5), seal_envelope(NOTE, b"[1,2,3]")),
+    ];
+    let collection_id: Uuid = COLLECTION.parse().unwrap();
+    let old_ck = b64(old.as_bytes());
+    let new_ck = b64(new.as_bytes());
+    for (index, (id, plain)) in rows.iter().enumerate() {
+        let aad = object_aad(id.as_bytes(), collection_id.as_bytes());
+        let enc = encrypt_object(&old, plain, &aad).unwrap();
+        let row = ResealRow {
+            id: *id,
+            revision: index as u64 + 10,
+            nonce: b64(&enc.nonce),
+            ciphertext: b64(&enc.ciphertext),
+            padded_size: enc.padded_size as u64,
+        };
+        let resealed =
+            sealbook_core::reseal_row_upgrading(&old_ck, &new_ck, collection_id, &row).unwrap();
+        assert!(!resealed.upgraded, "{id} was rewritten");
+        let (_, payload) = opened(&new_ck, collection_id, &resealed.row);
+        let original = match sealbook_protocol::envelope::open_envelope(plain) {
+            sealbook_protocol::envelope::Unsealed::Envelope { payload, .. } => payload,
+            _ => unreachable!(),
+        };
+        assert_eq!(payload, original, "{id} is not byte for byte");
+    }
+}
+
+#[test]
+fn an_upgraded_payload_that_lands_in_a_larger_bucket_is_resealed_at_that_size() {
+    let old = CollectionKey::from_bytes([3u8; 32]);
+    let new = CollectionKey::from_bytes([5u8; 32]);
+    let event = "application/sealbook.calendar-event+json";
+    let stored = |padding: usize| {
+        format!(
+            r#"{{"@type":"CalendarEvent","version":"1.0","title":"{}","start":"2026-10-01"}}"#,
+            "x".repeat(padding)
+        )
+    };
+    let padded = |text: &str| {
+        encrypt_object(&old, &seal_envelope(event, text.as_bytes()), &[])
+            .unwrap()
+            .padded_size
+    };
+    // A title length at which the upgrade, which adds a calendar and a version
+    // bump, moves the object into the next padding bucket.
+    let padding = (0..4096)
+        .find(|padding| {
+            let before = stored(*padding);
+            let after = payload_upgrade(event, &before).expect("upgrades");
+            padded(&before) != padded(&after)
+        })
+        .expect("a length that crosses a bucket");
+    let before = stored(padding);
+    let rows = vec![(Uuid::from_u128(1), seal_envelope(event, before.as_bytes()))];
+    let (sealed, plan, old_ck, collection_id) = vault_of(&old, &rows);
+    let new_ck = b64(new.as_bytes());
+    let resealed =
+        sealbook_core::reseal_row_upgrading(&old_ck, &new_ck, collection_id, &plan.reseal[0])
+            .unwrap();
+    assert!(resealed.upgraded);
+    assert!(
+        resealed.row.padded_size > sealed[0].padded_size,
+        "the row was meant to move to a larger bucket"
+    );
+    let entries = rotation_entries(&plan, std::slice::from_ref(&resealed.row)).unwrap();
+    assert_eq!(entries.len(), 1);
+    let (_, payload) = opened(&new_ck, collection_id, &resealed.row);
+    assert!(std::str::from_utf8(&payload)
+        .unwrap()
+        .contains("calendarId"));
 }

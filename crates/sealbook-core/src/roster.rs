@@ -104,6 +104,12 @@ pub struct CoreRosterPin {
     pub roster_seq: u64,
     /// base64 of the 32-byte transcript.
     pub transcript: String,
+    /// The approving device's manifest sequence, sealed next to the roster pin
+    /// when a device is paired, so the new device does not start at 0 and can be
+    /// shown an older, validly signed manifest. 0 everywhere else. A host that
+    /// drops it leaves the device at 0 and the check does nothing.
+    #[serde(default)]
+    pub manifest_seq: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -119,9 +125,13 @@ pub struct VerifiedRoster {
     pub roster_json: String,
     /// False for a roster that predates key commitments. It vouches for the
     /// collection key by its MAC alone, which a server that sealed a key of its
-    /// own to the device can recompute; a rotation replaces it with one that
-    /// commits. A host shows [`legacy_roster_message`](crate::legacy_roster_message).
+    /// own to the device can recompute, so a key adopted under it is checked
+    /// against the vault itself.
     pub key_committed: bool,
+    /// Whether the account has moved to the current protocol. A roster that has
+    /// not leaves it owing one rotation, whatever the server says: that is the
+    /// only write it may make, and the key it holds is only to be read with.
+    pub migrated: bool,
 }
 
 /// The request that fetches the roster history this device can check.
@@ -134,10 +144,10 @@ pub fn roster_request(context: &RosterContext) -> Result<HttpRequest, CoreError>
     let collection = context.collection_id;
     let path = match context.pin()? {
         Some(pin) => format!(
-            "/v1/collections/{collection}/roster?from={}",
+            "/v2/collections/{collection}/roster?from={}",
             pin.roster_seq
         ),
-        None => format!("/v1/collections/{collection}/roster"),
+        None => format!("/v2/collections/{collection}/roster"),
     };
     Ok(HttpRequest {
         method: Method::Get,
@@ -186,7 +196,13 @@ pub fn roster_accept_key(
              or recovering with the phrase",
         ));
     }
-    accept(context, session, response, true)
+    let verified = accept(context, session, response, true)?;
+    // Once the account has migrated, the unbound wrap is something only a server
+    // replaying an old one could serve, whatever else it reports.
+    if verified.migrated && session.legacy_wrap {
+        return Err(CoreError::LegacyKeyMaterial);
+    }
+    Ok(verified)
 }
 
 fn accept(
@@ -329,9 +345,11 @@ fn verify(
         pin: CoreRosterPin {
             roster_seq: latest.roster_seq,
             transcript: encode(&transcript),
+            manifest_seq: 0,
         },
         roster_json: serde_json::to_string(&latest)?,
         key_committed: !latest.key_commitment.is_empty(),
+        migrated: latest.migrated,
     })
 }
 
@@ -426,6 +444,7 @@ pub mod ffi {
             collection_key,
             key_epoch,
             verified_roster: None,
+            legacy_wrap: false,
         })
     }
 
@@ -457,9 +476,12 @@ pub mod ffi {
         context: RosterContext,
         ck_b64: String,
         key_epoch: u64,
+        legacy_wrap: bool,
         body: String,
     ) -> Result<VerifiedRoster, CoreError> {
-        super::roster_accept_key(&context, &session(Some(ck_b64), key_epoch)?, &ok(body))
+        let mut session = session(Some(ck_b64), key_epoch)?;
+        session.legacy_wrap = legacy_wrap;
+        super::roster_accept_key(&context, &session, &ok(body))
     }
 
     #[uniffi::export]

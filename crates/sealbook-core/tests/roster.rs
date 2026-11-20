@@ -76,6 +76,7 @@ impl Fixture {
             collection_key: Some(self.key()),
             key_epoch: self.key_epoch,
             verified_roster: None,
+            legacy_wrap: false,
         }
     }
 
@@ -104,7 +105,6 @@ impl Fixture {
             collection_id: self.collection_id,
             device_id: self.alpha_device_id,
             session_token: Some("t".into()),
-            kdf_salt: Vec::new(),
             hpke_sk: Vec::new(),
             mldsa_seed: Vec::new(),
             ed25519_sk: Vec::new(),
@@ -141,13 +141,13 @@ fn the_request_asks_from_the_pin_so_the_chain_can_be_checked() {
     assert_eq!(unpinned.method, Method::Get);
     assert_eq!(
         unpinned.path,
-        format!("/v1/collections/{COLLECTION}/roster")
+        format!("/v2/collections/{COLLECTION}/roster")
     );
     assert!(unpinned.headers.is_empty(), "the token is the host's");
 
     assert_eq!(
         roster_request(&fixture.context(2)).unwrap().path,
-        format!("/v1/collections/{COLLECTION}/roster?from=2")
+        format!("/v2/collections/{COLLECTION}/roster?from=2")
     );
 }
 
@@ -288,6 +288,43 @@ fn a_roster_with_a_key_commitment_is_reported_as_committed() {
     assert!(verified.key_committed);
 }
 
+/// Once the latest roster says the account has migrated, the unbound device wrap
+/// is something only a replaying server could serve, and it is refused even
+/// though the key inside it is the right one.
+#[test]
+fn an_unbound_wrap_is_refused_under_a_migrated_roster() {
+    let fixture = fixture();
+    let mut session = fixture.session();
+    session.legacy_wrap = true;
+    let refused = roster_accept_key(&fixture.context(1), &session, &fixture.served(1, 1))
+        .expect_err("a migrated account does not take the unbound wrap");
+    assert_eq!(refused, CoreError::LegacyKeyMaterial);
+}
+
+/// Before the account has migrated the same wrap is how it still holds its key,
+/// so it opens for reading and the rotation replaces it.
+#[test]
+fn an_unbound_wrap_is_accepted_for_reading_under_an_unmigrated_roster() {
+    let legacy: LegacyFixture =
+        serde_json::from_str(&std::fs::read_to_string(LEGACY_FIXTURE).expect("legacy fixture"))
+            .unwrap();
+    let chain = fixture();
+    let mut state = chain.state(1);
+    state.roster_seq = legacy.pin.roster_seq;
+    state.roster_transcript = unb64(&legacy.pin.transcript);
+    let response = HttpResponse {
+        status: 200,
+        headers: Vec::new(),
+        body: serde_json::to_vec(&serde_json::json!({ "rosters": legacy.rosters, "floor": 1 }))
+            .unwrap(),
+    };
+    let mut session = chain.session();
+    session.legacy_wrap = true;
+    let verified = roster_accept_key(&state.roster_context(), &session, &response)
+        .expect("an unmigrated account still reads under what it holds");
+    assert!(!verified.migrated);
+}
+
 /// A roster sealed before commitments existed still verifies, by its MAC, and
 /// is reported so the host can ask for the rotation that replaces it.
 #[test]
@@ -310,6 +347,10 @@ fn a_roster_that_predates_key_commitments_is_reported_as_uncommitted() {
     let verified = roster_accept_key(&state.roster_context(), &chain.session(), &response)
         .expect("a legacy roster still verifies by its MAC");
     assert!(!verified.key_committed);
+    assert!(
+        !verified.migrated,
+        "an uncommitted roster is not a migrated one"
+    );
     assert_eq!(verified.pin, legacy.pin);
 }
 
@@ -325,6 +366,7 @@ fn regenerate_the_legacy_roster_fixture() {
     let key = CollectionKey(chain.key());
     let mut legacy = chain.rosters[0].to_roster();
     legacy.key_commitment.clear();
+    legacy.migrated = false;
     let transcript = legacy.transcript(chain.collection_id);
     legacy.signature = sealbook_crypto::sign(&alpha, &transcript).unwrap();
     legacy.mac = roster_mac(&key, &transcript).unwrap().to_vec();
@@ -334,6 +376,7 @@ fn regenerate_the_legacy_roster_fixture() {
         key_epoch: legacy.key_epoch,
         device_id: chain.alpha_device_id,
         pin: CoreRosterPin {
+            manifest_seq: 0,
             roster_seq: legacy.roster_seq,
             transcript: b64(&transcript),
         },
@@ -364,6 +407,7 @@ fn a_served_key_the_roster_does_not_commit_to_is_refused_even_with_a_matching_ma
         collection_key: Some(substitute.0),
         key_epoch: fixture.key_epoch,
         verified_roster: None,
+        legacy_wrap: false,
     };
     let err = roster_accept_key(&fixture.context(1), &session, &response).unwrap_err();
     assert_eq!(err.kind(), "Roster", "{err:?}");
@@ -392,6 +436,7 @@ fn a_served_key_labelled_with_an_older_epoch_than_the_roster_is_refused() {
         collection_key: Some(CollectionKey::generate().0),
         key_epoch: fixture.key_epoch - 1,
         verified_roster: None,
+        legacy_wrap: false,
     };
     // A key already held from before a rotation may still read the roster.
     roster_accept(&fixture.context(1), &session, &fixture.served(1, 1))
@@ -459,6 +504,7 @@ fn the_pin_moves_forward_and_never_back() {
     assert_eq!(next.device_id, state.device_id);
 
     let older = CoreRosterPin {
+        manifest_seq: 0,
         roster_seq: 2,
         transcript: verified.pin.transcript.clone(),
     };
@@ -477,6 +523,7 @@ fn a_pin_that_is_not_a_32_byte_transcript_is_refused() {
     let state = fixture.context(0);
     for transcript in ["", "not base64!", &b64(&[0u8; 16])] {
         let pin = CoreRosterPin {
+            manifest_seq: 0,
             roster_seq: 4,
             transcript: transcript.to_string(),
         };

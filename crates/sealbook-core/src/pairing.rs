@@ -330,16 +330,20 @@ pub fn pair_finish(
     let pin = keys
         .open_from_approver(pair_id, &served.sealed_pin)
         .map_err(|_| refuse(PairRefusal::Unverified))?;
-    if pin.len() != 8 + 32 {
+    if pin.len() != 8 + 8 + 32 {
         return Err(refuse(PairRefusal::Unverified));
     }
     let roster_seq = u64::from_be_bytes(pin[..8].try_into().expect("eight bytes"));
-    if roster_seq == 0 {
+    let manifest_seq = u64::from_be_bytes(pin[8..16].try_into().expect("eight bytes"));
+    // Registration posts a manifest at sequence 1 and a collection without one
+    // is refused, so an approver can have no sequence of 0 to vouch for.
+    if roster_seq == 0 || manifest_seq == 0 {
         return Err(refuse(PairRefusal::Unverified));
     }
     Ok(CoreRosterPin {
         roster_seq,
-        transcript: URL_SAFE_NO_PAD.encode(&pin[8..]),
+        transcript: URL_SAFE_NO_PAD.encode(&pin[16..]),
+        manifest_seq,
     })
 }
 
@@ -499,9 +503,15 @@ pub fn pair_approve(
     verified: &VerifiedRoster,
     response: &CorePairResponse,
     preview: &CorePairPreview,
+    manifest_seq: u64,
 ) -> Result<PairApproval, CoreError> {
     if preview.pair_id != response.pair_id {
         return Err(refuse(PairRefusal::Expired));
+    }
+    if manifest_seq == 0 {
+        return Err(CoreError::manifest(
+            "this device has not seen a manifest yet, so it cannot vouch for one to a new device",
+        ));
     }
     open_hello(response, &decode(&preview.hello, "pairing hello")?)?;
     check_anchor(session, verified, &response.device)?;
@@ -550,7 +560,12 @@ pub fn pair_approve(
         &key,
     )?;
     let pin = roster.pin(context.collection_id);
-    let pin_bytes = [pin.roster_seq.to_be_bytes().as_slice(), &pin.transcript].concat();
+    let pin_bytes = [
+        pin.roster_seq.to_be_bytes().as_slice(),
+        manifest_seq.to_be_bytes().as_slice(),
+        &pin.transcript,
+    ]
+    .concat();
     let sealed_pin = run_keys(response)?
         .seal_for_joiner(&mut rand::thread_rng(), response.pair_id, &pin_bytes)
         .map_err(CoreError::from)?;
@@ -592,7 +607,7 @@ fn open_hello(response: &CorePairResponse, sealed: &[u8]) -> Result<String, Core
 /// The path that reads a pairing: by nameplate for the approving device, by
 /// pair id for the joining one.
 pub fn pair_path(key: &str) -> String {
-    format!("/v1/pair/{}", escape(key.trim()))
+    format!("/v2/pair/{}", escape(key.trim()))
 }
 
 pub fn pair_respond_path(key: &str) -> String {
@@ -822,6 +837,7 @@ pub mod ffi {
             collection_key,
             key_epoch,
             verified_roster: None,
+            legacy_wrap: false,
         })
     }
 
@@ -920,6 +936,7 @@ pub mod ffi {
         verified: VerifiedRoster,
         response: CorePairResponse,
         preview: CorePairPreview,
+        manifest_seq: u64,
     ) -> Result<PairApproval, CoreError> {
         super::pair_approve(
             &secrets(&mldsa_seed_b64, &ed25519_sk_b64)?,
@@ -928,6 +945,7 @@ pub mod ffi {
             &verified,
             &response,
             &preview,
+            manifest_seq,
         )
     }
 

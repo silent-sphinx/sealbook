@@ -28,7 +28,6 @@ pub struct CoreDeviceState {
     pub device_id: Uuid,
     #[serde(default)]
     pub session_token: Option<String>,
-    pub kdf_salt: Vec<u8>,
     pub hpke_sk: Vec<u8>,
     pub mldsa_seed: Vec<u8>,
     pub ed25519_sk: Vec<u8>,
@@ -90,6 +89,9 @@ pub struct CoreSession {
     /// The roster this device last verified, kept so a second check in the same
     /// session does not have to re-walk the chain.
     pub verified_roster: Option<String>,
+    /// Whether the device wrap that opened `collection_key` was the unbound
+    /// form. Set from [`LoggedIn::legacy_wrap`](crate::LoggedIn::legacy_wrap).
+    pub legacy_wrap: bool,
 }
 
 impl Drop for CoreSession {

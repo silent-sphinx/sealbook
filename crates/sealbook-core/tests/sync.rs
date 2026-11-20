@@ -172,7 +172,7 @@ fn a_read_asks_for_the_live_rows_from_the_start() {
     assert_eq!(request.method, Method::Get);
     assert_eq!(
         request.path,
-        format!("/v1/collections/{COLLECTION}/changes?after=0&limit=500&snapshot=true")
+        format!("/v2/collections/{COLLECTION}/changes?after=0&limit=500&snapshot=true")
     );
 }
 
@@ -518,7 +518,7 @@ fn build() -> Fixture {
             // The request this page is the answer to, so a reader checks the
             // walk's cursor rather than only its result.
             "request_path": format!(
-                "/v1/collections/{COLLECTION}/changes?after={after}&limit=500&snapshot=true"
+                "/v2/collections/{COLLECTION}/changes?after={after}&limit=500&snapshot=true"
             ),
             "latest_revision": 7,
             "key_epoch": key_epoch,

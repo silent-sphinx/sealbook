@@ -47,6 +47,8 @@ const JOINING: &str = "dddddddd-dddd-dddd-dddd-dddddddddddd";
 const INTRUDER: &str = "99999999-9999-9999-9999-999999999999";
 const PAIR_ID: &str = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
 const USERNAME: &str = "alice";
+/// The manifest sequence the approver vouches for, sealed next to the roster pin.
+const APPROVER_MANIFEST_SEQ: u64 = 9;
 const DESCRIPTION: &str = "Firefox on macOS";
 const WAIT_JOIN: PairJoinPoll = PairJoinPoll::Wait {
     after_ms: PAIR_POLL_INTERVAL_MS,
@@ -217,6 +219,7 @@ impl Fixture {
             collection_key: Some(key),
             key_epoch,
             verified_roster: None,
+            legacy_wrap: false,
         }
     }
 
@@ -228,6 +231,7 @@ impl Fixture {
             &self.verified,
             &self.responded.response,
             &self.preview,
+            APPROVER_MANIFEST_SEQ,
         )
         .expect("the approval signs")
     }
@@ -316,6 +320,25 @@ fn an_approval_seals_the_pin_of_its_own_roster_step() {
     let expected = body.roster.pin(fixture.collection_id);
     assert_eq!(pin.roster_seq, expected.roster_seq);
     assert_eq!(pin.transcript, b64(&expected.transcript));
+    assert_eq!(pin.manifest_seq, APPROVER_MANIFEST_SEQ);
+}
+
+/// An approver that has seen no manifest has nothing to vouch for, and a pin
+/// carrying sequence 0 would leave the joining device exactly where it started.
+#[test]
+fn an_approver_with_no_manifest_cannot_approve() {
+    let fixture = fixture();
+    let refused = pair_approve(
+        &fixture.approver.secrets(),
+        &fixture.context(),
+        &fixture.session(fixture.key_epoch),
+        &fixture.verified,
+        &fixture.responded.response,
+        &fixture.preview,
+        0,
+    )
+    .expect_err("sequence 0 is refused");
+    assert!(matches!(refused, CoreError::Manifest { .. }), "{refused:?}");
 }
 
 // ── The refusals ──
@@ -383,6 +406,7 @@ fn an_approval_refuses_a_preview_the_run_did_not_open() {
         &fixture.verified,
         &fixture.responded.response,
         &forged,
+        APPROVER_MANIFEST_SEQ,
     )
     .expect_err("a preview that does not open is refused");
     assert_eq!(pair_refusal(refused), PairRefusal::CodeMismatch);
@@ -688,14 +712,17 @@ fn build() -> Fixture {
         pin: CoreRosterPin {
             roster_seq: roster.roster_seq,
             transcript: b64(&anchor.transcript),
+            manifest_seq: 0,
         },
         roster_json: roster_json.clone(),
         key_committed: true,
+        migrated: true,
     };
     let session = |held: u64| CoreSession {
         collection_key: Some(*key.as_bytes()),
         key_epoch: held,
         verified_roster: None,
+        legacy_wrap: false,
     };
     let context = RosterContext {
         collection_id,
@@ -784,6 +811,7 @@ fn build() -> Fixture {
         &verified,
         &responded.response,
         &preview,
+        APPROVER_MANIFEST_SEQ,
     )
     .unwrap();
     let approved: PairApproveRequest = serde_json::from_str(&approval.body).unwrap();
@@ -890,7 +918,33 @@ fn build() -> Fixture {
     let other_share = serde_json::from_str::<PairRespondRequest>(&wrong.body)
         .unwrap()
         .share;
+    // Sealed under the run's own keys, so the only thing wrong with them is
+    // their shape.
+    let run_keys = sealbook_crypto::PairKeys::from_bytes(
+        &URL_SAFE_NO_PAD.decode(&responded.response.keys).unwrap(),
+    )
+    .unwrap();
+    let pin_of = |manifest_seq: Option<u64>| {
+        let mut bytes = finished.roster_seq.to_be_bytes().to_vec();
+        if let Some(manifest_seq) = manifest_seq {
+            bytes.extend_from_slice(&manifest_seq.to_be_bytes());
+        }
+        bytes.extend_from_slice(&URL_SAFE_NO_PAD.decode(&finished.transcript).unwrap());
+        run_keys
+            .seal_for_joiner(&mut StdRng::seed_from_u64(9), pair_id, &bytes)
+            .unwrap()
+    };
     let finish_refusals = vec![
+        FinishRefusal {
+            what: "the pin is the old 40-byte form with no manifest sequence".into(),
+            body: served.to_joiner("ready", approver_share.clone(), pin_of(None)),
+            refusal: PairRefusal::Unverified,
+        },
+        FinishRefusal {
+            what: "the approving device vouched for manifest sequence 0".into(),
+            body: served.to_joiner("ready", approver_share.clone(), pin_of(Some(0))),
+            refusal: PairRefusal::Unverified,
+        },
         FinishRefusal {
             what: "the sealed pin was altered on the way".into(),
             body: served.to_joiner("ready", approver_share.clone(), tampered_pin),

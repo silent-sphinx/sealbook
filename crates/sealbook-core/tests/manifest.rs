@@ -9,11 +9,11 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sealbook_core::{
-    accept_manifest_seq, manifest_absence_ok, manifest_accept, manifest_apply,
-    manifest_buckets_accept, manifest_buckets_from_whole, manifest_buckets_request,
-    manifest_entry_for, manifest_request, manifest_sign, manifest_sign_root, manifest_signer,
-    manifest_verify, BucketsOutcome, CoreDevice, CoreError, CoreManifestEntry, HttpResponse,
-    ManifestContext, ManifestOutcome, ManifestPlan, Method,
+    accept_manifest_seq, manifest_accept, manifest_apply, manifest_buckets_accept,
+    manifest_buckets_from_whole, manifest_buckets_request, manifest_entry_for, manifest_request,
+    manifest_sign, manifest_sign_root, manifest_signer, manifest_verify, BucketsOutcome,
+    CoreDevice, CoreError, CoreManifestEntry, HttpResponse, ManifestContext, ManifestOutcome,
+    ManifestPlan, Method,
 };
 use sealbook_crypto::{signing_from_seeds, DeviceSigningSecrets};
 use serde::{Deserialize, Serialize};
@@ -96,7 +96,7 @@ fn the_whole_manifest_is_asked_for_by_collection() {
     assert_eq!(request.method, Method::Get);
     assert_eq!(
         request.path,
-        format!("/v1/collections/{COLLECTION}/manifest")
+        format!("/v2/collections/{COLLECTION}/manifest")
     );
 }
 
@@ -111,7 +111,7 @@ fn a_write_asks_only_for_the_buckets_its_objects_fall_in() {
         .collect();
     assert_eq!(
         request.path,
-        format!("/v1/collections/{COLLECTION}/manifest/buckets?buckets={query}")
+        format!("/v2/collections/{COLLECTION}/manifest/buckets?buckets={query}")
     );
 }
 
@@ -152,9 +152,7 @@ fn the_checked_in_whole_manifest_verifies() {
         &fixture.devices,
     )
     .unwrap();
-    let ManifestOutcome::Signed { plan, entries } = outcome else {
-        panic!("the fixture carries a signed manifest");
-    };
+    let ManifestOutcome::Signed { plan, entries } = outcome;
     assert_eq!(plan.key_epoch, fixture.key_epoch);
     assert_eq!(plan.manifest_seq, 7);
     assert_eq!(entries.len(), 5);
@@ -202,123 +200,42 @@ fn a_manifest_older_than_the_one_this_device_saw_is_refused() {
 }
 
 #[test]
-fn a_vault_with_no_manifest_is_accepted_only_by_a_device_that_has_seen_none() {
+fn a_vault_with_no_manifest_is_refused_whatever_this_device_has_seen() {
     let fixture = fixture();
     let mut body = fixture.manifest_response.clone();
     body["manifest"] = Value::Null;
-    let outcome = manifest_accept(&fixture.context(), &ok(&body), &fixture.devices).unwrap();
-    let ManifestOutcome::Unmanifested {
-        latest_revision,
-        entries,
-    } = outcome
-    else {
-        panic!("no manifest was served");
-    };
-    assert_eq!(entries.len(), 5);
-    assert_eq!(latest_revision, 12);
-
-    let context = ManifestContext {
-        manifest_seq: 7,
-        ..fixture.context()
-    };
-    let err = manifest_accept(&context, &ok(&body), &fixture.devices).unwrap_err();
-    assert!(
-        matches!(&err, CoreError::Manifest { detail } if detail.contains("has seen sequence")),
-        "{err:?}"
-    );
+    // A fresh device (sequence 0) is the case that used to be waved through, and
+    // the one a server would pick: it has no sequence to catch the lie with.
+    for manifest_seq in [0, 7] {
+        let context = ManifestContext {
+            manifest_seq,
+            ..fixture.context()
+        };
+        let err = manifest_accept(&context, &ok(&body), &fixture.devices).unwrap_err();
+        assert!(
+            matches!(&err, CoreError::Manifest { detail } if detail.contains("no signed manifest")),
+            "{err:?}"
+        );
+    }
 }
 
 #[test]
-fn the_checked_in_bucket_answer_verifies_and_holds_what_a_write_needs() {
-    let fixture = fixture();
-    let held = signed_buckets(&fixture);
-    assert_eq!(held.plan.manifest_seq, 7);
-    assert_eq!(held.object_count, 5);
-    assert_eq!(held.held, fixture.wanted);
-    // Only the asked-for buckets' entries, not the whole collection.
-    assert!(held.entries.len() < 5);
-}
-
-#[test]
-fn a_bucket_answer_for_other_buckets_than_were_asked_for_is_refused() {
-    let fixture = fixture();
-    let mut body = fixture.buckets_response.clone();
-    body["served"] = serde_json::json!([0x03]);
-    let err = manifest_buckets_accept(
-        &fixture.context(),
-        &fixture.ids(),
-        &ok(&body),
-        &fixture.devices,
-    )
-    .unwrap_err();
-    assert!(
-        matches!(&err, CoreError::Manifest { detail } if detail.contains("other buckets")),
-        "{err:?}"
-    );
-}
-
-#[test]
-fn an_object_withheld_from_a_served_bucket_is_refused() {
-    let fixture = fixture();
-    let mut body = fixture.buckets_response.clone();
-    body["entries"].as_array_mut().unwrap().pop();
-    let err = manifest_buckets_accept(
-        &fixture.context(),
-        &fixture.ids(),
-        &ok(&body),
-        &fixture.devices,
-    )
-    .unwrap_err();
-    assert!(
-        matches!(&err, CoreError::Manifest { detail } if detail.contains("do not match its digest")),
-        "{err:?}"
-    );
-}
-
-#[test]
-fn an_edited_bucket_digest_fails_the_root_rather_than_the_bucket_check() {
-    let fixture = fixture();
-    let mut body = fixture.buckets_response.clone();
-    let mut blob = unb64(body["buckets"].as_str().unwrap());
-    // Bucket 0x81 carries no served entries, so only the root binds it.
-    blob[0x81 * 32] ^= 1;
-    body["buckets"] = serde_json::json!(b64(&blob));
-    let err = manifest_buckets_accept(
-        &fixture.context(),
-        &fixture.ids(),
-        &ok(&body),
-        &fixture.devices,
-    )
-    .unwrap_err();
-    assert!(
-        matches!(&err, CoreError::Manifest { detail } if detail.contains("bucket digests served")),
-        "{err:?}"
-    );
-}
-
-#[test]
-fn a_bucket_answer_with_no_manifest_sends_the_host_to_the_whole_read() {
+fn a_bucket_answer_with_no_manifest_is_refused() {
     let fixture = fixture();
     let mut body = fixture.buckets_response.clone();
     body["manifest"] = Value::Null;
-    let outcome = manifest_buckets_accept(
-        &fixture.context(),
-        &fixture.ids(),
-        &ok(&body),
-        &fixture.devices,
-    )
-    .unwrap();
-    assert!(matches!(outcome, BucketsOutcome::Unmanifested));
-
-    // The rule still applies: a device that has seen a manifest may not be told
-    // there is none.
-    let context = ManifestContext {
-        manifest_seq: 7,
-        ..fixture.context()
-    };
-    assert!(
-        manifest_buckets_accept(&context, &fixture.ids(), &ok(&body), &fixture.devices).is_err()
-    );
+    for manifest_seq in [0, 7] {
+        let context = ManifestContext {
+            manifest_seq,
+            ..fixture.context()
+        };
+        let err = manifest_buckets_accept(&context, &fixture.ids(), &ok(&body), &fixture.devices)
+            .unwrap_err();
+        assert!(
+            matches!(&err, CoreError::Manifest { detail } if detail.contains("no signed manifest")),
+            "{err:?}"
+        );
+    }
 }
 
 #[test]
@@ -339,17 +256,6 @@ fn a_walk_is_checked_against_the_manifest_it_was_served_with() {
     );
 }
 
-#[test]
-fn objects_served_with_no_manifest_are_refused_once_this_device_has_seen_one() {
-    let fixture = fixture();
-    assert!(manifest_absence_ok(&fixture.context()).is_ok());
-    let context = ManifestContext {
-        manifest_seq: 1,
-        ..fixture.context()
-    };
-    assert!(manifest_absence_ok(&context).is_err());
-}
-
 // ── The next manifest ──
 
 #[test]
@@ -368,9 +274,7 @@ fn the_bucket_path_and_the_whole_path_agree_on_the_root() {
         &ok(&fixture.manifest_response),
         &fixture.devices,
     )
-    .unwrap() else {
-        panic!("signed");
-    };
+    .unwrap();
     let whole = manifest_buckets_from_whole(&plan, &entries).unwrap();
     assert_eq!(
         manifest_apply(&whole, &fixture.write).unwrap().root,
@@ -422,9 +326,7 @@ fn signing_over_the_entries_and_over_the_root_cover_the_same_value() {
         &ok(&fixture.manifest_response),
         &fixture.devices,
     )
-    .unwrap() else {
-        panic!("signed");
-    };
+    .unwrap();
     let whole = manifest_sign(&fixture.secrets(), &fixture.context(), &plan, &entries).unwrap();
     let applied =
         manifest_apply(&manifest_buckets_from_whole(&plan, &entries).unwrap(), &[]).unwrap();
@@ -472,7 +374,6 @@ fn signed_buckets(fixture: &Fixture) -> sealbook_core::BucketedManifest {
     .unwrap();
     match outcome {
         BucketsOutcome::Signed { held } => held,
-        BucketsOutcome::Unmanifested => panic!("the fixture carries a signed manifest"),
     }
 }
 

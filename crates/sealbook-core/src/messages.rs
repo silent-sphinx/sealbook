@@ -15,6 +15,9 @@ pub fn rotation_message(refusal: &RotationRefusal) -> String {
         RotationRefusal::RevokingSelf => "You can't revoke the device you're signed in on.".into(),
         RotationRefusal::NotInRoster => "That device has already been removed.".into(),
         RotationRefusal::LastDevice => "You can't revoke the last device.".into(),
+        RotationRefusal::RevokedOutOfOrder => {
+            "The devices to revoke must be listed once each, in order.".into()
+        }
         RotationRefusal::NotEnrolled => {
             "This device isn't in the account's device list. Sign in again.".into()
         }
@@ -123,12 +126,24 @@ pub fn wrong_collection_key_message() -> String {
         .into()
 }
 
-/// For an account whose roster has no key commitment; see
-/// [`VerifiedRoster::key_committed`](crate::VerifiedRoster::key_committed).
-pub fn legacy_roster_message() -> String {
-    "This account's device list predates vault key checks, so this device can't prove the \
-     vault key it was given is your own. Generate a new recovery phrase in Settings to fix \
-     this; it re-encrypts the vault under a new key."
+/// For an account that has not yet moved to the current protocol; see
+/// [`VerifiedRoster::migrated`](crate::VerifiedRoster::migrated).
+pub fn upgrade_pending_message() -> String {
+    "The server kept a copy of your vault key that your password protected. That copy has been \
+     deleted. Replacing the vault key makes sure no old copy of it works, and it issues a new \
+     recovery phrase. Nothing can be saved until then."
+        .into()
+}
+
+pub fn key_mismatch_message() -> String {
+    "The server served a key that does not match your vault, so nothing was shown. Do not \
+     continue; check the server, then pair this device again or recover with your phrase."
+        .into()
+}
+
+pub fn legacy_key_material_message() -> String {
+    "The server served key material in an old form that this account no longer uses. It may \
+     be a replay or an attack, so nothing was opened."
         .into()
 }
 
@@ -173,6 +188,9 @@ pub fn error_message(error: &CoreError) -> Option<String> {
         CoreError::RosterTooOld => Some(roster_too_old_message()),
         CoreError::CollectionBusy => Some(collection_busy_message()),
         CoreError::RecoveryRotationPending => Some(recovery_pending_message()),
+        CoreError::UpgradeRotationPending => Some(upgrade_pending_message()),
+        CoreError::KeyMismatch => Some(key_mismatch_message()),
+        CoreError::LegacyKeyMaterial => Some(legacy_key_material_message()),
         CoreError::WrongCollectionKey { .. } => Some(wrong_collection_key_message()),
         _ => None,
     }
@@ -215,9 +233,19 @@ pub mod ffi {
         super::wrong_collection_key_message()
     }
 
-    #[uniffi::export(name = "legacy_roster_message")]
-    pub fn legacy_roster_message() -> String {
-        super::legacy_roster_message()
+    #[uniffi::export(name = "upgrade_pending_message")]
+    pub fn upgrade_pending_message() -> String {
+        super::upgrade_pending_message()
+    }
+
+    #[uniffi::export(name = "key_mismatch_message")]
+    pub fn key_mismatch_message() -> String {
+        super::key_mismatch_message()
+    }
+
+    #[uniffi::export(name = "legacy_key_material_message")]
+    pub fn legacy_key_material_message() -> String {
+        super::legacy_key_material_message()
     }
 
     #[uniffi::export(name = "collection_busy_message")]

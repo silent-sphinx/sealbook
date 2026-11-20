@@ -51,6 +51,8 @@ mod rotation;
 pub mod schema;
 mod settings;
 mod state;
+#[cfg(feature = "strength")]
+pub mod strength;
 mod sync;
 mod task_rules;
 mod tasks;
@@ -88,10 +90,10 @@ pub use attachments::{
     attachment_chunk_path, attachment_commit_accept, attachment_commit_request,
     attachment_content_hash, attachment_create_accept, attachment_create_request,
     attachment_delete_request, attachment_limits, attachment_meta_accept, attachment_meta_request,
-    attachment_plan, attachment_ranges, attachment_verify, open_attachment_chunk,
-    seal_attachment_chunk, sweep_orphans, sweep_page, sweep_request, sweep_start, AttachmentLimits,
-    AttachmentPlan, AttachmentRefusal, AttachmentRow, ChunkRange, SweepCursor, SweepPage,
-    NONCE_HEADER, ORPHAN_GRACE_SECS,
+    attachment_plan, attachment_ranges, attachment_read_len, attachment_verify,
+    open_attachment_chunk, seal_attachment_chunk, sweep_orphans, sweep_page, sweep_request,
+    sweep_start, AttachmentLimits, AttachmentPlan, AttachmentRefusal, AttachmentRow, ChunkRange,
+    SweepCursor, SweepPage, NONCE_HEADER, ORPHAN_GRACE_SECS,
 };
 pub use auth::{
     account_challenge_request, change_password_request, change_username_request,
@@ -101,8 +103,9 @@ pub use auth::{
     password_change_start_accept, password_change_start_request, recover_accept,
     recover_finish_request, recover_start_accept, recover_start_request, register_accept,
     register_finish_request, register_start_accept, register_start_request, AuthRefusal,
-    AuthRequest, CoreDeviceSecrets, LoggedIn, LoginStarting, OpaqueStart, PasswordChange,
-    PasswordChangeStarted, RecoverStarted, Recovering, RegisterIdentity, Registering,
+    AuthRequest, CoreDeviceSecrets, CoreRotationOwed, LoggedIn, LoginStarting, OpaqueStart,
+    PasswordChange, PasswordChangeStarted, RecoverStarted, Recovering, RegisterIdentity,
+    Registering,
 };
 pub use batch::write_batches;
 pub use bookmark_file::{
@@ -110,7 +113,7 @@ pub use bookmark_file::{
     bookmark_import_plan, bookmark_import_with_folder, CoreBookmarkImport,
     CoreBookmarkImportOptions, CoreBookmarkImportPlan, CoreFolderAction, CoreFolderRule,
     CoreImportFolder, CoreImportedBookmark, CoreNewBookmarkCollection, BOOKMARK_EXPORT_TYPE,
-    BOOKMARK_NOT_JSON, BOOKMARK_UNRECOGNISED,
+    BOOKMARK_EXPORT_VERSION, BOOKMARK_NOT_JSON, BOOKMARK_UNRECOGNISED, LEGACY_BOOKMARK_EXPORT_TYPE,
 };
 pub use bookmarks::{
     bookmark_collection_name_by_id, bookmark_collection_parse, bookmark_collection_tone,
@@ -166,12 +169,11 @@ pub use ics::{
     CoreIcsImport, CoreIcsSkipped,
 };
 pub use manifest::{
-    accept_manifest_seq, core_entries, manifest_absence_ok, manifest_accept, manifest_apply,
-    manifest_buckets_accept, manifest_buckets_from_whole, manifest_buckets_request,
-    manifest_entry_for, manifest_request, manifest_sign, manifest_sign_root, manifest_signer,
-    manifest_verify, wire_entries, AppliedManifest, BucketedManifest, BucketsOutcome,
-    CoreManifestEntry, ManifestContext, ManifestOutcome, ManifestPlan, ManifestSigner,
-    SignedManifest,
+    accept_manifest_seq, core_entries, manifest_accept, manifest_apply, manifest_buckets_accept,
+    manifest_buckets_from_whole, manifest_buckets_request, manifest_entry_for, manifest_request,
+    manifest_sign, manifest_sign_root, manifest_signer, manifest_verify, wire_entries,
+    AppliedManifest, BucketedManifest, BucketsOutcome, CoreManifestEntry, ManifestContext,
+    ManifestOutcome, ManifestPlan, ManifestSigner, SignedManifest,
 };
 pub use notes::{
     default_notebook_id, note_parse, note_write, notebook_name_by_id, notebook_parse,
@@ -188,7 +190,10 @@ pub use pairing::{
     PairApproval, PairApprovePoll, PairJoinPoll, PairJoined, PairRefusal, PairResponded,
     PairStarted, PAIR_DESCRIPTION_MAX, PAIR_POLL_INTERVAL_MS,
 };
-pub use payload::{payload_kind, write_payload, CorePayloadKind};
+pub use payload::{
+    container_key, payload_kind, upgrade as payload_upgrade, write_payload, CorePayloadKind,
+    CARD_SCHEMA_PROP,
+};
 pub use recurrence::{is_calendar_day, recurrence_days, recurrence_next};
 pub use roster::{
     pin_roster, read_roster, roster_accept, roster_accept_key, roster_accept_sealed,
@@ -196,9 +201,9 @@ pub use roster::{
     RosterContext, VerifiedRoster,
 };
 pub use rotation::{
-    reseal_row, rotation_entries, rotation_plan, rotation_recipients, rotation_wraps,
-    rotation_wraps_typed, CoreKeyWrap, CoreRotationWraps, ResealRow, RotationPlan, RotationRefusal,
-    RotationState, RotationWraps,
+    reseal_row, reseal_row_upgrading, rotation_entries, rotation_plan, rotation_recipients,
+    rotation_wraps, rotation_wraps_typed, CoreKeyWrap, CoreResealed, CoreRotationWraps, ResealRow,
+    RotationPlan, RotationRefusal, RotationState, RotationWraps,
 };
 pub use settings::{
     can_disable_feature, default_account_settings, normalize_accent, normalize_contact_mode,
@@ -220,8 +225,8 @@ pub use task_rules::{
     task_relist_plan, task_remove_plan, task_reopen, task_subtree, CoreImportedTask,
     CoreTaskAgenda, CoreTaskAgendaItem, CoreTaskClock, CoreTaskCompletion, CoreTaskImport,
     CoreTaskListWrite, CoreTaskOrderItem, CoreTaskPlan, CoreTaskWrite,
-    DEFAULT_TASK_LIST_REMOVE_REFUSAL, TASK_EXPORT_TYPE, TASK_IMPORT_REFUSAL,
-    TASK_LIST_MOVE_REFUSAL, TASK_MOVE_REFUSAL,
+    DEFAULT_TASK_LIST_REMOVE_REFUSAL, LEGACY_TASK_EXPORT_TYPE, TASK_EXPORT_TYPE,
+    TASK_EXPORT_VERSION, TASK_IMPORT_REFUSAL, TASK_LIST_MOVE_REFUSAL, TASK_MOVE_REFUSAL,
 };
 pub use tasks::{
     default_task_list_id, normalize_due_date, resolve_task_list_id, task_list_name_by_id,
@@ -238,13 +243,14 @@ pub use markdown::repair_pipe_tables;
 pub use merge::{conflict_copy, conflict_copy_id, merge_payload, MergeOutcome};
 pub use messages::{
     attachment_message, auth_message, collection_busy_message, conflict_copy_title, error_message,
-    legacy_roster_message, offline_conflict_message, offline_delete_kept_message,
-    offline_overwrote_message, offline_restored_message, pair_message, recovery_pending_message,
-    roster_too_old_message, rotation_message, wrong_collection_key_message,
+    key_mismatch_message, legacy_key_material_message, offline_conflict_message,
+    offline_delete_kept_message, offline_overwrote_message, offline_restored_message, pair_message,
+    recovery_pending_message, roster_too_old_message, rotation_message, upgrade_pending_message,
+    wrong_collection_key_message,
 };
 pub use notes_file::{
     notes_import, notes_write_json, notes_write_markdown, CoreNoteFile, CoreNoteFileEntry,
-    CoreNoteSkipped,
+    CoreNoteSkipped, NOTES_EXPORT_TYPE, NOTES_EXPORT_VERSION,
 };
 pub use offline::{
     local_vault_apply, local_vault_read, local_vault_write, local_view, outbox_fail, outbox_push,
@@ -298,7 +304,6 @@ mod tests {
             collection_id: Uuid::from_u128(2),
             device_id: Uuid::from_u128(3),
             session_token: None,
-            kdf_salt: vec![0; 16],
             hpke_sk: vec![0; 32],
             mldsa_seed: vec![0; 32],
             ed25519_sk: vec![0; 32],
@@ -310,7 +315,7 @@ mod tests {
 
     #[test]
     fn the_build_reports_the_generation_it_speaks() {
-        assert_eq!(core_build().protocol_version, "sealbook-v1");
+        assert_eq!(core_build().protocol_version, "sealbook-v2");
     }
 
     #[test]

@@ -29,12 +29,12 @@ use sealbook_core::{
     password_change_start_accept, password_change_start_request, recover_accept,
     recover_finish_request, recover_start_accept, recover_start_request, register_accept,
     register_finish_request, register_start_request, AuthRefusal, CoreDeviceSecrets,
-    CoreDeviceState, CoreError, CoreSession, PasswordChangeStarted, RegisterIdentity,
+    CoreDeviceState, CoreError, CoreRotationOwed, PasswordChangeStarted, RegisterIdentity,
 };
 use sealbook_crypto::{
-    device_hpke_keypair_from_ikm, phrase_recovery_public, signing_from_seeds, wrap_collection_key,
-    wrap_for_device, wrap_for_phrase, CollectionKey, DeviceHpkePublic, WrapBinding,
-    PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
+    device_hpke_keypair_from_ikm, phrase_recovery_public, signing_from_seeds, wrap_for_device,
+    wrap_for_device_legacy, wrap_for_phrase, wrap_for_phrase_legacy_with_nonce, CollectionKey,
+    DeviceHpkePublic, WrapBinding, NONCE_LEN, PHRASE_CIPHERSUITE, PHRASE_SCHEME, XWING_CIPHERSUITE,
 };
 use sealbook_protocol::{
     AccountChallengeResponse, ChangePasswordRequest, ChangePasswordStartResponse,
@@ -122,11 +122,12 @@ struct PathCase {
 struct LoginCase {
     what: String,
     body: String,
-    /// "device" or "recovery": which wrap core opened. A device whose own wrap
-    /// is gone has been revoked, and falling back to the password wrap is what
-    /// lets it sign in and be told so.
+    /// "bound" or "legacy": which form of the device wrap opened. The legacy
+    /// form is opened at login and refused by the roster check once the account
+    /// has migrated.
     wrap: String,
-    recovery_pending: bool,
+    /// What the server said is owed, if anything.
+    rotation_owed: Option<CoreRotationOwed>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -172,14 +173,6 @@ impl Fixture {
         let mut bytes = [0u8; 32];
         bytes.copy_from_slice(&unb64(&self.collection_key));
         CollectionKey::from_bytes(bytes)
-    }
-
-    fn session(&self) -> CoreSession {
-        CoreSession {
-            collection_key: Some(*self.key().as_bytes()),
-            key_epoch: 1,
-            verified_roster: None,
-        }
     }
 
     fn path(&self, what: &str) -> &str {
@@ -278,7 +271,7 @@ fn the_paths_are_what_the_fixture_names() {
         fixture.path("register start")
     );
     assert_eq!(
-        register_finish_request("alice", PASSWORD, &b64(b"upload"), &identity)
+        register_finish_request("alice", &b64(b"upload"), &identity)
             .unwrap()
             .request
             .path,
@@ -317,16 +310,10 @@ fn the_paths_are_what_the_fixture_names() {
         fixture.path("account delete")
     );
     assert_eq!(
-        change_password_request(
-            &fixture.state,
-            &fixture.session(),
-            "a new password",
-            &b64(b"upload"),
-            &started_password_change(),
-        )
-        .unwrap()
-        .request
-        .path,
+        change_password_request(&fixture.state, &b64(b"upload"), &started_password_change())
+            .unwrap()
+            .request
+            .path,
         fixture.path("password change")
     );
 }
@@ -340,8 +327,7 @@ fn the_paths_are_what_the_fixture_names() {
 fn registration_refuses_a_collection_the_server_substituted() {
     let fixture = fixture();
     let identity = fixture.identity();
-    let registering =
-        register_finish_request("alice", PASSWORD, &b64(b"upload"), &identity).unwrap();
+    let registering = register_finish_request("alice", &b64(b"upload"), &identity).unwrap();
     let elsewhere: Uuid = SECOND.parse().unwrap();
     let refused = register_accept(
         SERVER,
@@ -373,8 +359,7 @@ fn registration_refuses_a_collection_the_server_substituted() {
 fn registration_pins_the_genesis_roster_it_signed() {
     let fixture = fixture();
     let identity = fixture.identity();
-    let registering =
-        register_finish_request("alice", PASSWORD, &b64(b"upload"), &identity).unwrap();
+    let registering = register_finish_request("alice", &b64(b"upload"), &identity).unwrap();
     let request: RegisterFinishRequest = serde_json::from_str(&registering.request.body).unwrap();
     assert_eq!(request.roster.roster_seq, 1);
     assert_eq!(request.roster.key_epoch, 1);
@@ -402,29 +387,28 @@ fn registration_pins_the_genesis_roster_it_signed() {
     assert!(state.session_token.is_none());
 }
 
-/// The account's own key wraps: one the device opens, one the password opens and
-/// one the phrase opens, so losing any single one of the three is survivable.
+/// The account's own key wraps: one the device opens and one the phrase opens.
+/// There is no password wrap: the server keeps no copy of the vault key that a
+/// password could open.
 #[test]
-fn registration_wraps_the_collection_key_for_the_device_the_password_and_the_phrase() {
+fn registration_wraps_the_collection_key_for_the_device_and_the_phrase() {
     let fixture = fixture();
     let identity = fixture.identity();
-    let registering =
-        register_finish_request("alice", PASSWORD, &b64(b"upload"), &identity).unwrap();
+    let registering = register_finish_request("alice", &b64(b"upload"), &identity).unwrap();
     let request: RegisterFinishRequest = serde_json::from_str(&registering.request.body).unwrap();
     let kinds: Vec<&str> = request
         .key_wraps
         .iter()
         .map(|wrap| wrap.recipient_kind.as_str())
         .collect();
-    assert_eq!(kinds, ["device", "recovery", "phrase"]);
+    assert_eq!(kinds, ["device", "phrase"]);
     assert_eq!(
         request.key_wraps[0].recipient_id,
         identity.device.device.device_id.to_string()
     );
-    // The password and phrase wraps are keyed by the account's name, which is
-    // what the server looks them up by on a login and a recovery.
+    // The phrase wrap is keyed by the account's name, which is what the server
+    // looks it up by on a recovery.
     assert_eq!(request.key_wraps[1].recipient_id, "alice");
-    assert_eq!(request.key_wraps[2].recipient_id, "alice");
     assert_eq!(request.phrase_recovery.scheme, PHRASE_SCHEME);
     // The genesis roster carries the phrase's verification keys, so a recovery
     // can sign a step from it later.
@@ -436,30 +420,25 @@ fn registration_wraps_the_collection_key_for_the_device_the_password_and_the_phr
 
 // ── Login ──
 
-/// Which wrap a login opens, and whether it reports a recovery still owing.
+/// Which form of the wrap a login opens, and why a rotation is owed if it is.
 #[test]
 fn a_login_opens_the_wrap_the_fixture_names() {
     let fixture = fixture();
     for case in &fixture.logins {
-        let logged = login_accept(&fixture.state, &fixture.password, &case.body)
+        let logged = login_accept(&fixture.state, &case.body)
             .unwrap_or_else(|err| panic!("{}: {err}", case.what));
         assert_eq!(
             logged.collection_key, fixture.collection_key,
             "{}",
             case.what
         );
+        assert_eq!(logged.rotation_owed, case.rotation_owed, "{}", case.what);
         assert_eq!(
-            logged.recovery_pending, case.recovery_pending,
-            "{}",
-            case.what
-        );
-        let served: LoginFinishResponse = serde_json::from_str(&case.body).unwrap();
-        let has_device = served
-            .key_wraps
-            .iter()
-            .any(|wrap| wrap.recipient_kind == "device");
-        assert_eq!(
-            if has_device { "device" } else { "recovery" },
+            if logged.legacy_wrap {
+                "legacy"
+            } else {
+                "bound"
+            },
             case.wrap,
             "{}",
             case.what
@@ -467,17 +446,16 @@ fn a_login_opens_the_wrap_the_fixture_names() {
     }
 }
 
-/// A login replaces the account, collection, salt and token this device holds
+/// A login replaces the account, collection and token this device holds
 /// with the ones the server just confirmed, and leaves everything else alone.
 #[test]
 fn a_login_persists_what_the_server_confirmed_and_nothing_else() {
     let fixture = fixture();
     let case = &fixture.logins[0];
-    let logged = login_accept(&fixture.state, &fixture.password, &case.body).unwrap();
+    let logged = login_accept(&fixture.state, &case.body).unwrap();
     let served: LoginFinishResponse = serde_json::from_str(&case.body).unwrap();
     assert_eq!(logged.state.account_id, served.account_id);
     assert_eq!(logged.state.collection_id, served.collection_id);
-    assert_eq!(logged.state.kdf_salt, served.kdf_salt);
     assert_eq!(logged.state.session_token.as_deref(), Some("a-token"));
     assert_eq!(logged.key_epoch, served.key_epoch);
     // The pin and the manifest high-water mark are this device's own memory and
@@ -588,6 +566,21 @@ fn a_recovery_under_the_wrong_phrase_says_so_about_the_phrase() {
     );
 }
 
+/// An account that has not migrated still holds the phrase wrap from before
+/// binding, and a recovery has to open it: the recovery that follows rotates, and
+/// the rotation writes the bound form.
+#[test]
+fn a_recovery_opens_the_unbound_phrase_wrap_while_the_account_has_not_migrated() {
+    let fixture = fixture();
+    let body = fixture.recover_start_body_as(true, false);
+    let started = recover_start_accept(&fixture.phrase, &body).expect("the legacy wrap opens");
+    assert_eq!(started.collection_key, fixture.collection_key);
+    assert!(
+        !started.roster.devices.is_empty(),
+        "the unmigrated roster still verifies by its MAC"
+    );
+}
+
 /// A phrase that is only spelled differently reaches the same account.
 #[test]
 fn a_recovery_accepts_the_phrase_in_every_spelling_of_it() {
@@ -609,15 +602,9 @@ fn a_recovery_signs_the_roster_step_with_the_phrase_and_pins_it() {
     let fixture = fixture();
     let started = recover_start_accept(&fixture.phrase, &fixture.recover_start).unwrap();
     let device = secrets(RECOVERING, 5);
-    let recovering = recover_finish_request(
-        "alice",
-        &fixture.phrase,
-        "a new password",
-        &started,
-        &device,
-        &b64(b"upload"),
-    )
-    .unwrap();
+    let recovering =
+        recover_finish_request("alice", &fixture.phrase, &started, &device, &b64(b"upload"))
+            .unwrap();
     let body: RecoverFinishRequest = serde_json::from_str(&recovering.request.body).unwrap();
     assert_eq!(body.roster.signer, RosterSignerBody::Phrase);
     assert_eq!(body.roster.roster_seq, started.roster.roster_seq + 1);
@@ -636,7 +623,6 @@ fn a_recovery_signs_the_roster_step_with_the_phrase_and_pins_it() {
         b64(&body.roster.pin(fixture.collection_id).transcript)
     );
     assert_eq!(body.wrap.recipient_id, device.device.device_id.to_string());
-    assert_eq!(b64(&body.kdf_salt), recovering.kdf_salt);
 }
 
 /// Recovery checks the collection the server names for the same reason
@@ -647,15 +633,9 @@ fn a_recovery_refuses_a_collection_the_server_substituted() {
     let fixture = fixture();
     let started = recover_start_accept(&fixture.phrase, &fixture.recover_start).unwrap();
     let device = secrets(RECOVERING, 5);
-    let recovering = recover_finish_request(
-        "alice",
-        &fixture.phrase,
-        "a new password",
-        &started,
-        &device,
-        &b64(b"upload"),
-    )
-    .unwrap();
+    let recovering =
+        recover_finish_request("alice", &fixture.phrase, &started, &device, &b64(b"upload"))
+            .unwrap();
     let elsewhere: Uuid = SECOND.parse().unwrap();
     let refused = recover_accept(
         SERVER,
@@ -710,72 +690,33 @@ fn a_rename_sends_the_new_name_the_new_verifier_and_a_signature_over_both() {
     );
 }
 
-/// The signature covers the replacement recovery wrap as well as the verifier,
-/// so nobody holding only a token can swap in key material the account holder
-/// never produced and quietly destroy password-based recovery.
+/// The signature covers the new verifier, so nobody holding only a token can
+/// swap in one the account holder never produced. The request carries no key
+/// material at all: the vault key is not re-wrapped under a password.
 #[test]
-fn a_password_change_sends_a_fresh_wrap_and_signs_over_it() {
+fn a_password_change_sends_only_the_verifier_and_signs_over_it() {
     let fixture = fixture();
-    let changed = change_password_request(
-        &fixture.state,
-        &fixture.session(),
-        "a new password",
-        &b64(b"upload"),
-        &started_password_change(),
-    )
-    .unwrap();
+    let changed =
+        change_password_request(&fixture.state, &b64(b"upload"), &started_password_change())
+            .unwrap();
+    let raw: serde_json::Value = serde_json::from_str(&changed.request.body).unwrap();
+    for field in [
+        "kdf_salt",
+        "recovery_nonce",
+        "recovery_wrapped_ck",
+        "recovery_ciphersuite",
+    ] {
+        assert!(raw.get(field).is_none(), "{field} must not be sent");
+    }
     let body: ChangePasswordRequest = serde_json::from_str(&changed.request.body).unwrap();
-    assert_eq!(body.recovery_ciphersuite, RECOVERY_CIPHERSUITE);
-    assert_eq!(b64(&body.kdf_salt), changed.kdf_salt);
-    assert_ne!(body.kdf_salt, fixture.state.kdf_salt);
-    assert_eq!(body.recovery_nonce.len(), 24);
-    // The new wrap opens to the same vault key, because changing a password
-    // re-wraps the key rather than replacing it.
-    let mut nonce = [0u8; 24];
-    nonce.copy_from_slice(&body.recovery_nonce);
-    let wrapped = body.recovery_wrapped_ck.clone();
-    let suite = body.recovery_ciphersuite.clone();
-    let opened = sealbook_crypto::unwrap_collection_key(
-        b"a new password",
-        &body.kdf_salt,
-        &sealbook_crypto::RecoveryWrap {
-            nonce,
-            ciphertext: wrapped.clone(),
-            ciphersuite: suite.clone(),
-        },
-    )
-    .expect("the new password opens the vault");
-    assert_eq!(b64(opened.as_bytes()), fixture.collection_key);
     verifies(
         &fixture.device,
         &fixture.state,
         "password",
         &body.challenge,
-        &sealbook_crypto::password_change_payload(
-            &body.upload,
-            &body.kdf_salt,
-            &body.recovery_nonce,
-            &wrapped,
-            &suite,
-        ),
+        &sealbook_crypto::password_change_payload(&body.upload),
         &body.signature,
     );
-}
-
-/// A password change needs the collection key, since there is nothing to re-wrap
-/// without it. Signed out, it is a refusal rather than a wrap of nothing.
-#[test]
-fn a_password_change_without_the_vault_key_is_refused() {
-    let fixture = fixture();
-    let refused = change_password_request(
-        &fixture.state,
-        &CoreSession::default(),
-        "a new password",
-        &b64(b"upload"),
-        &started_password_change(),
-    )
-    .expect_err("there is no key to re-wrap");
-    assert_eq!(refused, CoreError::NoCollectionKey);
 }
 
 /// Deleting an account is signed too, so a stolen token cannot destroy a vault.
@@ -806,7 +747,7 @@ fn the_refusals_are_what_the_fixture_names() {
             "recover start accept" => recover_start_accept(&fixture.phrase, &case.body)
                 .map(|_| ())
                 .expect_err(&case.what),
-            "login accept" => login_accept(&fixture.state, &fixture.password, &case.body)
+            "login accept" => login_accept(&fixture.state, &case.body)
                 .map(|_| ())
                 .expect_err(&case.what),
             other => panic!("the fixture names an unknown flow: {other}"),
@@ -831,13 +772,12 @@ fn a_login_with_no_wrap_this_device_can_open_is_a_refusal() {
         account_id: fixture.account_id,
         collection_id: fixture.collection_id,
         session_token: "a-token".into(),
-        kdf_salt: fixture.state.kdf_salt.clone(),
         key_wraps: Vec::new(),
         key_epoch: 1,
-        recovery_pending: false,
+        rotation_owed: None,
     })
     .unwrap();
-    let refused = login_accept(&fixture.state, &fixture.password, &body)
+    let refused = login_accept(&fixture.state, &body)
         .map(|_| ())
         .expect_err("no wrap at all is refused");
     assert_eq!(
@@ -1010,17 +950,33 @@ impl Fixture {
             device: self.device.clone(),
             collection_id: self.collection_id,
             collection_key: self.collection_key.clone(),
-            kdf_salt: b64(&self.state.kdf_salt),
             phrase: self.phrase.clone(),
+        }
+    }
+
+    fn binding(&self) -> WrapBinding {
+        WrapBinding {
+            collection_id: self.collection_id,
+            key_epoch: 1,
         }
     }
 
     /// The recovery start response, with the roster served as the server serves
     /// it: phrase keys stripped.
     fn recover_start_body(&self) -> String {
+        self.recover_start_body_as(false, true)
+    }
+
+    /// As [`Self::recover_start_body`], optionally with the phrase wrap from
+    /// before binding and a roster from before the account migrated.
+    fn recover_start_body_as(&self, legacy_wrap: bool, migrated: bool) -> String {
         let key = self.key();
         let entropy = sealbook_crypto::entropy_from_phrase(&self.phrase).unwrap();
-        let wrap = wrap_for_phrase(&entropy, &key).unwrap();
+        let wrap = if legacy_wrap {
+            wrap_for_phrase_legacy_with_nonce(&entropy, &key, &[7u8; NONCE_LEN]).unwrap()
+        } else {
+            wrap_for_phrase(&entropy, &key, &self.binding()).unwrap()
+        };
         let second = secrets(SECOND, 2);
         let devices: Vec<DevicePublicKeys> = [&self.device.device, &second.device]
             .iter()
@@ -1040,6 +996,17 @@ impl Fixture {
             &key,
         )
         .unwrap();
+        if !migrated {
+            let mut earlier = roster.to_roster();
+            earlier.migrated = false;
+            earlier.key_commitment.clear();
+            let transcript = earlier.transcript(self.collection_id);
+            earlier.signature = sealbook_crypto::sign(&phrase_secrets, &transcript).unwrap();
+            earlier.mac = sealbook_crypto::roster_mac(&key, &transcript)
+                .unwrap()
+                .to_vec();
+            roster = RosterBody::from_roster(earlier);
+        }
         roster.phrase_mldsa_pk = Vec::new();
         roster.phrase_ed25519_pk = Vec::new();
         serde_json::to_string(&RecoverStartResponse {
@@ -1066,7 +1033,6 @@ fn build() -> Fixture {
     let collection_id: Uuid = COLLECTION.parse().unwrap();
     let key = CollectionKey::from_bytes([3u8; 32]);
     let device = secrets(DEVICE, 1);
-    let salt = [4u8; 16];
 
     let state = CoreDeviceState {
         server: SERVER.into(),
@@ -1075,7 +1041,6 @@ fn build() -> Fixture {
         collection_id,
         device_id: device.device.device_id,
         session_token: None,
-        kdf_salt: salt.to_vec(),
         hpke_sk: unb64(&device.hpke_sk),
         mldsa_seed: unb64(&device.mldsa_seed),
         ed25519_sk: unb64(&device.ed25519_sk),
@@ -1093,7 +1058,9 @@ fn build() -> Fixture {
         },
     )
     .unwrap();
-    let password_wrap = wrap_collection_key(PASSWORD.as_bytes(), &salt, &key).unwrap();
+    let legacy_device_wrap =
+        wrap_for_device_legacy(&DeviceHpkePublic(unb64(&device.device.xwing_hpke_pk)), &key)
+            .unwrap();
     let device_key_wrap = KeyWrapBody {
         recipient_kind: "device".into(),
         recipient_id: device.device.device_id.to_string(),
@@ -1101,22 +1068,20 @@ fn build() -> Fixture {
         wrapped_ck: device_wrap.ciphertext.clone(),
         ciphersuite: XWING_CIPHERSUITE.into(),
     };
-    let recovery_key_wrap = KeyWrapBody {
-        recipient_kind: "recovery".into(),
-        recipient_id: "alice".into(),
-        hpke_enc: password_wrap.nonce.to_vec(),
-        wrapped_ck: password_wrap.ciphertext.clone(),
-        ciphersuite: RECOVERY_CIPHERSUITE.into(),
+    let legacy_key_wrap = KeyWrapBody {
+        hpke_enc: legacy_device_wrap.enc.clone(),
+        wrapped_ck: legacy_device_wrap.ciphertext.clone(),
+        ..device_key_wrap.clone()
     };
-    let login = |wraps: Vec<KeyWrapBody>, recovery_pending: bool| {
+    let login = |wraps: Vec<KeyWrapBody>,
+                 rotation_owed: Option<sealbook_protocol::RotationOwed>| {
         serde_json::to_string(&LoginFinishResponse {
             account_id,
             collection_id,
             session_token: "a-token".into(),
-            kdf_salt: salt.to_vec(),
             key_wraps: wraps,
             key_epoch: 1,
-            recovery_pending,
+            rotation_owed,
         })
         .unwrap()
     };
@@ -1205,75 +1170,83 @@ fn build() -> Fixture {
         paths: vec![
             PathCase {
                 what: "register start".into(),
-                path: "/v1/opaque/register/start".into(),
+                path: "/v2/opaque/register/start".into(),
             },
             PathCase {
                 what: "register finish".into(),
-                path: "/v1/opaque/register/finish".into(),
+                path: "/v2/opaque/register/finish".into(),
             },
             PathCase {
                 what: "login challenge".into(),
-                path: "/v1/opaque/login/challenge".into(),
+                path: "/v2/opaque/login/challenge".into(),
             },
             PathCase {
                 what: "login start".into(),
-                path: "/v1/opaque/login/start".into(),
+                path: "/v2/opaque/login/start".into(),
             },
             PathCase {
                 what: "login finish".into(),
-                path: "/v1/opaque/login/finish".into(),
+                path: "/v2/opaque/login/finish".into(),
             },
             PathCase {
                 what: "recover start".into(),
-                path: "/v1/recover/start".into(),
+                path: "/v2/recover/start".into(),
             },
             PathCase {
                 what: "recover finish".into(),
-                path: "/v1/recover/finish".into(),
+                path: "/v2/recover/finish".into(),
             },
             PathCase {
                 what: "account challenge".into(),
-                path: "/v1/account/challenge".into(),
+                path: "/v2/account/challenge".into(),
             },
             PathCase {
                 what: "username change".into(),
-                path: "/v1/account/username".into(),
+                path: "/v2/account/username".into(),
             },
             PathCase {
                 what: "password change start".into(),
-                path: "/v1/account/password/start".into(),
+                path: "/v2/account/password/start".into(),
             },
             PathCase {
                 what: "password change".into(),
-                path: "/v1/account/password".into(),
+                path: "/v2/account/password".into(),
             },
             PathCase {
                 what: "account delete".into(),
-                path: "/v1/account".into(),
+                path: "/v2/account".into(),
             },
         ],
         logins: vec![
             LoginCase {
-                what: "this device's own wrap".into(),
-                body: login(
-                    vec![device_key_wrap.clone(), recovery_key_wrap.clone()],
-                    false,
-                ),
-                wrap: "device".into(),
-                recovery_pending: false,
+                what: "this device's own wrap, bound to the collection and epoch".into(),
+                body: login(vec![device_key_wrap.clone()], None),
+                wrap: "bound".into(),
+                rotation_owed: None,
             },
             LoginCase {
-                what: "only the password wrap, which a device without one of its own falls back to"
-                    .into(),
-                body: login(vec![recovery_key_wrap.clone()], false),
-                wrap: "recovery".into(),
-                recovery_pending: false,
+                what: "the wrap from before binding, which a migrated roster then refuses".into(),
+                body: login(vec![legacy_key_wrap.clone()], None),
+                wrap: "legacy".into(),
+                rotation_owed: None,
             },
             LoginCase {
                 what: "a recovery whose rotation is still owing".into(),
-                body: login(vec![device_key_wrap.clone()], true),
-                wrap: "device".into(),
-                recovery_pending: true,
+                body: login(
+                    vec![device_key_wrap.clone()],
+                    Some(sealbook_protocol::RotationOwed::Recovery),
+                ),
+                wrap: "bound".into(),
+                rotation_owed: Some(CoreRotationOwed::Recovery),
+            },
+            LoginCase {
+                what: "an account the server says has not moved to this protocol".into(),
+                body: login(
+                    vec![legacy_key_wrap.clone()],
+                    Some(sealbook_protocol::RotationOwed::Upgrade),
+                ),
+                wrap: "legacy".into(),
+                rotation_owed: Some(CoreRotationOwed::Upgrade),
             },
         ],
         refusals: vec![
@@ -1282,7 +1255,15 @@ fn build() -> Fixture {
                 flow: "recover start accept".into(),
                 body: {
                     let entropy = sealbook_crypto::entropy_from_phrase(PHRASE).unwrap();
-                    let wrap = wrap_for_phrase(&entropy, &key).unwrap();
+                    let wrap = wrap_for_phrase(
+                        &entropy,
+                        &key,
+                        &WrapBinding {
+                            collection_id,
+                            key_epoch: 1,
+                        },
+                    )
+                    .unwrap();
                     serde_json::to_string(&RecoverStartResponse {
                         wrap: KeyWrapBody {
                             recipient_kind: "phrase".into(),
@@ -1306,7 +1287,15 @@ fn build() -> Fixture {
                 flow: "recover start accept".into(),
                 body: {
                     let entropy = sealbook_crypto::entropy_from_phrase(PHRASE).unwrap();
-                    let wrap = wrap_for_phrase(&entropy, &key).unwrap();
+                    let wrap = wrap_for_phrase(
+                        &entropy,
+                        &key,
+                        &WrapBinding {
+                            collection_id,
+                            key_epoch: 1,
+                        },
+                    )
+                    .unwrap();
                     serde_json::to_string(&RecoverStartResponse {
                         wrap: KeyWrapBody {
                             recipient_kind: "phrase".into(),
@@ -1328,12 +1317,21 @@ fn build() -> Fixture {
             RefusalCase {
                 what: "a login with no wrap this device can open".into(),
                 flow: "login accept".into(),
-                body: login(Vec::new(), false),
+                body: login(Vec::new(), None),
                 refusal: AuthRefusal::NoKeyWrap,
             },
         ],
     };
     let recover_start = fixture.recover_start_body();
+    let mut fixture = fixture;
+    fixture.refusals.push(RefusalCase {
+        what: "a phrase wrap from before binding, under a roster that says the account has \
+               migrated"
+            .into(),
+        flow: "recover start accept".into(),
+        body: fixture.recover_start_body_as(true, true),
+        refusal: AuthRefusal::PhraseMismatch,
+    });
     Fixture {
         recover_start,
         ..fixture

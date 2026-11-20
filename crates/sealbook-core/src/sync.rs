@@ -98,8 +98,8 @@ pub enum WalkStep {
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct WalkOutcome {
-    /// To be checked against the rows with `manifest_verify`. `None` means
-    /// `manifest_absence_ok` is the rule instead.
+    /// To be checked against the rows with `manifest_verify`. `None` means the
+    /// server served none, which is a refusal.
     pub manifest_json: Option<String>,
     pub key_epoch: u64,
     pub latest_revision: u64,
@@ -217,7 +217,7 @@ pub fn changes_request(collection_id: Uuid, cursor: &WalkCursor) -> HttpRequest 
     HttpRequest {
         method: Method::Get,
         path: format!(
-            "/v1/collections/{collection_id}/changes?after={}&limit={CHANGES_PAGE_LIMIT}{snapshot}",
+            "/v2/collections/{collection_id}/changes?after={}&limit={CHANGES_PAGE_LIMIT}{snapshot}",
             cursor.after
         ),
         headers: Vec::<Header>::new(),

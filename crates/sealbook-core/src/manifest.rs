@@ -92,21 +92,15 @@ pub struct SignedManifest {
     pub manifest_json: String,
 }
 
-/// A verified whole-collection manifest, or the absence of one.
+/// A verified whole-collection manifest. A missing one is always a refusal: a
+/// device just paired, recovered or reinstalled has seen none, so accepting the
+/// absence would let a server serve any subset of the vault.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum ManifestOutcome {
     Signed {
         plan: ManifestPlan,
-        entries: Vec<CoreManifestEntry>,
-    },
-    /// A collection no manifest-writing client has written yet. Accepted only
-    /// while this device has never seen a manifest, which core has checked, so
-    /// a server cannot pretend one away. The key epoch is the host's to supply:
-    /// there is no signed one to read.
-    Unmanifested {
-        latest_revision: u64,
         entries: Vec<CoreManifestEntry>,
     },
 }
@@ -136,15 +130,7 @@ pub struct BucketedManifest {
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum BucketsOutcome {
-    Signed {
-        held: BucketedManifest,
-    },
-    /// No manifest yet. A bucket answer carries no revision for the entries it
-    /// did not serve, so the collection's next revision cannot be chosen from
-    /// it: the host reads the whole set and calls
-    /// [`manifest_buckets_from_whole`]. One extra request, on a path nothing
-    /// takes once anything has written a manifest.
-    Unmanifested,
+    Signed { held: BucketedManifest },
 }
 
 /// What the manifest after a write has to carry.
@@ -166,7 +152,7 @@ impl SignedManifest {
 /// The request that fetches the manifest with every entry it commits to.
 pub fn manifest_request(context: &ManifestContext) -> HttpRequest {
     get(format!(
-        "/v1/collections/{}/manifest",
+        "/v2/collections/{}/manifest",
         context.collection_id
     ))
 }
@@ -175,7 +161,7 @@ pub fn manifest_request(context: &ManifestContext) -> HttpRequest {
 /// fall in.
 pub fn manifest_buckets_request(context: &ManifestContext, ids: &[Uuid]) -> HttpRequest {
     get(format!(
-        "/v1/collections/{}/manifest/buckets?buckets={}",
+        "/v2/collections/{}/manifest/buckets?buckets={}",
         context.collection_id,
         bucket_query(&buckets_of(ids))
     ))
@@ -212,7 +198,7 @@ pub fn manifest_accept(
     let served: ManifestResponse = read_body(response)?;
     let entries = project(&served.entries);
     let Some(manifest) = served.manifest else {
-        return unmanifested(context, entries);
+        return Err(no_manifest());
     };
     let plan = against_entries(context, &manifest, &served.entries, devices)?;
     Ok(ManifestOutcome::Signed { plan, entries })
@@ -230,21 +216,6 @@ pub fn manifest_verify(
 ) -> Result<ManifestPlan, CoreError> {
     let manifest: ManifestBody = serde_json::from_str(manifest_json).map_err(unreadable)?;
     against_entries(context, &manifest, &unproject(entries)?, devices)
-}
-
-/// The rule for a server that served no manifest at all.
-///
-/// A collection nothing has written a manifest for is a real state, but only
-/// for a device that has never seen one: otherwise a server could hide a vault
-/// by claiming it was never written.
-pub fn manifest_absence_ok(context: &ManifestContext) -> Result<(), CoreError> {
-    if context.manifest_seq > 0 {
-        return Err(CoreError::manifest(format!(
-            "server has no manifest, but this device has seen sequence {}",
-            context.manifest_seq
-        )));
-    }
-    Ok(())
 }
 
 /// Checks a bucketed manifest answer and returns what a write needs from it.
@@ -285,10 +256,7 @@ pub fn manifest_buckets_accept(
         }
     }
     let Some(manifest) = served.manifest else {
-        // Still core's rule to apply, even though the host reads again: a
-        // server may not drop the manifest for a device that has seen one.
-        unmanifested(context, Vec::new())?;
-        return Ok(BucketsOutcome::Unmanifested);
+        return Err(no_manifest());
     };
     not_backwards(context, &manifest)?;
     if manifest.object_count != served.object_count {
@@ -318,7 +286,7 @@ pub fn manifest_buckets_accept(
 
 /// The bucketed view of a collection whose every entry is in hand.
 ///
-/// For the manifestless write path, where the whole set had to be read anyway.
+/// For a write path that has read the whole set anyway.
 pub fn manifest_buckets_from_whole(
     plan: &ManifestPlan,
     entries: &[CoreManifestEntry],
@@ -557,20 +525,11 @@ fn not_backwards(context: &ManifestContext, manifest: &ManifestBody) -> Result<(
     Ok(())
 }
 
-fn unmanifested(
-    context: &ManifestContext,
-    entries: Vec<CoreManifestEntry>,
-) -> Result<ManifestOutcome, CoreError> {
-    manifest_absence_ok(context)?;
-    let latest_revision = entries
-        .iter()
-        .map(|entry| entry.revision)
-        .max()
-        .unwrap_or(0);
-    Ok(ManifestOutcome::Unmanifested {
-        latest_revision,
-        entries,
-    })
+fn no_manifest() -> CoreError {
+    CoreError::manifest(
+        "the server has no signed manifest for this collection, so nothing it served can be \
+         checked against what a device vouched for",
+    )
 }
 
 fn plan_of(manifest: &ManifestBody) -> ManifestPlan {
@@ -830,11 +789,6 @@ pub mod ffi {
         devices: Vec<CoreDevice>,
     ) -> Result<ManifestPlan, CoreError> {
         super::manifest_verify(&context, &manifest_json, &entries, &devices)
-    }
-
-    #[uniffi::export]
-    pub fn manifest_absence_ok(context: ManifestContext) -> Result<(), CoreError> {
-        super::manifest_absence_ok(&context)
     }
 
     #[uniffi::export]

@@ -23,14 +23,14 @@ use sealbook_crypto::opaque::{
 };
 use sealbook_crypto::{
     account_op_transcript, delete_account_payload, enrollment_transcript, entropy_from_phrase,
-    generate_device_hpke, generate_device_signing, generate_kdf_salt, generate_phrase,
-    login_start_transcript, login_transcript, open_login_challenge, password_change_payload,
-    phrase_lookup_id, phrase_recovery_keys, phrase_recovery_public,
-    phrase_recovery_start_transcript, phrase_recovery_transcript, recovery_password_payload, sign,
-    sign_phrase_recovery, unwrap_collection_key, unwrap_for_device, unwrap_for_phrase,
-    username_change_payload, wrap_collection_key, wrap_for_device, wrap_for_phrase, CollectionKey,
-    DeviceHpkePublic, DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets, RecoveryWrap,
-    WrapBinding, PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
+    generate_device_hpke, generate_device_signing, generate_phrase, login_start_transcript,
+    login_transcript, open_login_challenge, password_change_payload, phrase_lookup_id,
+    phrase_recovery_keys, phrase_recovery_public, phrase_recovery_start_transcript,
+    phrase_recovery_transcript, recovery_password_payload, sign, sign_phrase_recovery,
+    unwrap_for_device, unwrap_for_phrase, username_change_payload, wrap_for_device,
+    wrap_for_phrase, CollectionKey, DeviceHpkePublic, DeviceHpkeSecret, DeviceHpkeWrap,
+    DeviceSigningSecrets, PhraseWrap, WrapBinding, WrapForm, PHRASE_CIPHERSUITE, PHRASE_SCHEME,
+    XWING_CIPHERSUITE,
 };
 use sealbook_protocol::{
     valid_username, AccountChallengeResponse, ChangePasswordRequest, ChangePasswordStartRequest,
@@ -141,7 +141,6 @@ pub struct RegisterIdentity {
     #[cfg_attr(feature = "wasm", tsify(type = "string"))]
     pub collection_id: Uuid,
     pub collection_key: String,
-    pub kdf_salt: String,
     /// The 24 words to show the user once. Nothing can re-derive them.
     pub phrase: String,
 }
@@ -169,6 +168,28 @@ pub struct LoginStarting {
     pub challenge: String,
 }
 
+/// Why the server says a rotation of the collection key is owed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
+#[serde(rename_all = "snake_case")]
+pub enum CoreRotationOwed {
+    /// A recovery enrolled a device and the key has not been rotated, so the
+    /// phrase used then, and any copy of it, can still open this vault.
+    Recovery,
+    /// The account has not yet moved to this protocol version.
+    Upgrade,
+}
+
+impl From<sealbook_protocol::RotationOwed> for CoreRotationOwed {
+    fn from(owed: sealbook_protocol::RotationOwed) -> Self {
+        match owed {
+            sealbook_protocol::RotationOwed::Recovery => Self::Recovery,
+            sealbook_protocol::RotationOwed::Upgrade => Self::Upgrade,
+        }
+    }
+}
+
 /// What a completed login hands the host.
 ///
 /// No `Debug`: it carries the collection key and the session token.
@@ -176,15 +197,20 @@ pub struct LoginStarting {
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct LoggedIn {
-    /// The persisted state with the account, collection, salt and token the
+    /// The persisted state with the account, collection and token the
     /// server just confirmed, for the host to store in place of its own.
     pub state: CoreDeviceState,
     pub collection_key: String,
     pub key_epoch: u64,
-    /// True when a recovery enrolled a device and the key has still not been
-    /// rotated, so the phrase used then, and any copy of it, still opens this
-    /// vault. The server refuses writes until the rotation lands.
-    pub recovery_pending: bool,
+    /// Why the server says a rotation is owed, if it does. A hint: the roster
+    /// decides whether the account has migrated. The server refuses writes
+    /// until the rotation lands.
+    pub rotation_owed: Option<CoreRotationOwed>,
+    /// True when the device wrap that opened the key was the unbound form, which
+    /// a server can serve under any epoch. Hand it to the session before
+    /// [`roster_accept_key`](crate::roster_accept_key), which refuses it under a
+    /// migrated roster.
+    pub legacy_wrap: bool,
 }
 
 /// What the first round of a recovery established, checked against the phrase.
@@ -216,7 +242,6 @@ pub struct Recovering {
     /// The roster step this device signed with the phrase, to pin: its first
     /// fetch then has to be a step from a roster it has already checked.
     pub pin: CoreRosterPin,
-    pub kdf_salt: String,
 }
 
 /// What a password change start established.
@@ -232,13 +257,12 @@ pub struct PasswordChangeStarted {
     pub opaque_response: String,
 }
 
-/// The password change request, and the salt it leaves the account on.
+/// The password change request.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct PasswordChange {
     pub request: AuthRequest,
-    pub kdf_salt: String,
 }
 
 // ── What the user typed ──
@@ -327,15 +351,14 @@ pub fn new_device() -> Result<CoreDeviceSecrets, CoreError> {
     })
 }
 
-/// Everything a registration mints: a device, a collection, a collection key, a
-/// KDF salt and a recovery phrase.
+/// Everything a registration mints: a device, a collection, a collection key and
+/// a recovery phrase.
 pub fn new_registration() -> Result<RegisterIdentity, CoreError> {
     let (phrase, _entropy) = generate_phrase()?;
     Ok(RegisterIdentity {
         device: new_device()?,
         collection_id: Uuid::new_v4(),
         collection_key: encode(CollectionKey::generate().as_bytes()),
-        kdf_salt: encode(&generate_kdf_salt()),
         phrase,
     })
 }
@@ -346,7 +369,7 @@ pub fn register_start_request(
     opaque_request_b64: &str,
 ) -> Result<AuthRequest, CoreError> {
     Ok(AuthRequest {
-        path: "/v1/opaque/register/start".into(),
+        path: "/v2/opaque/register/start".into(),
         body: serde_json::to_string(&RegisterStartRequest {
             username: checked_username(username)?,
             request: decode(opaque_request_b64, "OPAQUE request")?,
@@ -363,17 +386,16 @@ pub fn register_start_accept(body: &str) -> Result<String, CoreError> {
 }
 
 /// The register finish request: the genesis roster, the first manifest, and the
-/// three wraps of the collection key.
+/// two wraps of the collection key.
 ///
 /// The roster and the manifest are both signed before the account exists, so an
 /// account has a device history and a signed manifest from the moment it does,
 /// and no client is ever asked to accept an unsigned "your vault is empty".
 ///
-/// The password gets a wrap of the collection key alongside the device's and the
-/// phrase's, so the account can be opened on a device holding neither.
+/// The password protects nothing but the sign-in: there is no password wrap of
+/// the collection key, so the server holds no copy a password could open.
 pub fn register_finish_request(
     username: &str,
-    password: &str,
     upload_b64: &str,
     identity: &RegisterIdentity,
 ) -> Result<Registering, CoreError> {
@@ -381,18 +403,17 @@ pub fn register_finish_request(
     let key = CollectionKey::from_bytes(crate::roster::collection_key(&identity.collection_key)?);
     let keys = DevicePublicKeys::try_from(&identity.device.device)?;
     let secrets = identity.device.signing()?;
-    let salt = decode(&identity.kdf_salt, "KDF salt")?;
     let entropy = phrase_entropy(&identity.phrase)?;
 
-    let password_wrap = wrap_collection_key(password.as_bytes(), &salt, &key)?;
-    let phrase_wrap = wrap_for_phrase(&entropy, &key)?;
+    let binding = WrapBinding {
+        collection_id: identity.collection_id,
+        key_epoch: 1,
+    };
+    let phrase_wrap = wrap_for_phrase(&entropy, &key, &binding)?;
     let device_wrap = wrap_for_device(
         &DeviceHpkePublic(keys.xwing_hpke_pk.clone()),
         &key,
-        &WrapBinding {
-            collection_id: identity.collection_id,
-            key_epoch: 1,
-        },
+        &binding,
     )?;
     let phrase_public = phrase_recovery_public(&entropy)?;
     let phrase_recovery = PhraseRecoveryBody {
@@ -431,23 +452,15 @@ pub fn register_finish_request(
         &[],
     )?;
     let request = AuthRequest {
-        path: "/v1/opaque/register/finish".into(),
+        path: "/v2/opaque/register/finish".into(),
         body: serde_json::to_string(&RegisterFinishRequest {
             username: username.clone(),
             upload: decode(upload_b64, "OPAQUE upload")?,
-            kdf_salt: salt,
             device: keys.clone(),
             collection_id: identity.collection_id,
             enrollment_signature: enrollment_signature(&keys, &secrets)?,
             key_wraps: vec![
                 device_key_wrap(keys.device_id, &device_wrap),
-                KeyWrapBody {
-                    recipient_kind: "recovery".into(),
-                    recipient_id: username.clone(),
-                    hpke_enc: password_wrap.nonce.to_vec(),
-                    wrapped_ck: password_wrap.ciphertext,
-                    ciphersuite: RECOVERY_CIPHERSUITE.into(),
-                },
                 KeyWrapBody {
                     recipient_kind: "phrase".into(),
                     recipient_id: username.clone(),
@@ -494,7 +507,6 @@ pub fn register_accept(
         served.account_id,
         served.collection_id,
         &identity.device,
-        &identity.kdf_salt,
         // Registration posts a manifest at sequence 1, so the first one this
         // device is served has to be at least that.
         1,
@@ -507,7 +519,7 @@ pub fn register_accept(
 /// Login step 1: ask for a challenge sealed to this device's X-Wing key.
 pub fn login_challenge_request(username: &str, device_id: Uuid) -> Result<AuthRequest, CoreError> {
     Ok(AuthRequest {
-        path: "/v1/opaque/login/challenge".into(),
+        path: "/v2/opaque/login/challenge".into(),
         body: serde_json::to_string(&LoginChallengeRequest {
             username: checked_username(username)?,
             device_id,
@@ -550,7 +562,7 @@ pub fn login_start_request(
     )?;
     Ok(LoginStarting {
         request: AuthRequest {
-            path: "/v1/opaque/login/start".into(),
+            path: "/v2/opaque/login/start".into(),
             body: serde_json::to_string(&LoginStartRequest {
                 challenge_id: served.challenge_id,
                 username,
@@ -592,7 +604,7 @@ pub fn login_finish_request(
         ),
     )?;
     Ok(AuthRequest {
-        path: "/v1/opaque/login/finish".into(),
+        path: "/v2/opaque/login/finish".into(),
         body: serde_json::to_string(&LoginFinishRequest {
             login_id: served.login_id,
             username,
@@ -606,9 +618,9 @@ pub fn login_finish_request(
 /// Reads the login finish response: opens the collection key, and returns the
 /// state to persist in place of the old one.
 ///
-/// The device's own wrap is preferred and the password wrap is the fallback, so
-/// a device whose wrap was never written can still sign in. No wrap at all is
-/// [`AuthRefusal::NoKeyWrap`].
+/// Only the device's own wrap opens the key. The server keeps no copy a password
+/// could open, so a device with no wrap is [`AuthRefusal::NoKeyWrap`]: pair it
+/// again from an enrolled device, or recover with the phrase.
 ///
 /// The roster is not fetched here, and the host must sync it with
 /// [`roster_accept_key`](crate::roster_accept_key) before anything reads or
@@ -616,17 +628,11 @@ pub fn login_finish_request(
 /// the server can seal any key to this device. It is also what every later
 /// device-set decision is made from, and a device no longer in it has been
 /// revoked and should learn so here rather than fail confusingly later.
-pub fn login_accept(
-    state: &CoreDeviceState,
-    password: &str,
-    body: &str,
-) -> Result<LoggedIn, CoreError> {
+pub fn login_accept(state: &CoreDeviceState, body: &str) -> Result<LoggedIn, CoreError> {
     let served: LoginFinishResponse = serde_json::from_str(body).map_err(|err| {
         CoreError::malformed(format!("the login finish response is unreadable: {err}"))
     })?;
-    let key = open_collection_key(
-        password,
-        &served.kdf_salt,
+    let (key, form) = open_collection_key(
         &state.hpke_sk,
         state.device_id,
         &WrapBinding {
@@ -638,13 +644,13 @@ pub fn login_accept(
     let mut state = state.clone();
     state.account_id = served.account_id;
     state.collection_id = served.collection_id;
-    state.kdf_salt = served.kdf_salt;
     state.session_token = Some(served.session_token);
     Ok(LoggedIn {
         state,
         collection_key: encode(key.as_bytes()),
         key_epoch: served.key_epoch,
-        recovery_pending: served.recovery_pending,
+        rotation_owed: served.rotation_owed.map(CoreRotationOwed::from),
+        legacy_wrap: form == WrapForm::Legacy,
     })
 }
 
@@ -671,7 +677,7 @@ pub fn recover_start_request(
         &phrase_recovery_start_transcript(&username, &lookup_id, &opaque_request),
     )?;
     Ok(AuthRequest {
-        path: "/v1/recover/start".into(),
+        path: "/v2/recover/start".into(),
         body: serde_json::to_string(&RecoverStartRequest {
             username,
             lookup_id,
@@ -704,18 +710,28 @@ pub fn recover_start_accept(phrase: &str, body: &str) -> Result<RecoverStarted, 
     // Named rather than passed on as a crypto failure: the wrap not opening is
     // what a wrong phrase looks like, and reporting it as a key or roster
     // problem sent users looking for a fault in the account.
-    let key = unwrap_for_phrase(
+    let (Some(mut roster), Some(collection_id)) = (served.roster, served.collection_id) else {
+        return Err(refuse(AuthRefusal::NoRoster));
+    };
+    let (key, form) = unwrap_for_phrase(
         &entropy,
-        &RecoveryWrap {
+        &PhraseWrap {
             nonce,
             ciphertext: served.wrap.wrapped_ck,
             ciphersuite: PHRASE_CIPHERSUITE.to_string(),
         },
+        &WrapBinding {
+            collection_id,
+            key_epoch: roster.key_epoch,
+        },
     )
     .map_err(|_| refuse(AuthRefusal::PhraseMismatch))?;
-    let (Some(mut roster), Some(collection_id)) = (served.roster, served.collection_id) else {
-        return Err(refuse(AuthRefusal::NoRoster));
-    };
+    // The constant-AAD form is what an account that has not migrated holds. Once
+    // the roster says it has, a server serving that form is serving something it
+    // can recompute for any epoch.
+    if form == WrapForm::Legacy && roster.migrated {
+        return Err(refuse(AuthRefusal::PhraseMismatch));
+    }
     let phrase_public = phrase_recovery_public(&entropy)?;
     roster.phrase_mldsa_pk = phrase_public.mldsa_pk;
     roster.phrase_ed25519_pk = phrase_public.ed25519_pk;
@@ -756,7 +772,6 @@ pub fn recover_start_accept(phrase: &str, body: &str) -> Result<RecoverStarted, 
 pub fn recover_finish_request(
     username: &str,
     phrase: &str,
-    password: &str,
     started: &RecoverStarted,
     device: &CoreDeviceSecrets,
     upload_b64: &str,
@@ -768,8 +783,6 @@ pub fn recover_finish_request(
     let upload = decode(upload_b64, "OPAQUE upload")?;
     let challenge = challenge_bytes(&decode(&started.challenge, "recovery challenge")?)?;
 
-    let salt = generate_kdf_salt();
-    let password_wrap = wrap_collection_key(password.as_bytes(), &salt, &key)?;
     let device_wrap = wrap_for_device(
         &DeviceHpkePublic(keys.xwing_hpke_pk.clone()),
         &key,
@@ -778,13 +791,7 @@ pub fn recover_finish_request(
             key_epoch: started.roster.key_epoch,
         },
     )?;
-    let payload = recovery_password_payload(
-        &upload,
-        &salt,
-        &password_wrap.nonce,
-        &password_wrap.ciphertext,
-        &password_wrap.ciphersuite,
-    );
+    let payload = recovery_password_payload(&upload);
 
     let (phrase_secrets, phrase_public) = phrase_recovery_keys(&entropy)?;
     let current = &started.roster;
@@ -820,7 +827,7 @@ pub fn recover_finish_request(
         ),
     )?;
     let request = AuthRequest {
-        path: "/v1/recover/finish".into(),
+        path: "/v2/recover/finish".into(),
         body: serde_json::to_string(&RecoverFinishRequest {
             username,
             recovery_id: started.recovery_id,
@@ -831,16 +838,11 @@ pub fn recover_finish_request(
             wrap: device_key_wrap(keys.device_id, &device_wrap),
             roster,
             upload,
-            kdf_salt: salt.to_vec(),
-            recovery_nonce: password_wrap.nonce.to_vec(),
-            recovery_wrapped_ck: password_wrap.ciphertext,
-            recovery_ciphersuite: password_wrap.ciphersuite,
         })?,
     };
     Ok(Recovering {
         request,
         pin: sealed_pin(started.collection_id, keys.device_id, &key, &roster_json)?,
-        kdf_salt: encode(&salt),
     })
 }
 
@@ -872,7 +874,6 @@ pub fn recover_accept(
         served.account_id,
         served.collection_id,
         device,
-        &recovering.kdf_salt,
         // Nothing is known about the collection's manifest yet; the first login
         // and sync establish it.
         0,
@@ -889,7 +890,7 @@ pub fn recover_accept(
 /// rename or destroy an account.
 pub fn account_challenge_request() -> AuthRequest {
     AuthRequest {
-        path: "/v1/account/challenge".into(),
+        path: "/v2/account/challenge".into(),
         body: "{}".into(),
     }
 }
@@ -915,7 +916,7 @@ pub fn change_username_request(
         &username_change_payload(&new_username, &upload),
     )?;
     Ok(AuthRequest {
-        path: "/v1/account/username".into(),
+        path: "/v2/account/username".into(),
         body: serde_json::to_string(&ChangeUsernameRequest {
             new_username,
             upload,
@@ -929,7 +930,7 @@ pub fn change_username_request(
 /// Password change step 1, which also issues the challenge step 2 signs over.
 pub fn password_change_start_request(opaque_request_b64: &str) -> Result<AuthRequest, CoreError> {
     Ok(AuthRequest {
-        path: "/v1/account/password/start".into(),
+        path: "/v2/account/password/start".into(),
         body: serde_json::to_string(&ChangePasswordStartRequest {
             request: decode(opaque_request_b64, "OPAQUE request")?,
         })?,
@@ -950,52 +951,32 @@ pub fn password_change_start_accept(body: &str) -> Result<PasswordChangeStarted,
     })
 }
 
-/// Password change step 2: the new verifier, and the collection key re-wrapped
-/// under the new password.
-///
-/// The signature covers the replacement wrap as well as the verifier. Without
-/// it, somebody holding only a token could substitute key material the account
-/// holder never produced and quietly destroy password-based recovery.
+/// Password change step 2: the new verifier, signed by this device so that
+/// somebody holding only a token cannot substitute one.
 pub fn change_password_request(
     state: &CoreDeviceState,
-    session: &CoreSession,
-    new_password: &str,
     upload_b64: &str,
     started: &PasswordChangeStarted,
 ) -> Result<PasswordChange, CoreError> {
-    let key = CollectionKey::from_bytes(session.collection_key.ok_or(CoreError::NoCollectionKey)?);
     let upload = decode(upload_b64, "OPAQUE upload")?;
     let challenge = decode(&started.challenge, "password change challenge")?;
-    let salt = generate_kdf_salt();
-    let wrap = wrap_collection_key(new_password.as_bytes(), &salt, &key)?;
     let signature = account_signature(
         state,
         "password",
         started.password_change_id,
         &challenge,
-        &password_change_payload(
-            &upload,
-            &salt,
-            &wrap.nonce,
-            &wrap.ciphertext,
-            &wrap.ciphersuite,
-        ),
+        &password_change_payload(&upload),
     )?;
     Ok(PasswordChange {
         request: AuthRequest {
-            path: "/v1/account/password".into(),
+            path: "/v2/account/password".into(),
             body: serde_json::to_string(&ChangePasswordRequest {
                 password_change_id: started.password_change_id,
                 challenge,
                 signature,
                 upload,
-                kdf_salt: salt.to_vec(),
-                recovery_nonce: wrap.nonce.to_vec(),
-                recovery_wrapped_ck: wrap.ciphertext,
-                recovery_ciphersuite: wrap.ciphersuite,
             })?,
         },
-        kdf_salt: encode(&salt),
     })
 }
 
@@ -1013,7 +994,7 @@ pub fn delete_account_request(
         &delete_account_payload(),
     )?;
     Ok(AuthRequest {
-        path: "/v1/account".into(),
+        path: "/v2/account".into(),
         body: serde_json::to_string(&DeleteAccountRequest {
             challenge_id: challenge.challenge_id,
             challenge: challenge.challenge,
@@ -1031,7 +1012,6 @@ fn enrolled_state(
     account_id: Uuid,
     collection_id: Uuid,
     device: &CoreDeviceSecrets,
-    kdf_salt_b64: &str,
     manifest_seq: u64,
     pin: &CoreRosterPin,
 ) -> Result<CoreDeviceState, CoreError> {
@@ -1048,7 +1028,6 @@ fn enrolled_state(
         collection_id,
         device_id: device.device.device_id,
         session_token: None,
-        kdf_salt: decode(kdf_salt_b64, "KDF salt")?,
         hpke_sk: decode(&device.hpke_sk, "HPKE secret key")?,
         mldsa_seed: decode(&device.mldsa_seed, "ML-DSA seed")?,
         ed25519_sk: decode(&device.ed25519_sk, "Ed25519 secret key")?,
@@ -1083,49 +1062,30 @@ fn session(key: &CollectionKey) -> CoreSession {
         collection_key: Some(*key.as_bytes()),
         key_epoch: 0,
         verified_roster: None,
+        legacy_wrap: false,
     }
 }
 
 fn open_collection_key(
-    password: &str,
-    kdf_salt: &[u8],
     hpke_sk: &[u8],
     device_id: Uuid,
     binding: &WrapBinding,
     wraps: &[KeyWrapBody],
-) -> Result<CollectionKey, CoreError> {
+) -> Result<(CollectionKey, WrapForm), CoreError> {
     let device = device_id.to_string();
-    if let Some(wrap) = wraps
+    let wrap = wraps
         .iter()
         .find(|wrap| wrap.recipient_kind == "device" && wrap.recipient_id == device)
-    {
-        return Ok(unwrap_for_device(
-            &DeviceHpkeSecret::from_bytes(hpke_sk.to_vec()),
-            &DeviceHpkeWrap {
-                enc: wrap.hpke_enc.clone(),
-                ciphertext: wrap.wrapped_ck.clone(),
-                ciphersuite: XWING_CIPHERSUITE,
-            },
-            binding,
-        )?);
-    }
-    if let Some(wrap) = wraps.iter().find(|wrap| wrap.recipient_kind == "recovery") {
-        if wrap.hpke_enc.len() != 24 {
-            return Err(CoreError::Nonce);
-        }
-        let mut nonce = [0u8; 24];
-        nonce.copy_from_slice(&wrap.hpke_enc);
-        return Ok(unwrap_collection_key(
-            password.as_bytes(),
-            kdf_salt,
-            &RecoveryWrap {
-                nonce,
-                ciphertext: wrap.wrapped_ck.clone(),
-                ciphersuite: wrap.ciphersuite.clone(),
-            },
-        )?);
-    }
-    Err(refuse(AuthRefusal::NoKeyWrap))
+        .ok_or_else(|| refuse(AuthRefusal::NoKeyWrap))?;
+    Ok(unwrap_for_device(
+        &DeviceHpkeSecret::from_bytes(hpke_sk.to_vec()),
+        &DeviceHpkeWrap {
+            enc: wrap.hpke_enc.clone(),
+            ciphertext: wrap.wrapped_ck.clone(),
+            ciphersuite: XWING_CIPHERSUITE,
+        },
+        binding,
+    )?)
 }
 
 pub(crate) fn account_challenge(body: &str) -> Result<AccountChallengeResponse, CoreError> {
@@ -1248,20 +1208,7 @@ pub mod ffi {
         RegisterIdentity, Registering,
     };
     use crate::roster::CoreRosterPin;
-    use crate::CoreSession;
     use uuid::Uuid;
-
-    fn session(ck_b64: Option<String>) -> Result<CoreSession, CoreError> {
-        let collection_key = match ck_b64 {
-            Some(text) => Some(crate::roster::collection_key(&text)?),
-            None => None,
-        };
-        Ok(CoreSession {
-            collection_key,
-            key_epoch: 0,
-            verified_roster: None,
-        })
-    }
 
     #[uniffi::export]
     pub fn normalize_username(raw: String) -> String {
@@ -1318,11 +1265,10 @@ pub mod ffi {
     #[uniffi::export]
     pub fn register_finish_request(
         username: String,
-        password: String,
         upload_b64: String,
         identity: RegisterIdentity,
     ) -> Result<Registering, CoreError> {
-        super::register_finish_request(&username, &password, &upload_b64, &identity)
+        super::register_finish_request(&username, &upload_b64, &identity)
     }
 
     #[uniffi::export]
@@ -1365,12 +1311,8 @@ pub mod ffi {
     }
 
     #[uniffi::export]
-    pub fn login_accept(
-        state: CoreDeviceState,
-        password: String,
-        body: String,
-    ) -> Result<LoggedIn, CoreError> {
-        super::login_accept(&state, &password, &body)
+    pub fn login_accept(state: CoreDeviceState, body: String) -> Result<LoggedIn, CoreError> {
+        super::login_accept(&state, &body)
     }
 
     #[uniffi::export]
@@ -1391,19 +1333,11 @@ pub mod ffi {
     pub fn recover_finish_request(
         username: String,
         phrase: String,
-        password: String,
         started: RecoverStarted,
         device: CoreDeviceSecrets,
         upload_b64: String,
     ) -> Result<Recovering, CoreError> {
-        super::recover_finish_request(
-            &username,
-            &phrase,
-            &password,
-            &started,
-            &device,
-            &upload_b64,
-        )
+        super::recover_finish_request(&username, &phrase, &started, &device, &upload_b64)
     }
 
     #[uniffi::export]
@@ -1448,18 +1382,10 @@ pub mod ffi {
     #[uniffi::export]
     pub fn change_password_request(
         state: CoreDeviceState,
-        ck_b64: Option<String>,
-        new_password: String,
         upload_b64: String,
         started: PasswordChangeStarted,
     ) -> Result<PasswordChange, CoreError> {
-        super::change_password_request(
-            &state,
-            &session(ck_b64)?,
-            &new_password,
-            &upload_b64,
-            &started,
-        )
+        super::change_password_request(&state, &upload_b64, &started)
     }
 
     #[uniffi::export]

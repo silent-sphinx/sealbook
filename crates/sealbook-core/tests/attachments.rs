@@ -53,11 +53,14 @@ struct Limits {
 #[derive(Serialize, Deserialize)]
 struct Plan {
     size: u64,
+    /// The size after Padme, which the chunks cover.
+    padded_size: u64,
     chunk_count: u32,
     /// Omitted for the sizes whose range list would be dozens of entries; the
-    /// count is the decision those pin.
+    /// count is the decision those pin. Each entry is the slice's start and end
+    /// in the file, then the chunk's sealed length, zero fill included.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    ranges: Option<Vec<(u64, u64)>>,
+    ranges: Option<Vec<(u64, u64, u64)>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -123,7 +126,6 @@ fn device_state() -> CoreDeviceState {
         collection_id: collection(),
         device_id: "66666666-6666-4666-8666-666666666666".parse().unwrap(),
         session_token: None,
-        kdf_salt: vec![4u8; 16],
         hpke_sk: vec![7u8; 32],
         mldsa_seed: vec![1u8; 32],
         ed25519_sk: vec![11u8; 32],
@@ -159,8 +161,10 @@ fn plan_of(size: u64) -> AttachmentPlan {
         attachment_id: attachment(),
         key: KEY.to_string(),
         chunk_size: attachment_limits().chunk_size,
-        chunk_count: size.div_ceil(attachment_limits().chunk_size as u64) as u32,
-        total_plaintext_size: size,
+        chunk_count: sealbook_crypto::padme_len(size)
+            .div_ceil(attachment_limits().chunk_size as u64) as u32,
+        byte_size: size,
+        padded_size: sealbook_crypto::padme_len(size),
     }
 }
 
@@ -199,14 +203,15 @@ fn the_limits_are_the_protocols() {
 }
 
 #[test]
-fn a_size_becomes_the_chunk_count_the_server_derives() {
+fn a_size_becomes_the_chunk_count_of_its_padded_length() {
     for entry in fixture().plans {
         if entry.size == 0 || entry.size > attachment_limits().max_size {
             continue;
         }
         let plan = attachment_plan(entry.size).expect("planned");
         assert_eq!(plan.chunk_count, entry.chunk_count, "size {}", entry.size);
-        assert_eq!(plan.total_plaintext_size, entry.size);
+        assert_eq!(plan.byte_size, entry.size);
+        assert_eq!(plan.padded_size, entry.padded_size);
     }
 }
 
@@ -229,13 +234,56 @@ fn the_ranges_cover_the_plaintext_once_and_in_order() {
             continue;
         };
         let ranges = attachment_ranges(&plan_of(entry.size));
-        let actual: Vec<(u64, u64)> = ranges.iter().map(|r| (r.start, r.end)).collect();
+        let actual: Vec<(u64, u64, u64)> = ranges.iter().map(|r| (r.start, r.end, r.len)).collect();
         assert_eq!(actual, expected, "size {}", entry.size);
         assert_eq!(ranges.last().unwrap().end, entry.size);
+        assert_eq!(
+            ranges.iter().map(|r| r.len).sum::<u64>(),
+            entry.padded_size,
+            "the chunks cover exactly the padded length"
+        );
         for (index, range) in ranges.iter().enumerate() {
             assert_eq!(range.index as usize, index);
         }
     }
+}
+
+#[test]
+fn a_ten_kilobyte_photo_is_not_padded_to_a_chunk() {
+    let plan = attachment_plan(10_000).unwrap();
+    assert!(plan.padded_size >= 10_000 && plan.padded_size < 10_000 + 10_000 / 8 + 1);
+    assert_eq!(plan.chunk_count, 1);
+    let ranges = attachment_ranges(&plan);
+    assert_eq!(ranges.len(), 1);
+    assert_eq!(ranges[0].end, 10_000);
+    assert_eq!(ranges[0].len, plan.padded_size);
+}
+
+#[test]
+fn every_chunk_but_the_last_is_a_whole_chunk() {
+    let plan = attachment_plan(attachment_limits().chunk_size as u64 * 2 + 5).unwrap();
+    let ranges = attachment_ranges(&plan);
+    let chunk = attachment_limits().chunk_size as u64;
+    for range in &ranges[..ranges.len() - 1] {
+        assert_eq!(range.len, chunk);
+    }
+    assert!(ranges.last().unwrap().len <= chunk);
+}
+
+#[test]
+fn a_download_is_cut_back_to_the_true_length() {
+    let size = 10_000u64;
+    let padded = sealbook_crypto::padme_len(size);
+    assert_eq!(
+        attachment_read_len(attachment(), size, padded).unwrap(),
+        size
+    );
+    // An attachment from before padding decrypts to exactly its size.
+    assert_eq!(attachment_read_len(attachment(), size, size).unwrap(), size);
+    // Neither: not the file the record describes.
+    assert!(attachment_read_len(attachment(), size, padded + 1).is_err());
+    assert!(attachment_read_len(attachment(), size, size - 1).is_err());
+    assert!(attachment_read_len(attachment(), 0, 0).is_err());
 }
 
 #[test]
@@ -310,7 +358,10 @@ fn the_create_body_is_what_the_server_validates_against() {
         attachment_create_request(&device_state(), collection(), &plan, &challenge_body()).unwrap();
     let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
     assert_eq!(body["attachment_id"], ATTACHMENT);
-    assert_eq!(body["total_plaintext_size"], plan.total_plaintext_size);
+    assert!(
+        body.get("total_plaintext_size").is_none(),
+        "the server is not told the plaintext size"
+    );
     assert_eq!(body["chunk_size"], plan.chunk_size);
     assert_eq!(body["chunk_count"], 2);
 }
@@ -352,7 +403,6 @@ fn create_commit_and_delete_carry_a_device_signature_bound_to_the_operation() {
     let create_payload = sealbook_crypto::attachment_op_payload(
         collection(),
         plan.attachment_id,
-        plan.total_plaintext_size,
         plan.chunk_size,
         plan.chunk_count,
     );
@@ -368,14 +418,14 @@ fn create_commit_and_delete_carry_a_device_signature_bound_to_the_operation() {
         &create_payload
     ));
     let other_sizes =
-        sealbook_crypto::attachment_op_payload(collection(), plan.attachment_id, 1, 1, 1);
+        sealbook_crypto::attachment_op_payload(collection(), plan.attachment_id, 1, 1);
     assert!(!signature_verifies(
         &body.auth,
         "attachment-create",
         &other_sizes
     ));
 
-    let zeros = sealbook_crypto::attachment_op_payload(collection(), attachment(), 0, 0, 0);
+    let zeros = sealbook_crypto::attachment_op_payload(collection(), attachment(), 0, 0);
     let commit = attachment_commit_request(
         &device_state(),
         collection(),
@@ -396,14 +446,14 @@ fn create_commit_and_delete_carry_a_device_signature_bound_to_the_operation() {
     .unwrap();
     let auth: sealbook_protocol::AttachmentOpAuth = serde_json::from_slice(&delete.body).unwrap();
     assert!(signature_verifies(&auth, "attachment-delete", &zeros));
-    let elsewhere = sealbook_crypto::attachment_op_payload(collection(), Uuid::nil(), 0, 0, 0);
+    let elsewhere = sealbook_crypto::attachment_op_payload(collection(), Uuid::nil(), 0, 0);
     assert!(!signature_verifies(&auth, "attachment-delete", &elsewhere));
 }
 
 #[test]
 fn a_challenge_request_is_a_post_to_the_challenge_path() {
     let request = attachment_challenge_request();
-    assert_eq!(request.path, "/v1/attachments/challenge");
+    assert_eq!(request.path, "/v2/attachments/challenge");
 }
 
 #[test]
@@ -584,7 +634,9 @@ fn a_seal_and_open_round_trips_every_chunk_of_a_plan() {
     let mut digests = Vec::new();
     let mut out = Vec::new();
     for range in attachment_ranges(&plan) {
-        let slice = &data[range.start as usize..range.end as usize];
+        let mut padded = data[range.start as usize..range.end as usize].to_vec();
+        padded.resize(range.len as usize, 0);
+        let slice = padded.as_slice();
         digests.push(attachment_chunk_digest(slice));
         let sealed = seal_attachment_chunk(
             &plan.key,
@@ -608,7 +660,10 @@ fn a_seal_and_open_round_trips_every_chunk_of_a_plan() {
         .unwrap();
         out.extend_from_slice(&opened);
     }
-    assert_eq!(out, data);
+    assert_eq!(out.len() as u64, plan.padded_size);
+    let len = attachment_read_len(plan.attachment_id, plan.byte_size, out.len() as u64).unwrap();
+    out.truncate(len as usize);
+    assert!(out == data, "the cut-back file is the one uploaded");
     let hash = attachment_content_hash(&digests).unwrap();
     assert!(attachment_verify(plan.attachment_id, &hash, &digests).is_ok());
 }
@@ -753,11 +808,12 @@ fn regenerate() {
             let ranges = (plan.chunk_count <= 4).then(|| {
                 attachment_ranges(&plan)
                     .iter()
-                    .map(|r| (r.start, r.end))
+                    .map(|r| (r.start, r.end, r.len))
                     .collect()
             });
             Plan {
                 size,
+                padded_size: plan.padded_size,
                 chunk_count: plan.chunk_count,
                 ranges,
             }

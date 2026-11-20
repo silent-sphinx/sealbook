@@ -21,8 +21,8 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sealbook_crypto::{
-    attachment_chunk_aad, attachment_op_payload, decrypt_chunk, encrypt_chunk, AttachmentHasher,
-    AttachmentKey, EncryptedChunk, ATTACHMENT_KEY_LEN, NONCE_LEN,
+    attachment_chunk_aad, attachment_op_payload, decrypt_chunk, encrypt_chunk, padme_len,
+    AttachmentHasher, AttachmentKey, EncryptedChunk, ATTACHMENT_KEY_LEN, NONCE_LEN,
 };
 use sealbook_protocol::{
     AttachmentListEntry, AttachmentMetaResponse, AttachmentOpAuth, CommitAttachmentResponse,
@@ -89,10 +89,19 @@ pub struct AttachmentPlan {
     pub key: String,
     pub chunk_size: u32,
     pub chunk_count: u32,
-    pub total_plaintext_size: u64,
+    /// The file's true length. This is what the owning record keeps as its
+    /// `byteSize`, never the padded one.
+    pub byte_size: u64,
+    /// The length the chunks cover: `byte_size` padded with Padme, so the server
+    /// learns the size only to within a small step.
+    pub padded_size: u64,
 }
 
 /// One chunk's slice of the plaintext the host is holding.
+///
+/// The chunk is `plaintext[start..end]` followed by zeros up to `len` bytes. The
+/// zeros are the Padme padding and only ever follow the file's last byte, so a
+/// chunk past it has `start == end` and is all zeros.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
@@ -100,6 +109,8 @@ pub struct ChunkRange {
     pub index: u32,
     pub start: u64,
     pub end: u64,
+    /// Bytes sealed in this chunk: the slice plus its zero fill.
+    pub len: u64,
 }
 
 /// The ceilings and shapes a host needs to police its own input.
@@ -167,27 +178,30 @@ pub fn attachment_limits() -> AttachmentLimits {
 
 /// Decides an upload: a fresh id and key, and how the plaintext is cut up.
 ///
-/// The chunk count is `total / chunk_size` rounded up, with no floor of one: the
-/// server derives the same number the same way and refuses a count that does not
-/// match, so an empty attachment is refused here instead of becoming a protocol
-/// error nobody can act on.
-pub fn attachment_plan(total_plaintext_size: u64) -> Result<AttachmentPlan, CoreError> {
-    if total_plaintext_size == 0 {
+/// The file is padded to `padme_len(byte_size)` and chunked over that length, so
+/// every chunk but the last is exactly one chunk and the last is zero-filled to
+/// the padded total. The chunk count is the padded size divided by the chunk
+/// size, rounded up, with no floor of one: an empty attachment is refused here
+/// instead of becoming a protocol error nobody can act on.
+pub fn attachment_plan(byte_size: u64) -> Result<AttachmentPlan, CoreError> {
+    if byte_size == 0 {
         return Err(refuse(AttachmentRefusal::Empty));
     }
-    if total_plaintext_size > MAX_ATTACHMENT_SIZE as u64 {
+    if byte_size > MAX_ATTACHMENT_SIZE as u64 {
         return Err(refuse(AttachmentRefusal::TooLarge {
-            size: total_plaintext_size,
+            size: byte_size,
             max: MAX_ATTACHMENT_SIZE as u64,
         }));
     }
     let chunk_size = ATTACHMENT_CHUNK_SIZE as u64;
+    let padded_size = padme_len(byte_size);
     Ok(AttachmentPlan {
         attachment_id: Uuid::new_v4(),
         key: encode(AttachmentKey::generate().as_bytes()),
         chunk_size: chunk_size as u32,
-        chunk_count: total_plaintext_size.div_ceil(chunk_size) as u32,
-        total_plaintext_size,
+        chunk_count: padded_size.div_ceil(chunk_size) as u32,
+        byte_size,
+        padded_size,
     })
 }
 
@@ -197,13 +211,34 @@ pub fn attachment_ranges(plan: &AttachmentPlan) -> Vec<ChunkRange> {
     (0..plan.chunk_count)
         .map(|index| {
             let start = index as u64 * chunk_size;
+            let chunk_end = (start + chunk_size).min(plan.padded_size);
             ChunkRange {
                 index,
-                start,
-                end: (start + chunk_size).min(plan.total_plaintext_size),
+                start: start.min(plan.byte_size),
+                end: chunk_end.min(plan.byte_size),
+                len: chunk_end - start,
             }
         })
         .collect()
+}
+
+/// Checks that what a download decrypted to is a padded copy of the file the
+/// record describes, and returns the length to cut it to.
+///
+/// A file uploaded before padding was added decrypts to exactly its size, so
+/// that is accepted as well. Anything else is refused: a length that is neither
+/// is not the file the record committed to.
+pub fn attachment_read_len(
+    attachment_id: Uuid,
+    byte_size: u64,
+    decrypted_len: u64,
+) -> Result<u64, CoreError> {
+    if byte_size == 0 || (decrypted_len != byte_size && decrypted_len != padme_len(byte_size)) {
+        return Err(CoreError::AttachmentIntegrity {
+            object: attachment_id,
+        });
+    }
+    Ok(byte_size)
 }
 
 /// The challenge a create, commit or delete is signed over.
@@ -214,7 +249,7 @@ pub fn attachment_ranges(plan: &AttachmentPlan) -> Vec<ChunkRange> {
 pub fn attachment_challenge_request() -> HttpRequest {
     json_request(
         Method::Post,
-        "/v1/attachments/challenge".into(),
+        "/v2/attachments/challenge".into(),
         &serde_json::json!({}),
     )
 }
@@ -225,7 +260,7 @@ fn attachment_auth(
     op: &str,
     collection_id: Uuid,
     attachment_id: Uuid,
-    sizes: (u64, u32, u32),
+    chunking: (u32, u32),
     challenge_body: &str,
 ) -> Result<AttachmentOpAuth, CoreError> {
     let challenge = crate::auth::account_challenge(challenge_body)?;
@@ -234,7 +269,7 @@ fn attachment_auth(
         op,
         challenge.challenge_id,
         &challenge.challenge,
-        &attachment_op_payload(collection_id, attachment_id, sizes.0, sizes.1, sizes.2),
+        &attachment_op_payload(collection_id, attachment_id, chunking.0, chunking.1),
     )?;
     Ok(AttachmentOpAuth {
         challenge_id: challenge.challenge_id,
@@ -255,7 +290,7 @@ pub fn attachment_create_request(
         "attachment-create",
         collection_id,
         plan.attachment_id,
-        (plan.total_plaintext_size, plan.chunk_size, plan.chunk_count),
+        (plan.chunk_size, plan.chunk_count),
         challenge_body,
     )?;
     Ok(json_request(
@@ -263,7 +298,6 @@ pub fn attachment_create_request(
         attachment_base(collection_id),
         &CreateAttachmentRequest {
             attachment_id: plan.attachment_id,
-            total_plaintext_size: plan.total_plaintext_size,
             chunk_size: plan.chunk_size,
             chunk_count: plan.chunk_count,
             auth,
@@ -362,7 +396,7 @@ pub fn attachment_commit_request(
         "attachment-commit",
         collection_id,
         attachment_id,
-        (0, 0, 0),
+        (0, 0),
         challenge_body,
     )?;
     Ok(json_request(
@@ -421,7 +455,7 @@ pub fn attachment_delete_request(
         "attachment-delete",
         collection_id,
         attachment_id,
-        (0, 0, 0),
+        (0, 0),
         challenge_body,
     )?;
     Ok(json_request(
@@ -521,7 +555,7 @@ pub fn sweep_orphans(rows: &[AttachmentRow], referenced: &[Uuid], now_secs: i64)
 }
 
 fn attachment_base(collection_id: Uuid) -> String {
-    format!("/v1/collections/{collection_id}/attachments")
+    format!("/v2/collections/{collection_id}/attachments")
 }
 
 fn chunk_aad(attachment_id: Uuid, collection_id: Uuid, index: u32, chunk_count: u32) -> Vec<u8> {
@@ -618,8 +652,8 @@ pub mod ffi {
     use uuid::Uuid;
 
     #[uniffi::export(name = "attachment_plan")]
-    pub fn plan(total_plaintext_size: u64) -> Result<AttachmentPlan, CoreError> {
-        super::attachment_plan(total_plaintext_size)
+    pub fn plan(byte_size: u64) -> Result<AttachmentPlan, CoreError> {
+        super::attachment_plan(byte_size)
     }
 
     #[uniffi::export(name = "attachment_ranges")]
@@ -691,6 +725,15 @@ pub mod ffi {
             &nonce_b64,
             &ciphertext,
         )
+    }
+
+    #[uniffi::export(name = "attachment_read_len")]
+    pub fn read_len(
+        attachment_id: Uuid,
+        byte_size: u64,
+        decrypted_len: u64,
+    ) -> Result<u64, CoreError> {
+        super::attachment_read_len(attachment_id, byte_size, decrypted_len)
     }
 
     #[uniffi::export(name = "attachment_chunk_nonce")]

@@ -10,12 +10,11 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sealbook_crypto::{
-    decrypt_object, encrypt_object, generate_kdf_salt, generate_phrase, object_aad,
-    phrase_lookup_id, phrase_recovery_public, wrap_collection_key, wrap_for_device,
-    wrap_for_phrase, CollectionKey, DeviceHpkePublic, EncryptedObject, WrapBinding,
-    PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
+    decrypt_object, encrypt_object, generate_phrase, object_aad, phrase_lookup_id,
+    phrase_recovery_public, wrap_for_device, wrap_for_phrase, CollectionKey, DeviceHpkePublic,
+    EncryptedObject, WrapBinding, PHRASE_CIPHERSUITE, PHRASE_SCHEME, XWING_CIPHERSUITE,
 };
-use sealbook_protocol::envelope::{open_envelope, Unsealed};
+use sealbook_protocol::envelope::{open_envelope, seal_envelope, Unsealed};
 use sealbook_protocol::{KeyWrapBody, PhraseRecoveryBody};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -42,6 +41,11 @@ pub enum RotationRefusal {
     LastDevice,
     #[error("this device is not in the account's roster")]
     NotEnrolled,
+    /// The server refuses a list that is not strictly ascending, and the signed
+    /// transcript hashes it as sent, so it is refused here before anything is
+    /// signed.
+    #[error("the devices to revoke must be listed once each, in ascending order")]
+    RevokedOutOfOrder,
     /// A live row this device cannot open. Every other read counts one of these
     /// and carries on, because raising would hide every readable row behind it.
     /// A rotation cannot: it re-encrypts each row from its plaintext, so a row
@@ -177,21 +181,24 @@ pub fn rotation_plan(
 /// which is the whole reason the roster exists.
 pub fn rotation_recipients(
     self_device_id: Uuid,
-    revoke_device_id: Option<Uuid>,
+    revoke_device_ids: &[Uuid],
     devices: &[CoreDevice],
 ) -> Result<Vec<CoreDevice>, CoreError> {
     let refuse = |refusal| Err(CoreError::Rotation { refusal });
-    if revoke_device_id == Some(self_device_id) {
+    if revoke_device_ids.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return refuse(RotationRefusal::RevokedOutOfOrder);
+    }
+    if revoke_device_ids.contains(&self_device_id) {
         return refuse(RotationRefusal::RevokingSelf);
     }
-    if let Some(revoked) = revoke_device_id {
-        if !devices.iter().any(|device| device.device_id == revoked) {
+    for revoked in revoke_device_ids {
+        if !devices.iter().any(|device| device.device_id == *revoked) {
             return refuse(RotationRefusal::NotInRoster);
         }
     }
     let remaining: Vec<CoreDevice> = devices
         .iter()
-        .filter(|device| Some(device.device_id) != revoke_device_id)
+        .filter(|device| !revoke_device_ids.contains(&device.device_id))
         .cloned()
         .collect();
     if remaining.is_empty() {
@@ -217,6 +224,32 @@ pub fn reseal_row(
     collection_id: Uuid,
     row: &ResealRow,
 ) -> Result<CoreSealedRow, CoreError> {
+    reseal_row_upgrading(old_ck_b64, new_ck_b64, collection_id, row).map(|resealed| resealed.row)
+}
+
+/// A row re-sealed, and whether its payload was moved to the current schema on
+/// the way.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct CoreResealed {
+    pub row: CoreSealedRow,
+    pub upgraded: bool,
+}
+
+/// [`reseal_row`], moving the payload to the current schema when it can.
+///
+/// The default stays byte for byte. The payload is rewritten only when the
+/// envelope opens, names a type core knows, holds a JSON object as valid UTF-8
+/// and declares `1.0` or nothing. Anything else is resealed as it was, so a
+/// payload this build cannot read is never altered by a rotation. Every
+/// rotation does this, so the migration needs no flag of its own.
+pub fn reseal_row_upgrading(
+    old_ck_b64: &str,
+    new_ck_b64: &str,
+    collection_id: Uuid,
+    row: &ResealRow,
+) -> Result<CoreResealed, CoreError> {
     let unreadable = |reason| CoreError::Rotation {
         refusal: RotationRefusal::Unreadable {
             object: row.id,
@@ -243,19 +276,32 @@ pub fn reseal_row(
     let Ok(stored) = decrypt_object(&old_key, &encrypted, &aad) else {
         return Err(unreadable(UnreadableReason::Key));
     };
-    if matches!(open_envelope(&stored), Unsealed::Unreadable) {
-        return Err(unreadable(UnreadableReason::Envelope));
-    }
-    let resealed = encrypt_object(&new_key, &stored, &aad)?;
-    Ok(CoreSealedRow {
-        id: row.id,
-        revision: row.revision,
-        // A rotation re-encrypts plaintext, and the server refuses a rotated
-        // object that claims to be a tombstone.
-        tombstone: false,
-        nonce: URL_SAFE_NO_PAD.encode(resealed.nonce),
-        ciphertext: URL_SAFE_NO_PAD.encode(&resealed.ciphertext),
-        padded_size: resealed.padded_size as u64,
+    let upgraded = match open_envelope(&stored) {
+        Unsealed::Unreadable => return Err(unreadable(UnreadableReason::Envelope)),
+        Unsealed::Envelope {
+            content_type,
+            tombstone: false,
+            payload,
+        } => std::str::from_utf8(&payload)
+            .ok()
+            .and_then(|text| crate::payload::upgrade(&content_type, text))
+            .map(|text| seal_envelope(&content_type, text.as_bytes())),
+        Unsealed::Envelope { .. } => None,
+    };
+    let was_upgraded = upgraded.is_some();
+    let resealed = encrypt_object(&new_key, upgraded.as_deref().unwrap_or(&stored), &aad)?;
+    Ok(CoreResealed {
+        row: CoreSealedRow {
+            id: row.id,
+            revision: row.revision,
+            // A rotation re-encrypts plaintext, and the server refuses a rotated
+            // object that claims to be a tombstone.
+            tombstone: false,
+            nonce: URL_SAFE_NO_PAD.encode(resealed.nonce),
+            ciphertext: URL_SAFE_NO_PAD.encode(&resealed.ciphertext),
+            padded_size: resealed.padded_size as u64,
+        },
+        upgraded: was_upgraded,
     })
 }
 
@@ -303,32 +349,27 @@ pub fn rotation_entries(
 /// carries.
 pub struct RotationWraps {
     pub key_wraps: Vec<KeyWrapBody>,
-    pub kdf_salt: Vec<u8>,
     pub phrase: String,
     pub phrase_recovery: PhraseRecoveryBody,
 }
 
-/// The new key wrapped for every recipient, then for the password, then for a
-/// fresh recovery phrase.
+/// The new key wrapped for every recipient, then for a fresh recovery phrase.
+/// Every wrap is bound to the collection and the new epoch.
 ///
 /// The order is the one the rotation signature covers: the server checks the
 /// digest of the list as sent, so every client builds it here and none of them
-/// sequences it. Draws the salt and the phrase, and returns both for the host
-/// to keep.
+/// sequences it. Draws the phrase and returns it for the host to keep.
 pub fn rotation_wraps_typed(
     new_key: &CollectionKey,
     binding: &WrapBinding,
     recipients: &[CoreDevice],
     username: &str,
-    password: &str,
 ) -> Result<RotationWraps, CoreError> {
-    let salt = generate_kdf_salt();
-    let recovery = wrap_collection_key(password.as_bytes(), &salt, new_key)?;
     let (phrase, entropy) = generate_phrase()?;
-    let phrase_wrap = wrap_for_phrase(&entropy, new_key)?;
+    let phrase_wrap = wrap_for_phrase(&entropy, new_key, binding)?;
     let public = phrase_recovery_public(&entropy)?;
 
-    let mut key_wraps = Vec::with_capacity(recipients.len() + 2);
+    let mut key_wraps = Vec::with_capacity(recipients.len() + 1);
     for device in recipients {
         let pk =
             URL_SAFE_NO_PAD
@@ -346,13 +387,6 @@ pub fn rotation_wraps_typed(
         });
     }
     key_wraps.push(KeyWrapBody {
-        recipient_kind: "recovery".into(),
-        recipient_id: username.to_string(),
-        hpke_enc: recovery.nonce.to_vec(),
-        wrapped_ck: recovery.ciphertext,
-        ciphersuite: RECOVERY_CIPHERSUITE.into(),
-    });
-    key_wraps.push(KeyWrapBody {
         recipient_kind: "phrase".into(),
         recipient_id: username.to_string(),
         hpke_enc: phrase_wrap.nonce.to_vec(),
@@ -361,7 +395,6 @@ pub fn rotation_wraps_typed(
     });
     Ok(RotationWraps {
         key_wraps,
-        kdf_salt: salt.to_vec(),
         phrase,
         phrase_recovery: PhraseRecoveryBody {
             mldsa_pk: public.mldsa_pk,
@@ -391,7 +424,6 @@ pub struct CoreKeyWrap {
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct CoreRotationWraps {
     pub key_wraps: Vec<CoreKeyWrap>,
-    pub kdf_salt: String,
     pub phrase: String,
     pub phrase_mldsa_pk: String,
     pub phrase_ed25519_pk: String,
@@ -406,7 +438,6 @@ pub fn rotation_wraps(
     new_key_epoch: u64,
     recipients: &[CoreDevice],
     username: &str,
-    password: &str,
 ) -> Result<CoreRotationWraps, CoreError> {
     let key = CollectionKey::from_bytes(crate::roster::collection_key(new_ck_b64)?);
     let wraps = rotation_wraps_typed(
@@ -417,7 +448,6 @@ pub fn rotation_wraps(
         },
         recipients,
         username,
-        password,
     )?;
     let b64 = |bytes: &[u8]| URL_SAFE_NO_PAD.encode(bytes);
     Ok(CoreRotationWraps {
@@ -432,7 +462,6 @@ pub fn rotation_wraps(
                 ciphersuite: wrap.ciphersuite.clone(),
             })
             .collect(),
-        kdf_salt: b64(&wraps.kdf_salt),
         phrase: wraps.phrase,
         phrase_mldsa_pk: b64(&wraps.phrase_recovery.mldsa_pk),
         phrase_ed25519_pk: b64(&wraps.phrase_recovery.ed25519_pk),
@@ -588,7 +617,7 @@ mod tests {
         }
     }
 
-    fn refusal(revoke: Option<Uuid>, devices: &[CoreDevice]) -> RotationRefusal {
+    fn refusal(revoke: &[Uuid], devices: &[CoreDevice]) -> RotationRefusal {
         match rotation_recipients(Uuid::from_u128(1), revoke, devices).unwrap_err() {
             CoreError::Rotation { refusal } => refusal,
             other => panic!("expected a rotation refusal, got {other:?}"),
@@ -599,7 +628,7 @@ mod tests {
     fn revoking_a_device_leaves_every_other_one_holding_a_wrap() {
         let devices = [device(1), device(2), device(3)];
         let remaining =
-            rotation_recipients(Uuid::from_u128(1), Some(Uuid::from_u128(2)), &devices).unwrap();
+            rotation_recipients(Uuid::from_u128(1), &[Uuid::from_u128(2)], &devices).unwrap();
         assert_eq!(
             remaining
                 .iter()
@@ -612,14 +641,14 @@ mod tests {
     #[test]
     fn a_rotation_that_revokes_nothing_wraps_for_the_whole_roster() {
         let devices = [device(1), device(2)];
-        let remaining = rotation_recipients(Uuid::from_u128(1), None, &devices).unwrap();
+        let remaining = rotation_recipients(Uuid::from_u128(1), &[], &devices).unwrap();
         assert_eq!(remaining.len(), 2);
     }
 
     #[test]
     fn the_signed_in_device_cannot_revoke_itself() {
         assert_eq!(
-            refusal(Some(Uuid::from_u128(1)), &[device(1), device(2)]),
+            refusal(&[Uuid::from_u128(1)], &[device(1), device(2)]),
             RotationRefusal::RevokingSelf
         );
     }
@@ -627,15 +656,42 @@ mod tests {
     #[test]
     fn a_device_already_gone_from_the_roster_cannot_be_revoked() {
         assert_eq!(
-            refusal(Some(Uuid::from_u128(9)), &[device(1), device(2)]),
+            refusal(&[Uuid::from_u128(9)], &[device(1), device(2)]),
             RotationRefusal::NotInRoster
         );
     }
 
     #[test]
+    fn a_revoke_list_must_be_strictly_ascending() {
+        let (a, b) = (Uuid::from_u128(2), Uuid::from_u128(3));
+        let devices = [device(1), device(2), device(3), device(4)];
+        for list in [vec![a, a], vec![b, a]] {
+            assert_eq!(
+                refusal(&list, &devices),
+                RotationRefusal::RevokedOutOfOrder,
+                "{list:?}"
+            );
+        }
+        let remaining = rotation_recipients(Uuid::from_u128(1), &[a, b], &devices).unwrap();
+        assert_eq!(remaining.len(), 2);
+    }
+
+    #[test]
+    fn revoking_two_devices_leaves_the_rest() {
+        let devices = [device(1), device(2), device(3)];
+        let remaining = rotation_recipients(
+            Uuid::from_u128(1),
+            &[Uuid::from_u128(2), Uuid::from_u128(3)],
+            &devices,
+        )
+        .unwrap();
+        assert_eq!(remaining.len(), 1);
+    }
+
+    #[test]
     fn the_last_device_cannot_be_revoked() {
         assert_eq!(
-            refusal(Some(Uuid::from_u128(2)), &[device(2)]),
+            refusal(&[Uuid::from_u128(2)], &[device(2)]),
             RotationRefusal::LastDevice
         );
     }
@@ -645,7 +701,7 @@ mod tests {
     #[test]
     fn a_device_not_in_the_roster_cannot_rotate() {
         assert_eq!(
-            refusal(None, &[device(2), device(3)]),
+            refusal(&[], &[device(2), device(3)]),
             RotationRefusal::NotEnrolled
         );
     }
@@ -718,7 +774,8 @@ mod tests {
             crate::sync::open_row(&new_ck, collection(), &resealed).unwrap(),
             RowOutcome::Object {
                 content_type: "application/sealbook.note+json".into(),
-                payload: "{}".into(),
+                // A payload declaring no version is moved to the current one.
+                payload: r#"{"version":"1.1"}"#.into(),
             }
         );
         // The old key is retired by the rotation, and stops opening the row.
@@ -770,18 +827,12 @@ mod tests {
     }
 
     #[test]
-    fn wraps_go_to_each_device_then_the_password_then_the_phrase() {
+    fn wraps_go_to_each_device_then_the_phrase() {
         let (first, first_secret) = enrolled(1);
         let (second, _) = enrolled(2);
         let key = CollectionKey::from_bytes(KEY);
-        let wraps = rotation_wraps_typed(
-            &key,
-            &binding(),
-            &[first.clone(), second.clone()],
-            "ada",
-            "hunter2",
-        )
-        .unwrap();
+        let wraps = rotation_wraps_typed(&key, &binding(), &[first.clone(), second.clone()], "ada")
+            .unwrap();
         let order: Vec<(&str, &str)> = wraps
             .key_wraps
             .iter()
@@ -792,16 +843,14 @@ mod tests {
             [
                 ("device", first.device_id.to_string().as_str()),
                 ("device", second.device_id.to_string().as_str()),
-                ("recovery", "ada"),
                 ("phrase", "ada"),
             ]
         );
         assert_eq!(wraps.key_wraps[0].ciphersuite, XWING_CIPHERSUITE);
-        assert_eq!(wraps.key_wraps[2].ciphersuite, RECOVERY_CIPHERSUITE);
-        assert_eq!(wraps.key_wraps[3].ciphersuite, PHRASE_CIPHERSUITE);
+        assert_eq!(wraps.key_wraps[2].ciphersuite, PHRASE_CIPHERSUITE);
         assert_eq!(wraps.phrase_recovery.scheme, PHRASE_SCHEME);
 
-        let opened = sealbook_crypto::unwrap_for_device(
+        let (opened, form) = sealbook_crypto::unwrap_for_device(
             &first_secret,
             &sealbook_crypto::DeviceHpkeWrap {
                 enc: wraps.key_wraps[0].hpke_enc.clone(),
@@ -812,6 +861,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(opened.as_bytes(), &KEY);
+        assert_eq!(form, sealbook_crypto::WrapForm::Bound);
     }
 
     #[test]
@@ -823,12 +873,10 @@ mod tests {
             binding().key_epoch,
             &[only],
             "ada",
-            "pw",
         )
         .unwrap();
-        assert_eq!(wraps.key_wraps.len(), 3);
+        assert_eq!(wraps.key_wraps.len(), 2);
         assert_eq!(wraps.phrase.split_whitespace().count(), 24);
-        assert!(URL_SAFE_NO_PAD.decode(&wraps.kdf_salt).is_ok());
         assert!(URL_SAFE_NO_PAD.decode(&wraps.phrase_lookup_id).is_ok());
     }
 
@@ -836,14 +884,10 @@ mod tests {
     fn a_device_key_that_is_not_base64_is_refused() {
         let mut bad = device(1);
         bad.xwing_hpke_pk = "***".into();
-        assert!(rotation_wraps_typed(
-            &CollectionKey::from_bytes(KEY),
-            &binding(),
-            &[bad],
-            "ada",
-            "pw"
-        )
-        .is_err());
+        assert!(
+            rotation_wraps_typed(&CollectionKey::from_bytes(KEY), &binding(), &[bad], "ada")
+                .is_err()
+        );
     }
 }
 
@@ -851,8 +895,8 @@ mod tests {
 #[cfg(feature = "uniffi")]
 pub mod ffi {
     use super::{
-        CoreDevice, CoreError, CoreManifestEntry, CoreRotationWraps, CoreSealedRow, ResealRow,
-        RotationPlan, RotationState,
+        CoreDevice, CoreError, CoreManifestEntry, CoreResealed, CoreRotationWraps, CoreSealedRow,
+        ResealRow, RotationPlan, RotationState,
     };
     use uuid::Uuid;
 
@@ -869,10 +913,10 @@ pub mod ffi {
     #[uniffi::export]
     pub fn rotation_recipients(
         self_device_id: Uuid,
-        revoke_device_id: Option<Uuid>,
+        revoke_device_ids: Vec<Uuid>,
         devices: Vec<CoreDevice>,
     ) -> Result<Vec<CoreDevice>, CoreError> {
-        super::rotation_recipients(self_device_id, revoke_device_id, &devices)
+        super::rotation_recipients(self_device_id, &revoke_device_ids, &devices)
     }
 
     #[uniffi::export]
@@ -882,7 +926,6 @@ pub mod ffi {
         new_key_epoch: u64,
         recipients: Vec<CoreDevice>,
         username: String,
-        password: String,
     ) -> Result<CoreRotationWraps, CoreError> {
         super::rotation_wraps(
             &new_ck_b64,
@@ -890,8 +933,17 @@ pub mod ffi {
             new_key_epoch,
             &recipients,
             &username,
-            &password,
         )
+    }
+
+    #[uniffi::export]
+    pub fn reseal_row_upgrading(
+        old_ck_b64: String,
+        new_ck_b64: String,
+        collection_id: Uuid,
+        row: ResealRow,
+    ) -> Result<CoreResealed, CoreError> {
+        super::reseal_row_upgrading(&old_ck_b64, &new_ck_b64, collection_id, &row)
     }
 
     #[uniffi::export]

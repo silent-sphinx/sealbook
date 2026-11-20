@@ -70,6 +70,19 @@ pub enum CoreError {
          issues a new recovery phrase"
     )]
     RecoveryRotationPending,
+    #[error(
+        "this account has not moved to the current protocol: the collection key must be rotated, \
+         which issues a new recovery phrase"
+    )]
+    UpgradeRotationPending,
+    /// The server served a key that does not open the vault this device already
+    /// holds. Its own error, so a forged key is not mistaken for corruption.
+    #[error("the server served a key that does not match your vault")]
+    KeyMismatch,
+    /// An unbound device wrap, a constant-AAD phrase wrap or a key under an
+    /// uncommitted roster, offered after the account has migrated.
+    #[error("the server served key material in a form this account no longer uses")]
+    LegacyKeyMaterial,
     /// The key this device was served decrypted none of the collection's rows,
     /// so it is not the key the vault is sealed under. Raised rather than
     /// counted: a listing that came back empty would read as an emptied vault.
@@ -153,6 +166,9 @@ impl CoreError {
             CoreError::PairPending => "PairPending",
             CoreError::CollectionBusy => "CollectionBusy",
             CoreError::RecoveryRotationPending => "RecoveryRotationPending",
+            CoreError::UpgradeRotationPending => "UpgradeRotationPending",
+            CoreError::KeyMismatch => "KeyMismatch",
+            CoreError::LegacyKeyMaterial => "LegacyKeyMaterial",
             CoreError::WrongCollectionKey { .. } => "WrongCollectionKey",
             CoreError::Rotation { .. } => "Rotation",
             CoreError::Auth { .. } => "Auth",
