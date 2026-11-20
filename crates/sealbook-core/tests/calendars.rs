@@ -19,6 +19,7 @@
 use sealbook_core::*;
 use serde::{Deserialize, Serialize};
 
+const NOW: &str = "2026-10-28T12:00:00Z";
 const FIXTURE: &str = "../sealbook-protocol/fixtures/payloads/calendars.json";
 
 const EVENT: &str = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
@@ -26,6 +27,7 @@ const CALENDAR: &str = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
 #[derive(Serialize, Deserialize)]
 struct Fixture {
+    now: String,
     constants: Constants,
     calendar_writes: Vec<CalendarWriteCase>,
     calendar_parses: Vec<CalendarParseCase>,
@@ -496,7 +498,7 @@ fn every_written_calendar_is_the_one_spelling_the_fixture_holds() {
         assert_eq!(expected.case, case);
         assert_eq!(expected.draft, draft, "{case}: the draft drifted");
         assert_eq!(
-            calendar_write(&draft).expect("writes"),
+            calendar_write(&draft, NOW).expect("writes"),
             expected.payload,
             "{case}"
         );
@@ -521,7 +523,7 @@ fn every_written_event_is_the_one_spelling_the_fixture_holds() {
         assert_eq!(expected.case, case);
         assert_eq!(expected.draft, draft, "{case}: the draft drifted");
         assert_eq!(
-            event_write(&draft).expect("writes"),
+            event_write(&draft, NOW).expect("writes"),
             expected.payload,
             "{case}"
         );
@@ -569,21 +571,27 @@ fn a_payload_from_a_newer_schema_major_is_read_but_never_written_over() {
     let calendar = calendar_parse(CALENDAR, future);
     assert_eq!(calendar.name, "future");
     assert!(!calendar.readable);
-    let refused = calendar_write(&CoreCalendarDraft {
-        name: "edited".into(),
-        raw: Some(future.into()),
-        ..blank_calendar()
-    })
+    let refused = calendar_write(
+        &CoreCalendarDraft {
+            name: "edited".into(),
+            raw: Some(future.into()),
+            ..blank_calendar()
+        },
+        NOW,
+    )
     .expect_err("refuses");
     assert_eq!(error_name(&refused), refusals[0].error);
 
     let future = r#"{"@type":"CalendarEvent","version":"2.0","title":"future"}"#;
     assert!(!event_parse(EVENT, future).readable);
-    let refused = event_write(&CoreCalendarEventDraft {
-        title: "edited".into(),
-        raw: Some(future.into()),
-        ..blank_event()
-    })
+    let refused = event_write(
+        &CoreCalendarEventDraft {
+            title: "edited".into(),
+            raw: Some(future.into()),
+            ..blank_event()
+        },
+        NOW,
+    )
     .expect_err("refuses");
     assert_eq!(error_name(&refused), refusals[1].error);
 }
@@ -611,6 +619,7 @@ fn regenerate() {
         return;
     }
     let fixture = Fixture {
+        now: NOW.into(),
         constants: Constants {
             calendar_content_type: CALENDAR_CONTENT_TYPE.into(),
             calendar_event_content_type: CALENDAR_EVENT_CONTENT_TYPE.into(),
@@ -634,7 +643,7 @@ fn regenerate() {
             .into_iter()
             .map(|(case, draft)| CalendarWriteCase {
                 case,
-                payload: calendar_write(&draft).expect("writes"),
+                payload: calendar_write(&draft, NOW).expect("writes"),
                 draft,
             })
             .collect(),
@@ -651,7 +660,7 @@ fn regenerate() {
             .into_iter()
             .map(|(case, draft)| EventWriteCase {
                 case,
-                payload: event_write(&draft).expect("writes"),
+                payload: event_write(&draft, NOW).expect("writes"),
                 draft,
             })
             .collect(),

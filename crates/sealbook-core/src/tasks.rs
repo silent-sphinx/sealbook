@@ -35,7 +35,7 @@ use serde_json::{json, Map, Value};
 use crate::bookmarks::{normalize_tags, tone, ToneNode};
 use crate::calendars::{parse_recurrence, present, recurrence_json, stored_rule};
 use crate::payload::{
-    as_object, declared_readable, refuse_newer_major, text, trimmed, write_payload,
+    as_object, declared_readable, refuse_newer_major, stamp, text, trimmed, upgraded, write_payload,
 };
 use crate::{CoreError, CoreRecurrence};
 use sealbook_protocol::PAYLOAD_SCHEMA_VERSION;
@@ -81,6 +81,8 @@ pub const TASK_LIST_KEYS: &[&str] = &[
     "color",
     "archived",
     "hideFromAll",
+    "createdAt",
+    "updatedAt",
 ];
 
 /// The default task list's id, as a string, since that is how every host holds a
@@ -381,6 +383,13 @@ pub struct CoreTaskList {
     /// When it went into the trash: see `crate::trash`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trashed_at: Option<String>,
+    /// When it was first written. `None` on an object from before this was
+    /// recorded: unknown, never invented.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    /// When it was last written. `None` as for `created_at`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
     pub readable: bool,
     pub raw: String,
 }
@@ -533,7 +542,7 @@ pub fn task_write(draft: &CoreTaskDraft, now: &str) -> Result<String, CoreError>
 }
 
 pub fn task_list_parse(id: &str, raw: &str) -> CoreTaskList {
-    let object = as_object(raw);
+    let object = upgraded(crate::CorePayloadKind::TaskList, as_object(raw));
     let read = |key: &str| object.as_ref().and_then(|object| trimmed(object, key));
     CoreTaskList {
         id: id.to_string(),
@@ -550,6 +559,8 @@ pub fn task_list_parse(id: &str, raw: &str) -> CoreTaskList {
             .and_then(|object| object.get("hideFromAll"))
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        created_at: read("createdAt"),
+        updated_at: read("updatedAt"),
         trashed_at: object.as_ref().and_then(|object| {
             crate::trash::stored_trashed_at(crate::CorePayloadKind::TaskList, object)
         }),
@@ -558,7 +569,7 @@ pub fn task_list_parse(id: &str, raw: &str) -> CoreTaskList {
     }
 }
 
-pub fn task_list_write(draft: &CoreTaskListDraft) -> Result<String, CoreError> {
+pub fn task_list_write(draft: &CoreTaskListDraft, now: &str) -> Result<String, CoreError> {
     refuse_newer_major(draft.raw.as_deref())?;
 
     let mut fields = Map::new();
@@ -577,6 +588,7 @@ pub fn task_list_write(draft: &CoreTaskListDraft) -> Result<String, CoreError> {
     if draft.hide_from_all {
         fields.insert("hideFromAll".into(), json!(true));
     }
+    stamp(&mut fields, draft.raw.as_deref(), now);
     Ok(write_payload(
         draft.raw.as_deref(),
         Value::Object(fields),
@@ -669,8 +681,8 @@ pub mod ffi {
     }
 
     #[uniffi::export(name = "task_list_write")]
-    pub fn task_list_write(draft: CoreTaskListDraft) -> Result<String, CoreError> {
-        super::task_list_write(&draft)
+    pub fn task_list_write(draft: CoreTaskListDraft, now: String) -> Result<String, CoreError> {
+        super::task_list_write(&draft, &now)
     }
 
     #[uniffi::export(name = "task_list_name_by_id")]

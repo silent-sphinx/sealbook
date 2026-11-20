@@ -43,7 +43,7 @@ fn call(op: &str, args: &[Value]) -> Value {
             &arg::<String>(args, 1),
         ))),
         "task.normalize_due" => out::<_, String>(Ok(normalize_due_date(&arg::<String>(args, 0)))),
-        "task_list.write" => out(task_list_write(&arg(args, 0))),
+        "task_list.write" => out(task_list_write(&arg(args, 0), &arg::<String>(args, 1))),
         "task_list.parse" => out::<_, String>(Ok(task_list_parse(
             &arg::<String>(args, 0),
             &arg::<String>(args, 1),
@@ -57,7 +57,10 @@ fn call(op: &str, args: &[Value]) -> Value {
             &arg::<String>(args, 0),
             &arg::<String>(args, 1),
         ))),
-        "bookmark_collection.write" => out(bookmark_collection_write(&arg(args, 0))),
+        "bookmark_collection.write" => out(bookmark_collection_write(
+            &arg(args, 0),
+            &arg::<String>(args, 1),
+        )),
         "bookmark_collection.parse" => out::<_, String>(Ok(bookmark_collection_parse(
             &arg::<String>(args, 0),
             &arg::<String>(args, 1),
@@ -81,17 +84,18 @@ fn call(op: &str, args: &[Value]) -> Value {
             arg::<bool>(args, 2),
             arg::<bool>(args, 3),
             arg::<Option<String>>(args, 4).as_deref(),
+            &arg::<String>(args, 5),
         )),
         "notebook.parse" => out::<_, String>(Ok(notebook_parse(
             &arg::<String>(args, 0),
             &arg::<String>(args, 1),
         ))),
-        "calendar.write" => out(calendar_write(&arg(args, 0))),
+        "calendar.write" => out(calendar_write(&arg(args, 0), &arg::<String>(args, 1))),
         "calendar.parse" => out::<_, String>(Ok(calendar_parse(
             &arg::<String>(args, 0),
             &arg::<String>(args, 1),
         ))),
-        "event.write" => out(event_write(&arg(args, 0))),
+        "event.write" => out(event_write(&arg(args, 0), &arg::<String>(args, 1))),
         "event.parse" => out::<_, String>(Ok(event_parse(
             &arg::<String>(args, 0),
             &arg::<String>(args, 1),
@@ -101,7 +105,7 @@ fn call(op: &str, args: &[Value]) -> Value {
             &arg::<String>(args, 0),
             &arg::<String>(args, 1),
         ))),
-        "address_book.write" => out(address_book_write(&arg(args, 0))),
+        "address_book.write" => out(address_book_write(&arg(args, 0), &arg::<String>(args, 1))),
         "address_book.parse" => out::<_, String>(Ok(address_book_parse(
             &arg::<String>(args, 0),
             &arg::<String>(args, 1),
@@ -159,6 +163,10 @@ fn call(op: &str, args: &[Value]) -> Value {
         "trash.expired" => out::<_, String>(Ok(trash_expired(
             &arg::<Vec<TrashNode>>(args, 0),
             arg(args, 1),
+        ))),
+        "payload.upgrade" => out::<_, String>(Ok(payload_upgrade(
+            &arg::<String>(args, 0),
+            &arg::<String>(args, 1),
         ))),
         other => panic!("the corpus names an operation this host lacks: {other}"),
     }

@@ -35,7 +35,8 @@ use serde_json::{json, Map, Value};
 use crate::contact_profile::{parse_profile, profile_json, CoreContactProfile};
 use crate::notes::{attachment_json, parse_attachments, CoreNoteAttachment};
 use crate::payload::{
-    as_object, declared_readable, entry_with, extra_of, refuse_newer_major, trimmed, write_payload,
+    as_object, declared_readable, entry_with, extra_of, refuse_newer_major, trimmed, upgraded,
+    write_payload, CARD_SCHEMA_PROP,
 };
 use crate::CoreError;
 use sealbook_protocol::PAYLOAD_SCHEMA_VERSION;
@@ -88,6 +89,7 @@ pub fn default_address_book_id() -> String {
 pub const CONTACT_KEYS: &[&str] = &[
     "@type",
     "version",
+    CARD_SCHEMA_PROP,
     "name",
     ADDRESS_BOOK_ID_PROP,
     CONTACT_ARCHIVED_PROP,
@@ -125,6 +127,8 @@ pub const ADDRESS_BOOK_KEYS: &[&str] = &[
     "archived",
     "color",
     "hideFromAll",
+    "createdAt",
+    "updatedAt",
 ];
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -408,6 +412,13 @@ pub struct CoreAddressBook {
     /// When it went into the trash: see `crate::trash`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trashed_at: Option<String>,
+    /// When it was first written. `None` on an object from before this was
+    /// recorded: unknown, never invented.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    /// When it was last written. `None` as for `created_at`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
     pub readable: bool,
     pub raw: String,
 }
@@ -1151,12 +1162,24 @@ fn social_entries(socials: &[CoreContactSocial]) -> Option<Value> {
 /// `now` is the caller's clock, since core has none. It becomes `updated`, and
 /// `created` for a card that has none.
 pub fn contact_write(draft: &CoreContactDraft, now: &str) -> Result<String, CoreError> {
+    write_card(draft, Some(now))
+}
+
+/// [`contact_write`] with the clock optional, for an upgrade: it has none and
+/// must not invent a date, so it writes the card's own `updated` back and a
+/// `created` only where one is stored.
+fn write_card(draft: &CoreContactDraft, now: Option<&str>) -> Result<String, CoreError> {
     refuse_newer_major(draft.raw.as_deref())?;
     let previous = draft.raw.as_deref().and_then(as_object).unwrap_or_default();
 
     let mut fields = Map::new();
     fields.insert("@type".into(), json!("Card"));
-    fields.insert("version".into(), json!(PAYLOAD_SCHEMA_VERSION));
+    // RFC 9553's own version. Sealbook's schema version is `sealbook:version`.
+    fields.insert("version".into(), json!("1.0"));
+    fields.insert(
+        CARD_SCHEMA_PROP.into(),
+        json!(card_schema_version(&previous)),
+    );
     fields.insert("name".into(), json!({ "full": draft.name.trim() }));
     fields.insert(
         ADDRESS_BOOK_ID_PROP.into(),
@@ -1239,17 +1262,52 @@ pub fn contact_write(draft: &CoreContactDraft, now: &str) -> Result<String, Core
             "avatar",
         ),
     );
-    fields.insert(
-        "created".into(),
-        json!(present(&draft.created_at).unwrap_or_else(|| now.to_string())),
-    );
-    fields.insert("updated".into(), json!(now));
+    if let Some(created) = present(&draft.created_at).or_else(|| now.map(str::to_string)) {
+        fields.insert("created".into(), json!(created));
+    }
+    if let Some(now) = now {
+        fields.insert("updated".into(), json!(now));
+    }
 
     Ok(write_payload(
         draft.raw.as_deref(),
         Value::Object(fields),
         CONTACT_KEYS,
     ))
+}
+
+/// The schema version a card write stamps: the current one, unless the card
+/// already declares a later minor of the same major, which a save must not lower.
+fn card_schema_version(previous: &Map<String, Value>) -> String {
+    let current = PAYLOAD_SCHEMA_VERSION;
+    let pair = |text: &str| -> Option<(u32, u32)> {
+        let (major, minor) = text.split_once('.')?;
+        Some((major.parse().ok()?, minor.parse().ok()?))
+    };
+    match crate::payload::declared_version(previous) {
+        Some(declared) if pair(declared) > pair(current) && declared.starts_with("1.") => {
+            declared.to_string()
+        }
+        _ => current.to_string(),
+    }
+}
+
+/// A stored card moved to the current schema, or `None` when it is current, from
+/// a major this build does not read, or not a card.
+///
+/// Legacy keys are converted, not dropped: the card goes through the parser, which
+/// still reads `fullName`, `photo`, `nicknames`, `pronouns` and the rest, and back
+/// through the writer, which owns those keys and clears them. A value held only
+/// under a legacy key therefore lands under its canonical one. Keys the card model
+/// does not carry survive through the writer's carry of the stored card.
+///
+/// It writes no date it was not given: `updated` stays what the card held.
+pub(crate) fn contact_upgrade(object: &Map<String, Value>, raw: &str) -> Option<String> {
+    if !crate::payload::declares_legacy(object) {
+        return None;
+    }
+    let contact = contact_parse("", raw);
+    write_card(&contact.draft(), contact.updated_at.as_deref()).ok()
 }
 
 /// Reads a stored address book.
@@ -1259,7 +1317,7 @@ pub fn contact_write(draft: &CoreContactDraft, now: &str) -> Result<String, Core
 /// wrote, and anything else shows the one book every account has under a name
 /// nobody chose.
 pub fn address_book_parse(id: &str, raw: &str) -> CoreAddressBook {
-    let object = as_object(raw);
+    let object = upgraded(crate::CorePayloadKind::AddressBook, as_object(raw));
     CoreAddressBook {
         id: id.to_string(),
         name: object
@@ -1283,6 +1341,12 @@ pub fn address_book_parse(id: &str, raw: &str) -> CoreAddressBook {
             .and_then(Value::as_bool)
             .unwrap_or(false),
         color: object.as_ref().and_then(|object| trimmed(object, "color")),
+        created_at: object
+            .as_ref()
+            .and_then(|object| trimmed(object, "createdAt")),
+        updated_at: object
+            .as_ref()
+            .and_then(|object| trimmed(object, "updatedAt")),
         trashed_at: object.as_ref().and_then(|object| {
             crate::trash::stored_trashed_at(crate::CorePayloadKind::AddressBook, object)
         }),
@@ -1292,7 +1356,7 @@ pub fn address_book_parse(id: &str, raw: &str) -> CoreAddressBook {
 }
 
 /// Serialises an address book, merging onto whatever `draft.raw` carried.
-pub fn address_book_write(draft: &CoreAddressBookDraft) -> Result<String, CoreError> {
+pub fn address_book_write(draft: &CoreAddressBookDraft, now: &str) -> Result<String, CoreError> {
     refuse_newer_major(draft.raw.as_deref())?;
     let mut fields = Map::new();
     fields.insert("@type".into(), json!("AddressBook"));
@@ -1307,6 +1371,7 @@ pub fn address_book_write(draft: &CoreAddressBookDraft) -> Result<String, CoreEr
     if let Some(color) = present(&draft.color) {
         fields.insert("color".into(), json!(color));
     }
+    crate::payload::stamp(&mut fields, draft.raw.as_deref(), now);
     Ok(write_payload(
         draft.raw.as_deref(),
         Value::Object(fields),
@@ -1397,8 +1462,11 @@ pub mod ffi {
     }
 
     #[uniffi::export(name = "address_book_write")]
-    pub fn address_book_write(draft: CoreAddressBookDraft) -> Result<String, CoreError> {
-        super::address_book_write(&draft)
+    pub fn address_book_write(
+        draft: CoreAddressBookDraft,
+        now: String,
+    ) -> Result<String, CoreError> {
+        super::address_book_write(&draft, &now)
     }
 
     #[uniffi::export(name = "address_book_tone")]

@@ -21,6 +21,13 @@ const MARKER: &str = "sealbook: note";
 
 /// Matches the per-account byte quota, because the largest file anyone can
 /// reasonably import is a full export of their own vault.
+/// The notes export's `@type`. Older files carry none, and an import does not
+/// require one.
+pub const NOTES_EXPORT_TYPE: &str = "SealbookNotesExport";
+
+/// The export format's own version, a string `major.minor` like every other.
+pub const NOTES_EXPORT_VERSION: &str = "1.1";
+
 pub const MAX_NOTE_IMPORT_BYTES: usize = 128 * 1024 * 1024;
 pub const MAX_IMPORTED_NOTES: usize = 500;
 
@@ -154,7 +161,8 @@ pub fn notes_write_json(
         })
         .collect();
     let document = json!({
-        "version": "1.0",
+        "@type": NOTES_EXPORT_TYPE,
+        "version": NOTES_EXPORT_VERSION,
         "exportedAt": exported_at,
         "notebooks": notebooks
             .iter()

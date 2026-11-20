@@ -186,6 +186,8 @@ pub fn account_export_parse(document: &str) -> Result<CoreAccountImport, CoreErr
             },
             Some(payload) => payload.to_string(),
         };
+        // A file exported before this schema went in as it was written.
+        let payload = crate::payload::upgrade(&content_type, &payload).unwrap_or(payload);
         objects.push(CoreExportObject {
             id: id.to_string(),
             content_type,

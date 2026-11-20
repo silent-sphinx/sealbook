@@ -487,7 +487,8 @@ fn every_notebook_payload_is_the_one_spelling_the_fixture_holds() {
                 color.as_deref(),
                 archived,
                 hide_from_all,
-                previous.as_deref()
+                previous.as_deref(),
+                NOW
             )
             .expect("writes"),
             expected.payload,
@@ -591,7 +592,7 @@ fn a_payload_from_a_newer_schema_major_is_read_but_never_written_over() {
     let notebook = r#"{"@type":"Notebook","version":"3.1","name":"future"}"#;
     assert!(!notebook_parse(&default_notebook_id(), notebook).readable);
     let refused =
-        notebook_write("edited", None, false, false, Some(notebook)).expect_err("refuses");
+        notebook_write("edited", None, false, false, Some(notebook), NOW).expect_err("refuses");
     assert_eq!(error_name(&refused), refusals[1].error);
 }
 
@@ -658,6 +659,7 @@ fn regenerate() {
                         archived,
                         hide_from_all,
                         previous.as_deref(),
+                        NOW,
                     )
                     .expect("writes"),
                     name,

@@ -585,7 +585,7 @@ fn every_list_payload_is_the_one_spelling_the_fixture_holds() {
         assert_eq!(expected.case, case);
         assert_eq!(expected.draft, draft, "{case}: the draft drifted");
         assert_eq!(
-            task_list_write(&draft).expect("writes"),
+            task_list_write(&draft, NOW).expect("writes"),
             expected.payload,
             "{case}"
         );
@@ -645,11 +645,14 @@ fn a_payload_from_a_newer_schema_major_is_read_but_never_written_over() {
 
     let list = r#"{"@type":"TaskList","version":"3.1","name":"future"}"#;
     assert!(!task_list_parse(CHILD, list).readable);
-    let refused = task_list_write(&CoreTaskListDraft {
-        name: "edited".into(),
-        raw: Some(list.into()),
-        ..Default::default()
-    })
+    let refused = task_list_write(
+        &CoreTaskListDraft {
+            name: "edited".into(),
+            raw: Some(list.into()),
+            ..Default::default()
+        },
+        NOW,
+    )
     .expect_err("refuses");
     assert_eq!(error_name(&refused), refusals[1].error);
 }
@@ -733,7 +736,7 @@ fn regenerate() {
             .into_iter()
             .map(|(case, draft)| ListWriteCase {
                 case,
-                payload: task_list_write(&draft).expect("writes"),
+                payload: task_list_write(&draft, NOW).expect("writes"),
                 draft,
             })
             .collect(),

@@ -133,7 +133,7 @@ fn task_written(write: &CoreTaskWrite) -> Written {
 fn list_written(write: &CoreTaskListWrite) -> Written {
     Written {
         id: write.id.clone(),
-        payload: task_list_write(&write.draft).expect("writable"),
+        payload: task_list_write(&write.draft, NOW).expect("writable"),
     }
 }
 

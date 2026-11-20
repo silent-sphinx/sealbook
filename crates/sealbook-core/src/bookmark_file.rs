@@ -4,8 +4,10 @@
 //! file. The web used to keep the first in `lib/bookmarkExport.ts`, which broke
 //! the rule that a format has one author.
 //!
-//! **Sealbook JSON** (`sealbook-bookmark-export`, version 1): the format the web
-//! has always written. A bare JSON array of bookmark-like objects is read too.
+//! **Sealbook JSON** (`SealbookBookmarksExport`, version 1.1): the format the web
+//! has always written, under its old `sealbook-bookmark-export` tag and a
+//! numeric version, which are still read. A bare JSON array of bookmark-like
+//! objects is read too.
 //!
 //! **Netscape HTML**: the `<!DOCTYPE NETSCAPE-Bookmark-file-1>` file Firefox,
 //! Chrome, Safari and Edge all export and import. Folders become the nesting
@@ -25,7 +27,13 @@ use crate::bookmarks::{
 };
 use crate::CoreError;
 
-pub const BOOKMARK_EXPORT_TYPE: &str = "sealbook-bookmark-export";
+pub const BOOKMARK_EXPORT_TYPE: &str = "SealbookBookmarksExport";
+
+/// The tag exports carried before the spelling was unified. Read, never written.
+pub const LEGACY_BOOKMARK_EXPORT_TYPE: &str = "sealbook-bookmark-export";
+
+/// The export format's own version, a string `major.minor` like every other.
+pub const BOOKMARK_EXPORT_VERSION: &str = "1.1";
 
 /// Shown for a file that is not JSON at all.
 pub const BOOKMARK_NOT_JSON: &str = "Not a valid JSON file.";
@@ -361,7 +369,7 @@ pub fn bookmark_export(
         .collect();
     serde_json::to_string_pretty(&json!({
         "@type": BOOKMARK_EXPORT_TYPE,
-        "version": 1,
+        "version": BOOKMARK_EXPORT_VERSION,
         "exportedAt": now,
         "bookmarks": entries,
         "collections": folders,
@@ -404,10 +412,15 @@ fn import_json(text: &str) -> Result<CoreBookmarkImport, CoreError> {
     let tree = export_collections(&parsed);
     let entries = match &parsed {
         Value::Array(entries) => entries,
-        Value::Object(body) if body.get("@type") == Some(&json!(BOOKMARK_EXPORT_TYPE)) => body
-            .get("bookmarks")
-            .and_then(Value::as_array)
-            .ok_or_else(|| CoreError::malformed(BOOKMARK_UNRECOGNISED))?,
+        Value::Object(body)
+            if [BOOKMARK_EXPORT_TYPE, LEGACY_BOOKMARK_EXPORT_TYPE]
+                .iter()
+                .any(|tag| body.get("@type") == Some(&json!(tag))) =>
+        {
+            body.get("bookmarks")
+                .and_then(Value::as_array)
+                .ok_or_else(|| CoreError::malformed(BOOKMARK_UNRECOGNISED))?
+        }
         _ => return Err(CoreError::malformed(BOOKMARK_UNRECOGNISED)),
     };
     let mut bookmarks = Vec::new();
@@ -1390,8 +1403,8 @@ mod tests {
             "2026-11-11T00:00:00Z",
         ))
         .unwrap();
-        assert_eq!(out["@type"], "sealbook-bookmark-export");
-        assert_eq!(out["version"], 1);
+        assert_eq!(out["@type"], "SealbookBookmarksExport");
+        assert_eq!(out["version"], "1.1");
         assert_eq!(out["exportedAt"], "2026-11-11T00:00:00Z");
         assert_eq!(
             out["bookmarks"][0],

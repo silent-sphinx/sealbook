@@ -89,18 +89,6 @@ fn trash_key(kind: CorePayloadKind) -> &'static str {
     }
 }
 
-fn container_key(kind: CorePayloadKind) -> Option<&'static str> {
-    use CorePayloadKind::*;
-    match kind {
-        Contact => Some(sealbook_protocol::ADDRESS_BOOK_ID_PROP),
-        CalendarEvent => Some("calendarId"),
-        Note => Some("notebookId"),
-        Task => Some("taskListId"),
-        Bookmark => Some("collectionId"),
-        _ => None,
-    }
-}
-
 fn default_container(kind: CorePayloadKind) -> Option<String> {
     use sealbook_protocol::*;
     use CorePayloadKind::*;
@@ -147,7 +135,9 @@ pub fn trash_restore_write(
         if rehome.clear_parent {
             object.remove("parentId");
         }
-        if let (Some(key), Some(container)) = (container_key(kind), &rehome.container_id) {
+        if let (Some(key), Some(container)) =
+            (crate::payload::container_key_of(kind), &rehome.container_id)
+        {
             object.insert(key.into(), json!(container));
         }
     }
@@ -227,7 +217,9 @@ impl<'a> Graph<'a> {
                 }
             }
             if let Some(container) = node.container_id.as_deref() {
-                if container_key(node.kind).is_some() && by_id.contains_key(container) {
+                if crate::payload::container_key_of(node.kind).is_some()
+                    && by_id.contains_key(container)
+                {
                     links.push(container);
                 }
             }
@@ -325,7 +317,7 @@ pub fn trash_restore_plan(nodes: &[TrashNode], id: &str) -> Option<TrashRehome> 
         .parent_id
         .as_deref()
         .is_some_and(|parent| graph.nodes.contains_key(parent) && graph.hidden(parent));
-    let container_hidden = container_key(node.kind).is_some()
+    let container_hidden = crate::payload::container_key_of(node.kind).is_some()
         && node.container_id.as_deref().is_some_and(|container| {
             graph.nodes.contains_key(container) && graph.hidden(container)
         });

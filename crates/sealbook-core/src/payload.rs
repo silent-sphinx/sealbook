@@ -26,7 +26,8 @@ use sealbook_protocol::payload_schema_readable;
 /// Serialises a payload: the owned fields this write names, over whatever of
 /// `previous` this build does not own.
 pub fn write_payload(previous: Option<&str>, fields: Value, owned: &[&str]) -> String {
-    let mut merged = carried(previous, owned);
+    let upgraded = upgraded_previous(previous, &fields);
+    let mut merged = carried(upgraded.as_deref().or(previous), owned);
     if let Some(fields) = fields.as_object() {
         for (key, value) in fields {
             if owned.contains(&key.as_str()) {
@@ -38,6 +39,22 @@ pub fn write_payload(previous: Option<&str>, fields: Value, owned: &[&str]) -> S
         merged.insert("version".into(), Value::String(previous));
     }
     natural_json(&Value::Object(merged))
+}
+
+/// `previous` upgraded to the schema this write stamps, so a key the writer no
+/// longer owns is not carried through and the old shape does not survive every
+/// save. A Card is left alone: its writer owns the legacy keys and clears them.
+fn upgraded_previous(previous: Option<&str>, fields: &Value) -> Option<String> {
+    let tag = fields
+        .get("@type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let kind = payload_kind("", &serde_json::json!({ "@type": tag }).to_string());
+    if kind == CorePayloadKind::Contact {
+        return None;
+    }
+    let mut object = as_object(previous?)?;
+    upgrade_object(kind, &mut object).then(|| Value::Object(object).to_string())
 }
 
 /// Compact JSON with each object's keys in natural order, so `e2` precedes
@@ -151,6 +168,30 @@ pub(crate) fn text(object: &Map<String, Value>, key: &str) -> String {
         .to_string()
 }
 
+/// Sets `createdAt` and `updatedAt` on a write: `createdAt` is what the stored
+/// payload holds, else `now`, and `updatedAt` is always `now`. Core has no clock,
+/// so the caller's is the only one there is.
+pub(crate) fn stamp(fields: &mut Map<String, Value>, previous: Option<&str>, now: &str) {
+    let created = previous
+        .and_then(as_object)
+        .and_then(|stored| trimmed(&stored, "createdAt"))
+        .unwrap_or_else(|| now.to_string());
+    fields.insert("createdAt".into(), Value::String(created));
+    fields.insert("updatedAt".into(), Value::String(now.to_string()));
+}
+
+/// A parsed payload read as the current schema, so a record looks the same
+/// whichever shape is stored: an event with no calendar is in the default one.
+/// The stored text is untouched; only the read is.
+pub(crate) fn upgraded(
+    kind: CorePayloadKind,
+    object: Option<Map<String, Value>>,
+) -> Option<Map<String, Value>> {
+    let mut object = object?;
+    upgrade_object(kind, &mut object);
+    Some(object)
+}
+
 /// The entry's keys outside `known`, as a JSON object, or `None` when there are none.
 pub(crate) fn extra_of(entry: &Map<String, Value>, known: &[&str]) -> Option<String> {
     let extra: Map<String, Value> = entry
@@ -258,12 +299,28 @@ pub fn payload_kind(content_type: &str, raw: &str) -> CorePayloadKind {
     }
 }
 
+/// The Card property that holds Sealbook's schema version. A Card's own
+/// `version` is RFC 9553's JSContact version and stays `"1.0"`.
+pub const CARD_SCHEMA_PROP: &str = "sealbook:version";
+
+/// The schema version a payload declares: a Card's `sealbook:version`, falling
+/// back to its `version` for a Card written before that property existed, and
+/// `version` for every other type.
+pub(crate) fn declared_version(object: &Map<String, Value>) -> Option<&str> {
+    if object.get("@type").and_then(Value::as_str) == Some("Card") {
+        if let Some(declared) = object.get(CARD_SCHEMA_PROP).and_then(Value::as_str) {
+            return Some(declared);
+        }
+    }
+    object.get("version").and_then(Value::as_str)
+}
+
 /// Whether this build reads the schema major a payload declares.
 ///
-/// A payload with no `version` at all is read: the field was added after the
+/// A payload with no version at all is read: the field was added after the
 /// first release, and absence means the generation this build speaks.
 pub(crate) fn declared_readable(object: &Map<String, Value>) -> bool {
-    match object.get("version").and_then(Value::as_str) {
+    match declared_version(object) {
         Some(declared) => payload_schema_readable(declared),
         None => true,
     }
@@ -284,12 +341,86 @@ pub(crate) fn refuse_newer_major(previous: Option<&str>) -> Result<(), CoreError
         return Ok(());
     }
     Err(CoreError::PayloadSchema {
-        declared: object
-            .get("version")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
+        declared: declared_version(&object)
+            .map(ToOwned::to_owned)
+            .unwrap_or_default(),
     })
+}
+
+/// The key a payload of this kind names its container under, for the kinds that
+/// live in one. The names stay per type; this is the one place that says so.
+pub(crate) fn container_key_of(kind: CorePayloadKind) -> Option<&'static str> {
+    use CorePayloadKind::*;
+    match kind {
+        Contact => Some(sealbook_protocol::ADDRESS_BOOK_ID_PROP),
+        CalendarEvent => Some("calendarId"),
+        Note => Some("notebookId"),
+        Task => Some("taskListId"),
+        Bookmark => Some("collectionId"),
+        _ => None,
+    }
+}
+
+/// [`container_key_of`] for a stored content type.
+pub fn container_key(content_type: &str) -> Option<&'static str> {
+    container_key_of(payload_kind(content_type, ""))
+}
+
+/// Whether a payload declares the generation [`upgrade`] moves forward: `1.0`,
+/// or nothing at all.
+pub(crate) fn declares_legacy(object: &Map<String, Value>) -> bool {
+    match declared_version(object) {
+        None => true,
+        Some(declared) => declared
+            .split_once('.')
+            .is_some_and(|(major, minor)| major == "1" && minor == "0"),
+    }
+}
+
+/// Moves a `1.0` payload to `1.1` in place, for every kind but a Card.
+///
+/// Pure and idempotent: a payload already at `1.1`, from a later major, or of a
+/// kind core does not know comes back untouched. Three things change. An event
+/// with no calendar goes into the default one. A stored `favorite: false` goes,
+/// since a flag is written only when true. And the version moves.
+///
+/// A Card is not handled here: its legacy keys are converted by a round trip
+/// through the card parser and writer, in [`upgrade`].
+pub(crate) fn upgrade_object(kind: CorePayloadKind, object: &mut Map<String, Value>) -> bool {
+    use CorePayloadKind::*;
+    if matches!(kind, Contact | Unknown) || !declares_legacy(object) {
+        return false;
+    }
+    if kind == CalendarEvent && trimmed(object, "calendarId").is_none() {
+        object.insert(
+            "calendarId".into(),
+            Value::String(sealbook_protocol::DEFAULT_CALENDAR_ID.to_string()),
+        );
+    }
+    if object.get("favorite") == Some(&Value::Bool(false)) {
+        object.remove("favorite");
+    }
+    object.insert(
+        "version".into(),
+        Value::String(sealbook_protocol::PAYLOAD_SCHEMA_VERSION.into()),
+    );
+    true
+}
+
+/// A stored payload moved to the current schema, or `None` when there is
+/// nothing to move: not an object, a content type core does not know, already current,
+/// or from a major this build does not read.
+///
+/// Pure and idempotent. Keys core does not model survive.
+pub fn upgrade(content_type: &str, raw: &str) -> Option<String> {
+    let mut object = as_object(raw)?;
+    // By the content type alone: it is the authenticated one, and a payload's own
+    // `@type` must not pick how an object of some other type is rewritten.
+    let kind = payload_kind(content_type, "");
+    if kind == CorePayloadKind::Contact {
+        return crate::contacts::contact_upgrade(&object, raw);
+    }
+    upgrade_object(kind, &mut object).then(|| natural_json(&Value::Object(object)))
 }
 
 #[cfg(feature = "uniffi")]
@@ -299,6 +430,20 @@ pub mod ffi {
     #[uniffi::export(name = "payload_kind")]
     pub fn payload_kind(content_type: String, raw: String) -> CorePayloadKind {
         super::payload_kind(&content_type, &raw)
+    }
+
+    /// A payload moved to the current schema, or `None` when it already is one or
+    /// is not one core knows how to move.
+    #[uniffi::export(name = "payload_upgrade")]
+    pub fn payload_upgrade(content_type: String, raw: String) -> Option<String> {
+        super::upgrade(&content_type, &raw)
+    }
+
+    /// The payload key that names an object's container, for a content type that
+    /// has one.
+    #[uniffi::export(name = "container_key")]
+    pub fn container_key(content_type: String) -> Option<String> {
+        super::container_key(&content_type).map(str::to_string)
     }
 }
 

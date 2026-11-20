@@ -431,7 +431,7 @@ fn every_collection_payload_is_the_one_spelling_the_fixture_holds() {
         assert_eq!(expected.case, case);
         assert_eq!(expected.draft, draft, "{case}: the draft drifted");
         assert_eq!(
-            bookmark_collection_write(&draft).expect("writes"),
+            bookmark_collection_write(&draft, NOW).expect("writes"),
             expected.payload,
             "{case}"
         );
@@ -519,11 +519,14 @@ fn a_payload_from_a_newer_schema_major_is_read_but_never_written_over() {
 
     let collection = r#"{"@type":"BookmarkCollection","version":"3.1","name":"future"}"#;
     assert!(!bookmark_collection_parse(CHILD, collection).readable);
-    let refused = bookmark_collection_write(&CoreBookmarkCollectionDraft {
-        name: "edited".into(),
-        raw: Some(collection.into()),
-        ..Default::default()
-    })
+    let refused = bookmark_collection_write(
+        &CoreBookmarkCollectionDraft {
+            name: "edited".into(),
+            raw: Some(collection.into()),
+            ..Default::default()
+        },
+        NOW,
+    )
     .expect_err("refuses");
     assert_eq!(error_name(&refused), refusals[1].error);
 }
@@ -592,7 +595,7 @@ fn regenerate() {
             .into_iter()
             .map(|(case, draft)| CollectionWriteCase {
                 case,
-                payload: bookmark_collection_write(&draft).expect("writes"),
+                payload: bookmark_collection_write(&draft, NOW).expect("writes"),
                 draft,
             })
             .collect(),

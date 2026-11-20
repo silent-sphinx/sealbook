@@ -26,6 +26,7 @@ const BOOK: &str = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 #[derive(Serialize, Deserialize)]
 struct Fixture {
+    now: String,
     constants: Constants,
     contact_writes: Vec<ContactWriteCase>,
     contact_parses: Vec<ContactParseCase>,
@@ -780,7 +781,7 @@ fn every_written_address_book_is_the_one_spelling_the_fixture_holds() {
         assert_eq!(expected.case, case);
         assert_eq!(expected.draft, draft, "{case}: the draft drifted");
         assert_eq!(
-            address_book_write(&draft).expect("writes"),
+            address_book_write(&draft, NOW).expect("writes"),
             expected.payload,
             "{case}"
         );
@@ -858,13 +859,16 @@ fn a_payload_from_a_newer_schema_major_is_read_but_never_written_over() {
 
     let future = r#"{"@type":"AddressBook","version":"2.0","name":"future"}"#;
     assert!(!address_book_parse(BOOK, future).readable);
-    let refused = address_book_write(&CoreAddressBookDraft {
-        name: "edited".into(),
-        archived: false,
-        hide_from_all: false,
-        color: None,
-        raw: Some(future.into()),
-    })
+    let refused = address_book_write(
+        &CoreAddressBookDraft {
+            name: "edited".into(),
+            archived: false,
+            hide_from_all: false,
+            color: None,
+            raw: Some(future.into()),
+        },
+        NOW,
+    )
     .expect_err("refuses");
     assert_eq!(error_name(&refused), refusals[1].error);
 }
@@ -911,6 +915,7 @@ fn regenerate() {
         return;
     }
     let fixture = Fixture {
+        now: NOW.into(),
         constants: Constants {
             contact_content_type: JSCONTACT_CONTENT_TYPE.into(),
             address_book_content_type: ADDRESS_BOOK_CONTENT_TYPE.into(),
@@ -953,7 +958,7 @@ fn regenerate() {
             .into_iter()
             .map(|(case, draft)| BookWriteCase {
                 case,
-                payload: address_book_write(&draft).expect("writes"),
+                payload: address_book_write(&draft, NOW).expect("writes"),
                 draft,
             })
             .collect(),

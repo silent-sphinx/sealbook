@@ -94,6 +94,17 @@ pub fn merge_payload(
     remote: &str,
     date: &str,
 ) -> MergeOutcome {
+    // An edit queued under 1.0 must merge cleanly with a 1.1 copy, so all three
+    // sides are read as the current schema first. A side that is not a payload
+    // core knows comes back unchanged.
+    let upgraded = |raw: &str| crate::payload::upgrade(content_type, raw);
+    let (base_up, local_up, remote_up) =
+        (base.and_then(upgraded), upgraded(local), upgraded(remote));
+    let (base, local, remote) = (
+        base_up.as_deref().or(base),
+        local_up.as_deref().unwrap_or(local),
+        remote_up.as_deref().unwrap_or(remote),
+    );
     let (Some(local_obj), Some(remote_obj)) = (as_object(local), as_object(remote)) else {
         return merge_opaque(content_type, base, local, remote, date);
     };

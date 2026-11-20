@@ -92,6 +92,8 @@ fn a_notes_backup_meets_the_schema() {
         id: default_notebook_id(),
         name: "Journal".into(),
         color: None,
+        created_at: None,
+        updated_at: None,
         archived: false,
         hide_from_all: false,
         trashed_at: None,

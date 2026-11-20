@@ -15,15 +15,17 @@ use sealbook_protocol::{ACCOUNT_EXPORT_TYPE, ACCOUNT_EXPORT_VERSION};
 use crate::{
     ACCENTS, ACCOUNT_SETTINGS_CONTENT_TYPE, ACCOUNT_SETTINGS_KEYS, ADDRESS_BOOK_CONTENT_TYPE,
     ADDRESS_BOOK_ID_PROP, ADDRESS_BOOK_KEYS, BOOKMARK_COLLECTION_CONTENT_TYPE,
-    BOOKMARK_COLLECTION_KEYS, BOOKMARK_CONTENT_TYPE, BOOKMARK_KEYS, CALENDAR_CONTENT_TYPE,
-    CALENDAR_EVENT_CONTENT_TYPE, CALENDAR_EVENT_KEYS, CALENDAR_KEYS, CONTACT_ARCHIVED_PROP,
-    CONTACT_ATTACHMENTS_PROP, CONTACT_KEYS, CONTACT_MODES, CONTACT_PROFILE_PROP,
-    CONTACT_TRASHED_AT_PROP, DEVICE_KINDS, DEVICE_LABEL_CONTENT_TYPE, DEVICE_LABEL_KEYS, FEATURES,
-    JSCONTACT_CONTENT_TYPE, MAX_ALERT_MINUTES_BEFORE, MAX_BOOKMARK_TAGS, MAX_DEVICE_NAME_CHARS,
-    MAX_DEVICE_PLATFORM_CHARS, MAX_PROFILE_ENTRIES, MAX_TASK_COMPLETIONS, MIN_ALERT_MINUTES_BEFORE,
-    NOTEBOOK_CONTENT_TYPE, NOTEBOOK_KEYS, NOTE_CONTENT_TYPE, NOTE_KEYS, PERIOD_CURRENT_PROP,
-    PERIOD_END_PROP, PERIOD_START_PROP, PROFILE_KEYS, TASK_CONTENT_TYPE, TASK_EXPORT_TYPE,
-    TASK_KEYS, TASK_LIST_CONTENT_TYPE, TASK_LIST_KEYS, TRASHED_AT_KEY, WORK_NOTE_PROP,
+    BOOKMARK_COLLECTION_KEYS, BOOKMARK_CONTENT_TYPE, BOOKMARK_EXPORT_TYPE, BOOKMARK_EXPORT_VERSION,
+    BOOKMARK_KEYS, CALENDAR_CONTENT_TYPE, CALENDAR_EVENT_CONTENT_TYPE, CALENDAR_EVENT_KEYS,
+    CALENDAR_KEYS, CARD_SCHEMA_PROP, CONTACT_ARCHIVED_PROP, CONTACT_ATTACHMENTS_PROP, CONTACT_KEYS,
+    CONTACT_MODES, CONTACT_PROFILE_PROP, CONTACT_TRASHED_AT_PROP, DEVICE_KINDS,
+    DEVICE_LABEL_CONTENT_TYPE, DEVICE_LABEL_KEYS, FEATURES, JSCONTACT_CONTENT_TYPE,
+    MAX_ALERT_MINUTES_BEFORE, MAX_BOOKMARK_TAGS, MAX_DEVICE_NAME_CHARS, MAX_DEVICE_PLATFORM_CHARS,
+    MAX_PROFILE_ENTRIES, MAX_TASK_COMPLETIONS, MIN_ALERT_MINUTES_BEFORE, NOTEBOOK_CONTENT_TYPE,
+    NOTEBOOK_KEYS, NOTES_EXPORT_TYPE, NOTES_EXPORT_VERSION, NOTE_CONTENT_TYPE, NOTE_KEYS,
+    PERIOD_CURRENT_PROP, PERIOD_END_PROP, PERIOD_START_PROP, PROFILE_KEYS, TASK_CONTENT_TYPE,
+    TASK_EXPORT_TYPE, TASK_EXPORT_VERSION, TASK_KEYS, TASK_LIST_CONTENT_TYPE, TASK_LIST_KEYS,
+    TRASHED_AT_KEY, WORK_NOTE_PROP,
 };
 
 pub const PAYLOAD_SCHEMA_ID: &str = "urn:sealbook:schema:payloads";
@@ -58,6 +60,12 @@ pub const PAYLOAD_TYPES: &[(&str, &str, &[&str])] = &[
 ];
 
 const RULES: &[&str] = &[
+    "Header: @type and version are required on every payload. A Card's own version is RFC 9553's, always 1.0, and its Sealbook schema version is sealbook:version.",
+    "Metadata: createdAt and updatedAt are written by every write from payload 1.1, and may be absent on an older object. Readers treat absent as unknown, and a date sort puts unknown last.",
+    "Trash: trashedAt is optional and owned only by core's trash module.",
+    "Flags: archived, hideFromAll, pinned, done and favorite are written only when true. Absent is false.",
+    "Nesting: parentId is optional. Missing, the item's own id or a cycle reads as top level.",
+    "A payload declaring 1.0 or no version is read as 1.1: an event with no calendar is in the default one, and a Card's legacy keys are read under their canonical ones. Keys the schema does not name survive.",
     "Describes what a writer produces. Readers are lenient: a field of the wrong type reads as absent, and a payload that is not an object still lists under a fallback title.",
     "A key the writer does not own is carried through an edit unchanged, so every payload accepts additional properties.",
     "An optional field that is absent is omitted, never written as null.",
@@ -65,6 +73,24 @@ const RULES: &[&str] = &[
     "Keys of the JSContact maps (e1, e2, ...) are read in natural order, so e2 precedes e10.",
     "format is an annotation: core writes the timestamps and ids it is given without checking them.",
 ];
+
+/// [`RULES`], then the rule the container keys generate: each kind that lives in a
+/// container names it under its own key, so the table cannot drift from
+/// `container_key`.
+fn rules() -> Vec<String> {
+    let mut rules: Vec<String> = RULES.iter().map(|rule| rule.to_string()).collect();
+    let links: Vec<String> = PAYLOAD_TYPES
+        .iter()
+        .filter_map(|(name, content_type, _)| {
+            crate::container_key(content_type).map(|key| format!("{name} {key}"))
+        })
+        .collect();
+    rules.push(format!(
+        "Container link: required on every item, under a key that depends on the type: {}.",
+        links.join(", ")
+    ));
+    rules
+}
 
 /// Every stored payload under `$defs`, keyed by its `@type`.
 pub fn payload_schema() -> Value {
@@ -103,7 +129,7 @@ pub fn payload_schema() -> Value {
         "$id": PAYLOAD_SCHEMA_ID,
         "title": "Sealbook stored payloads",
         "description": "The plaintext inside each sealed object, by content type.",
-        "x-sealbook-rules": RULES,
+        "x-sealbook-rules": rules(),
         "$defs": defs,
     })
 }
@@ -138,6 +164,10 @@ fn payload(type_name: &str, properties: Value, required: &[&str]) -> Value {
         "properties": all,
         "required": required_keys,
     })
+}
+
+fn timestamp_note(description: &str) -> Value {
+    json!({ "type": "string", "format": "date-time", "description": description })
 }
 
 fn string() -> Value {
@@ -263,8 +293,10 @@ fn notebook() -> Value {
             "color": text("An accent key or a CSS colour."),
             "archived": { "type": "boolean", "description": "Written only when true." },
             "hideFromAll": { "type": "boolean", "description": "Written only when true." },
+            "createdAt": timestamp_note("Absent on an object written before payload 1.1: unknown, never invented."),
+            "updatedAt": timestamp_note("Absent as for createdAt."),
         }),
-        &["name"],
+        &["name", "createdAt", "updatedAt"],
     )
 }
 
@@ -276,8 +308,10 @@ fn address_book() -> Value {
             "archived": { "type": "boolean", "description": "Written only when true." },
             "hideFromAll": { "type": "boolean", "description": "Written only when true." },
             "color": text("An accent key or a CSS colour."),
+            "createdAt": timestamp_note("Absent on an object written before payload 1.1: unknown, never invented."),
+            "updatedAt": timestamp_note("Absent as for createdAt."),
         }),
-        &["name"],
+        &["name", "createdAt", "updatedAt"],
     )
 }
 
@@ -290,8 +324,10 @@ fn nested_container(type_name: &str) -> Value {
             "color": text("An accent key or a CSS colour."),
             "archived": { "type": "boolean", "description": "Written only when true." },
             "hideFromAll": { "type": "boolean", "description": "Written only when true." },
+            "createdAt": timestamp_note("Absent on an object written before payload 1.1: unknown, never invented."),
+            "updatedAt": timestamp_note("Absent as for createdAt."),
         }),
-        &["name"],
+        &["name", "createdAt", "updatedAt"],
     )
 }
 
@@ -304,8 +340,10 @@ fn bookmark_collection() -> Value {
             "color": text("An accent key or a CSS colour."),
             "hideFromAll": { "type": "boolean", "description": "Written only when true." },
             "archived": { "type": "boolean", "description": "Written only when true." },
+            "createdAt": timestamp_note("Absent on an object written before payload 1.1: unknown, never invented."),
+            "updatedAt": timestamp_note("Absent as for createdAt."),
         }),
-        &["name"],
+        &["name", "createdAt", "updatedAt"],
     )
 }
 
@@ -359,12 +397,14 @@ fn calendar() -> Value {
         "Calendar",
         json!({
             "name": string(),
-            "color": text("A CSS colour."),
-            "favorite": { "type": "boolean" },
+            "color": text("An accent key or a CSS colour. Absent reads as the default colour."),
+            "favorite": { "type": "boolean", "description": "Written only when true." },
             "archived": { "type": "boolean", "description": "Written only when true." },
             "hideFromAll": { "type": "boolean", "description": "Written only when true." },
+            "createdAt": timestamp_note("Absent on an object written before payload 1.1: unknown, never invented."),
+            "updatedAt": timestamp_note("Absent as for createdAt."),
         }),
-        &["name", "color", "favorite"],
+        &["name", "createdAt", "updatedAt"],
     )
 }
 
@@ -379,7 +419,9 @@ fn calendar_event() -> Value {
             "location": string(),
             "participants": strings(None),
             "timezone": text("An IANA zone name."),
-            "calendarId": id("Absent is no calendar."),
+            "calendarId": id("Carried as stored when it is not a UUID. An event stored without one is read as being in the default calendar."),
+            "createdAt": timestamp_note("Absent on an object written before payload 1.1: unknown, never invented."),
+            "updatedAt": timestamp_note("Absent as for createdAt."),
             "recurrence": stored_recurrence(),
             "alerts": {
                 "type": "array",
@@ -401,7 +443,7 @@ fn calendar_event() -> Value {
                 },
             },
         }),
-        &["title", "start"],
+        &["title", "start", "calendarId", "createdAt", "updatedAt"],
     )
 }
 
@@ -428,7 +470,7 @@ fn card() -> Value {
         schema
     };
     let media = object(json!({ "kind": string(), "uri": string(), "href": string() }));
-    payload(
+    let mut schema = payload(
         "Card",
         json!({
             "name": object(json!({ "full": string() })),
@@ -486,7 +528,18 @@ fn card() -> Value {
             "updatedAt": legacy(timestamp()),
         }),
         &["name", ADDRESS_BOOK_ID_PROP, "created", "updated"],
-    )
+    );
+    // RFC 9553's own version, not Sealbook's: see `crate::payload::CARD_SCHEMA_PROP`.
+    schema["properties"]["version"] = json!({
+        "const": "1.0",
+        "description": "The JSContact version. Sealbook's schema version is sealbook:version.",
+    });
+    schema["properties"][CARD_SCHEMA_PROP] = json!({ "$ref": "#/$defs/Version" });
+    schema["required"]
+        .as_array_mut()
+        .expect("payload() builds the required list")
+        .push(json!(CARD_SCHEMA_PROP));
+    schema
 }
 
 fn profile() -> Value {
@@ -602,6 +655,7 @@ pub fn file_schema() -> Value {
             "ExportObject": export_object(),
             "NotesExport": notes_export(),
             "TasksExport": tasks_export(),
+            "BookmarksExport": bookmarks_export(),
         },
     })
 }
@@ -666,9 +720,10 @@ fn export_object() -> Value {
 fn notes_export() -> Value {
     json!({
         "type": "object",
-        "description": "Every note, and the notebooks, as a JSON backup. An import also reads a bare array of notes.",
+        "description": "Every note, and the notebooks, as a JSON backup. An import also reads a bare array of notes, and a file with no @type or a version of 1.0.",
         "properties": {
-            "version": { "const": "1.0", "description": "An import does not read it." },
+            "@type": { "const": NOTES_EXPORT_TYPE },
+            "version": { "const": NOTES_EXPORT_VERSION, "description": "An import does not read it." },
             "exportedAt": timestamp(),
             "notebooks": {
                 "type": "array",
@@ -696,7 +751,7 @@ fn notes_export() -> Value {
                 },
             },
         },
-        "required": ["version", "exportedAt", "notebooks", "notes"],
+        "required": ["@type", "version", "exportedAt", "notebooks", "notes"],
     })
 }
 
@@ -716,7 +771,7 @@ fn tasks_export() -> Value {
         "description": "Every task, and the task lists, as a JSON file. An import also reads a bare array of tasks, and files every task under the one list it is given.",
         "properties": {
             "@type": { "const": TASK_EXPORT_TYPE },
-            "version": { "const": 1, "description": "An import does not read it." },
+            "version": { "const": TASK_EXPORT_VERSION, "description": "An import does not read it. A file tagged sealbook-task-export with a numeric version is read too." },
             "exportedAt": timestamp(),
             "lists": { "type": "array", "items": list },
             "tasks": {
@@ -736,5 +791,48 @@ fn tasks_export() -> Value {
             },
         },
         "required": ["@type", "version", "exportedAt", "lists", "tasks"],
+    })
+}
+
+fn bookmarks_export() -> Value {
+    json!({
+        "type": "object",
+        "description": "Every bookmark, and the collections, as a JSON file. An import also reads a bare array of bookmarks, and a file tagged sealbook-bookmark-export with a numeric version.",
+        "properties": {
+            "@type": { "const": BOOKMARK_EXPORT_TYPE },
+            "version": { "const": BOOKMARK_EXPORT_VERSION, "description": "An import does not read it." },
+            "exportedAt": timestamp(),
+            "bookmarks": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "url": string(),
+                        "title": string(),
+                        "notes": string(),
+                        "tags": strings(Some(MAX_BOOKMARK_TAGS)),
+                        "collectionId": id("The bookmark's collection in the vault it came from."),
+                        "collectionName": text("The collection's name, for a person reading the file."),
+                        "createdAt": timestamp(),
+                        "updatedAt": timestamp(),
+                    },
+                    "required": ["url", "title", "collectionId", "collectionName"],
+                },
+            },
+            "collections": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": id("The collection."),
+                        "name": string(),
+                        "parentId": id("The collection this one sits under."),
+                        "color": text("An accent key or a CSS colour."),
+                    },
+                    "required": ["id", "name"],
+                },
+            },
+        },
+        "required": ["@type", "version", "exportedAt", "bookmarks", "collections"],
     })
 }

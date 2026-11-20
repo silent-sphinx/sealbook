@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use crate::payload::{
-    as_object, declared_readable, refuse_newer_major, text, trimmed, write_payload,
+    as_object, declared_readable, refuse_newer_major, stamp, text, trimmed, upgraded, write_payload,
 };
 use crate::CoreError;
 use sealbook_protocol::PAYLOAD_SCHEMA_VERSION;
@@ -66,6 +66,8 @@ pub const BOOKMARK_COLLECTION_KEYS: &[&str] = &[
     "color",
     "hideFromAll",
     "archived",
+    "createdAt",
+    "updatedAt",
 ];
 
 /// Tones for a collection that has never been given a colour.
@@ -267,6 +269,13 @@ pub struct CoreBookmarkCollection {
     /// When it went into the trash: see `crate::trash`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trashed_at: Option<String>,
+    /// When it was first written. `None` on an object from before this was
+    /// recorded: unknown, never invented.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    /// When it was last written. `None` as for `created_at`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
     pub readable: bool,
     pub raw: String,
 }
@@ -391,7 +400,7 @@ pub fn bookmark_write(draft: &CoreBookmarkDraft, now: &str) -> Result<String, Co
 }
 
 pub fn bookmark_collection_parse(id: &str, raw: &str) -> CoreBookmarkCollection {
-    let object = as_object(raw);
+    let object = upgraded(crate::CorePayloadKind::BookmarkCollection, as_object(raw));
     let read = |key: &str| object.as_ref().and_then(|object| trimmed(object, key));
     CoreBookmarkCollection {
         id: id.to_string(),
@@ -408,6 +417,8 @@ pub fn bookmark_collection_parse(id: &str, raw: &str) -> CoreBookmarkCollection 
             .and_then(|object| object.get("archived"))
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        created_at: read("createdAt"),
+        updated_at: read("updatedAt"),
         trashed_at: object.as_ref().and_then(|object| {
             crate::trash::stored_trashed_at(crate::CorePayloadKind::BookmarkCollection, object)
         }),
@@ -416,7 +427,10 @@ pub fn bookmark_collection_parse(id: &str, raw: &str) -> CoreBookmarkCollection 
     }
 }
 
-pub fn bookmark_collection_write(draft: &CoreBookmarkCollectionDraft) -> Result<String, CoreError> {
+pub fn bookmark_collection_write(
+    draft: &CoreBookmarkCollectionDraft,
+    now: &str,
+) -> Result<String, CoreError> {
     refuse_newer_major(draft.raw.as_deref())?;
 
     let present = |value: &Option<String>| {
@@ -442,6 +456,7 @@ pub fn bookmark_collection_write(draft: &CoreBookmarkCollectionDraft) -> Result<
     if draft.archived {
         fields.insert("archived".into(), json!(true));
     }
+    stamp(&mut fields, draft.raw.as_deref(), now);
     Ok(write_payload(
         draft.raw.as_deref(),
         Value::Object(fields),
@@ -596,8 +611,9 @@ pub mod ffi {
     #[uniffi::export(name = "bookmark_collection_write")]
     pub fn bookmark_collection_write(
         draft: CoreBookmarkCollectionDraft,
+        now: String,
     ) -> Result<String, CoreError> {
-        super::bookmark_collection_write(&draft)
+        super::bookmark_collection_write(&draft, &now)
     }
 
     #[uniffi::export(name = "bookmark_collection_name_by_id")]

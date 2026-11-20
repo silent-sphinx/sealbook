@@ -24,18 +24,16 @@
 //! an owned key, so the next save from the phone turned a series written by a
 //! newer client into a single event on every device.
 //!
-//! **An event with no `calendarId` stays that way.** The CLI resolved a missing
-//! one to the default calendar and the other two left it absent, and absent is
-//! what the web's grid reads as "in no calendar, so never hidden by a calendar
-//! toggle". Resolving it here would have moved every such event into the
-//! default calendar, which is a visibility change rather than a spelling one, so
-//! the default stays the CLI's own: it passes the id it wants.
+//! **An event always has a calendar.** One stored without is read as being in the
+//! default calendar, and written as such, so the grid has one rule: an event is
+//! in a calendar, and hiding a calendar hides its events.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use crate::payload::{
-    as_object, declared_readable, entry_with, extra_of, refuse_newer_major, trimmed, write_payload,
+    as_object, declared_readable, entry_with, extra_of, refuse_newer_major, stamp, trimmed,
+    upgraded, write_payload,
 };
 use crate::CoreError;
 use sealbook_protocol::PAYLOAD_SCHEMA_VERSION;
@@ -67,6 +65,8 @@ pub const CALENDAR_KEYS: &[&str] = &[
     "favorite",
     "archived",
     "hideFromAll",
+    "createdAt",
+    "updatedAt",
 ];
 
 /// Every key an event writer owns.
@@ -83,6 +83,8 @@ pub const CALENDAR_EVENT_KEYS: &[&str] = &[
     "calendarId",
     "recurrence",
     "alerts",
+    "createdAt",
+    "updatedAt",
 ];
 
 /// The most reminders an event keeps; a writer drops the rest.
@@ -213,10 +215,11 @@ pub struct CoreRecurrence {
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct CoreCalendarDraft {
     pub name: String,
-    /// Hex, as the pickers hand it over. A blank one takes
-    /// [`DEFAULT_CALENDAR_COLOR`] rather than being written empty, since a
-    /// calendar with no colour has no dot on any client.
+    /// As the pickers hand it over, written as given. A blank one is not
+    /// written, and [`calendar_parse`] reads a calendar with none as
+    /// [`DEFAULT_CALENDAR_COLOR`], so no client shows one without a dot.
     pub color: String,
+    /// Written only when set.
     pub favorite: bool,
     /// Put away: out of the lists and the pickers, with its events left in the
     /// vault untouched. Written only when set, so a calendar that has never been
@@ -247,6 +250,13 @@ pub struct CoreCalendar {
     /// When it went into the trash: see `crate::trash`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trashed_at: Option<String>,
+    /// When it was first written. `None` on an object from before this was
+    /// recorded: unknown, never invented.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    /// When it was last written. `None` as for `created_at`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
     pub readable: bool,
     pub raw: String,
 }
@@ -273,6 +283,7 @@ pub struct CoreCalendarEventDraft {
     /// wall-clock time when the device moves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timezone: Option<String>,
+    /// Blank or absent is written as the default calendar: an event always has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub calendar_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -334,6 +345,13 @@ pub struct CoreCalendarEvent {
     /// When it went into the trash: see `crate::trash`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trashed_at: Option<String>,
+    /// When it was first written. `None` on an object from before this was
+    /// recorded: unknown, never invented.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    /// When it was last written. `None` as for `created_at`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
     pub readable: bool,
     pub raw: String,
 }
@@ -344,7 +362,7 @@ pub struct CoreCalendarEvent {
 /// object, comes back as a named row rather than taking the list down, because a
 /// calendar the user cannot see is one they cannot delete.
 pub fn calendar_parse(id: &str, raw: &str) -> CoreCalendar {
-    let object = as_object(raw);
+    let object = upgraded(crate::CorePayloadKind::Calendar, as_object(raw));
     let field = |key: &str| object.as_ref().and_then(|object| trimmed(object, key));
     let flag = |key: &str| {
         object
@@ -360,6 +378,8 @@ pub fn calendar_parse(id: &str, raw: &str) -> CoreCalendar {
         favorite: flag("favorite"),
         archived: flag("archived"),
         hide_from_all: flag("hideFromAll"),
+        created_at: field("createdAt"),
+        updated_at: field("updatedAt"),
         trashed_at: object.as_ref().and_then(|object| {
             crate::trash::stored_trashed_at(crate::CorePayloadKind::Calendar, object)
         }),
@@ -369,21 +389,26 @@ pub fn calendar_parse(id: &str, raw: &str) -> CoreCalendar {
 }
 
 /// Serialises a calendar, merging onto whatever `draft.raw` carried.
-pub fn calendar_write(draft: &CoreCalendarDraft) -> Result<String, CoreError> {
+pub fn calendar_write(draft: &CoreCalendarDraft, now: &str) -> Result<String, CoreError> {
     refuse_newer_major(draft.raw.as_deref())?;
 
     let mut fields = Map::new();
     fields.insert("@type".into(), json!("Calendar"));
     fields.insert("version".into(), json!(PAYLOAD_SCHEMA_VERSION));
     fields.insert("name".into(), json!(draft.name.trim()));
-    fields.insert("color".into(), json!(calendar_color(&draft.color)));
-    fields.insert("favorite".into(), json!(draft.favorite));
+    if let Some(color) = present(&Some(draft.color.clone())) {
+        fields.insert("color".into(), json!(color));
+    }
+    if draft.favorite {
+        fields.insert("favorite".into(), json!(true));
+    }
     if draft.archived {
         fields.insert("archived".into(), json!(true));
     }
     if draft.hide_from_all {
         fields.insert("hideFromAll".into(), json!(true));
     }
+    stamp(&mut fields, draft.raw.as_deref(), now);
     Ok(write_payload(
         draft.raw.as_deref(),
         Value::Object(fields),
@@ -393,7 +418,7 @@ pub fn calendar_write(draft: &CoreCalendarDraft) -> Result<String, CoreError> {
 
 /// Reads a stored event payload.
 pub fn event_parse(id: &str, raw: &str) -> CoreCalendarEvent {
-    let Some(object) = as_object(raw) else {
+    let Some(object) = upgraded(crate::CorePayloadKind::CalendarEvent, as_object(raw)) else {
         return CoreCalendarEvent {
             id: id.to_string(),
             title: UNTITLED_EVENT_TITLE.to_string(),
@@ -408,6 +433,8 @@ pub fn event_parse(id: &str, raw: &str) -> CoreCalendarEvent {
             unreadable_recurrence: None,
             alerts: Vec::new(),
             unreadable_alerts: Vec::new(),
+            created_at: None,
+            updated_at: None,
             trashed_at: None,
             readable: true,
             raw: raw.to_string(),
@@ -430,6 +457,8 @@ pub fn event_parse(id: &str, raw: &str) -> CoreCalendarEvent {
             .map(|stored| Value::Object(stored.clone()).to_string()),
         alerts,
         unreadable_alerts,
+        created_at: trimmed(&object, "createdAt"),
+        updated_at: trimmed(&object, "updatedAt"),
         trashed_at: crate::trash::stored_trashed_at(crate::CorePayloadKind::CalendarEvent, &object),
         readable: declared_readable(&object),
         raw: raw.to_string(),
@@ -437,7 +466,7 @@ pub fn event_parse(id: &str, raw: &str) -> CoreCalendarEvent {
 }
 
 /// Serialises an event, merging onto whatever `draft.raw` carried.
-pub fn event_write(draft: &CoreCalendarEventDraft) -> Result<String, CoreError> {
+pub fn event_write(draft: &CoreCalendarEventDraft, now: &str) -> Result<String, CoreError> {
     refuse_newer_major(draft.raw.as_deref())?;
 
     let mut fields = Map::new();
@@ -450,12 +479,15 @@ pub fn event_write(draft: &CoreCalendarEventDraft) -> Result<String, CoreError> 
         ("notes", &draft.notes),
         ("location", &draft.location),
         ("timezone", &draft.timezone),
-        ("calendarId", &draft.calendar_id),
     ] {
         if let Some(value) = present(value) {
             fields.insert(key.into(), json!(value));
         }
     }
+    fields.insert(
+        "calendarId".into(),
+        json!(present(&draft.calendar_id).unwrap_or_else(default_calendar_id)),
+    );
     let participants = trimmed_list(&draft.participants);
     if !participants.is_empty() {
         fields.insert("participants".into(), json!(participants));
@@ -469,6 +501,7 @@ pub fn event_write(draft: &CoreCalendarEventDraft) -> Result<String, CoreError> 
     if !alerts.is_empty() {
         fields.insert("alerts".into(), Value::Array(alerts));
     }
+    stamp(&mut fields, draft.raw.as_deref(), now);
     Ok(write_payload(
         draft.raw.as_deref(),
         Value::Object(fields),
@@ -504,15 +537,6 @@ fn fallback_calendar_name(id: &str) -> String {
         DEFAULT_CALENDAR_NAME.to_string()
     } else {
         UNTITLED_CALENDAR_NAME.to_string()
-    }
-}
-
-fn calendar_color(color: &str) -> String {
-    let color = color.trim();
-    if color.is_empty() {
-        DEFAULT_CALENDAR_COLOR.to_string()
-    } else {
-        color.to_string()
     }
 }
 
@@ -812,8 +836,8 @@ pub mod ffi {
     }
 
     #[uniffi::export(name = "calendar_write")]
-    pub fn calendar_write(draft: CoreCalendarDraft) -> Result<String, CoreError> {
-        super::calendar_write(&draft)
+    pub fn calendar_write(draft: CoreCalendarDraft, now: String) -> Result<String, CoreError> {
+        super::calendar_write(&draft, &now)
     }
 
     #[uniffi::export(name = "event_parse")]
@@ -822,8 +846,8 @@ pub mod ffi {
     }
 
     #[uniffi::export(name = "event_write")]
-    pub fn event_write(draft: CoreCalendarEventDraft) -> Result<String, CoreError> {
-        super::event_write(&draft)
+    pub fn event_write(draft: CoreCalendarEventDraft, now: String) -> Result<String, CoreError> {
+        super::event_write(&draft, &now)
     }
 
     #[uniffi::export(name = "alert_presets")]
@@ -852,6 +876,8 @@ pub mod ffi {
 
 #[cfg(test)]
 mod tests {
+    const NOW: &str = "2026-10-28T12:00:00Z";
+
     use super::*;
 
     fn parsed(payload: &str) -> Map<String, Value> {
@@ -879,9 +905,9 @@ mod tests {
 
     #[test]
     fn a_calendar_that_was_never_archived_carries_no_archived_key() {
-        let written = parsed(&calendar_write(&draft()).unwrap());
+        let written = parsed(&calendar_write(&draft(), NOW).unwrap());
         assert!(!written.contains_key("archived"));
-        assert_eq!(written["favorite"], false);
+        assert!(!written.contains_key("favorite"));
     }
 
     /// The CLI's `put_calendar` rebuilt the payload rather than merging onto it,
@@ -889,13 +915,16 @@ mod tests {
     /// archived flag the other clients had written.
     #[test]
     fn a_rename_keeps_what_the_renaming_host_did_not_change() {
-        let stored = calendar_write(&CoreCalendarDraft {
-            favorite: true,
-            archived: true,
-            hide_from_all: true,
-            color: "#9ece6a".into(),
-            ..draft()
-        })
+        let stored = calendar_write(
+            &CoreCalendarDraft {
+                favorite: true,
+                archived: true,
+                hide_from_all: true,
+                color: "#9ece6a".into(),
+                ..draft()
+            },
+            NOW,
+        )
         .unwrap();
         let mut from_a_later_build = parsed(&stored);
         from_a_later_build.insert("shared".into(), json!({ "with": "someone" }));
@@ -903,14 +932,17 @@ mod tests {
 
         let calendar = calendar_parse("c1", &stored);
         let renamed = parsed(
-            &calendar_write(&CoreCalendarDraft {
-                name: "Renamed".into(),
-                color: calendar.color,
-                favorite: calendar.favorite,
-                archived: calendar.archived,
-                hide_from_all: calendar.hide_from_all,
-                raw: Some(stored),
-            })
+            &calendar_write(
+                &CoreCalendarDraft {
+                    name: "Renamed".into(),
+                    color: calendar.color,
+                    favorite: calendar.favorite,
+                    archived: calendar.archived,
+                    hide_from_all: calendar.hide_from_all,
+                    raw: Some(stored),
+                },
+                NOW,
+            )
             .unwrap(),
         );
         assert_eq!(renamed["name"], "Renamed");
@@ -922,15 +954,20 @@ mod tests {
     }
 
     #[test]
-    fn a_blank_colour_takes_the_one_every_client_defaults_to() {
+    fn a_blank_colour_is_not_stored_and_reads_as_the_default() {
         let written = parsed(
-            &calendar_write(&CoreCalendarDraft {
-                color: "   ".into(),
-                ..draft()
-            })
+            &calendar_write(
+                &CoreCalendarDraft {
+                    color: "   ".into(),
+                    ..draft()
+                },
+                NOW,
+            )
             .unwrap(),
         );
-        assert_eq!(written["color"], DEFAULT_CALENDAR_COLOR);
+        assert!(!written.contains_key("color"));
+        let read = calendar_parse("c", &serde_json::Value::Object(written).to_string());
+        assert_eq!(read.color, DEFAULT_CALENDAR_COLOR);
     }
 
     #[test]
@@ -950,28 +987,39 @@ mod tests {
     /// what a reader predating a field expects to see. The CLI wrote nulls.
     #[test]
     fn an_event_with_nothing_optional_set_carries_only_what_it_has() {
-        let written = parsed(&event_write(&event()).unwrap());
+        let written = parsed(&event_write(&event(), NOW).unwrap());
         assert_eq!(
             written.keys().map(String::as_str).collect::<Vec<_>>(),
-            ["@type", "start", "title", "version"]
+            [
+                "@type",
+                "calendarId",
+                "createdAt",
+                "start",
+                "title",
+                "updatedAt",
+                "version"
+            ]
         );
     }
 
     #[test]
     fn an_events_blank_optional_fields_are_the_same_as_absent_ones() {
         let written = parsed(
-            &event_write(&CoreCalendarEventDraft {
-                end: Some("   ".into()),
-                notes: Some(String::new()),
-                participants: vec!["  ".into(), " alice@example.com ".into()],
-                calendar_id: Some("  ".into()),
-                ..event()
-            })
+            &event_write(
+                &CoreCalendarEventDraft {
+                    end: Some("   ".into()),
+                    notes: Some(String::new()),
+                    participants: vec!["  ".into(), " alice@example.com ".into()],
+                    calendar_id: Some("  ".into()),
+                    ..event()
+                },
+                NOW,
+            )
             .unwrap(),
         );
         assert!(!written.contains_key("end"));
         assert!(!written.contains_key("notes"));
-        assert!(!written.contains_key("calendarId"));
+        assert_eq!(written["calendarId"], default_calendar_id());
         assert_eq!(written["participants"], json!(["alice@example.com"]));
     }
 
@@ -983,13 +1031,16 @@ mod tests {
 
         // And it survives, because the writer puts back what it could not read.
         let written = parsed(
-            &event_write(&CoreCalendarEventDraft {
-                title: event.title,
-                start: event.start,
-                unreadable_recurrence: event.unreadable_recurrence,
-                raw: Some(event.raw),
-                ..Default::default()
-            })
+            &event_write(
+                &CoreCalendarEventDraft {
+                    title: event.title,
+                    start: event.start,
+                    unreadable_recurrence: event.unreadable_recurrence,
+                    raw: Some(event.raw),
+                    ..Default::default()
+                },
+                NOW,
+            )
             .unwrap(),
         );
         assert_eq!(
@@ -1027,20 +1078,26 @@ mod tests {
         assert_eq!(stored.title, "future");
         assert!(!stored.readable);
         assert!(matches!(
-            event_write(&CoreCalendarEventDraft {
-                raw: Some(future.into()),
-                ..event()
-            }),
+            event_write(
+                &CoreCalendarEventDraft {
+                    raw: Some(future.into()),
+                    ..event()
+                },
+                NOW
+            ),
             Err(CoreError::PayloadSchema { .. })
         ));
 
         let future = r#"{"@type":"Calendar","version":"3.1","name":"future"}"#;
         assert!(!calendar_parse("c1", future).readable);
         assert!(matches!(
-            calendar_write(&CoreCalendarDraft {
-                raw: Some(future.into()),
-                ..draft()
-            }),
+            calendar_write(
+                &CoreCalendarDraft {
+                    raw: Some(future.into()),
+                    ..draft()
+                },
+                NOW
+            ),
             Err(CoreError::PayloadSchema { .. })
         ));
     }
@@ -1078,14 +1135,17 @@ mod tests {
         assert_eq!(event.unreadable_alerts.len(), 2);
 
         let written = parsed(
-            &event_write(&CoreCalendarEventDraft {
-                title: event.title,
-                start: event.start,
-                alerts: event.alerts,
-                unreadable_alerts: event.unreadable_alerts,
-                raw: Some(event.raw),
-                ..Default::default()
-            })
+            &event_write(
+                &CoreCalendarEventDraft {
+                    title: event.title,
+                    start: event.start,
+                    alerts: event.alerts,
+                    unreadable_alerts: event.unreadable_alerts,
+                    raw: Some(event.raw),
+                    ..Default::default()
+                },
+                NOW,
+            )
             .unwrap(),
         );
         assert_eq!(
@@ -1103,10 +1163,13 @@ mod tests {
     fn clearing_every_alert_removes_the_key() {
         let stored = r#"{"title":"t","start":"2026-10-01","alerts":[{"minutesBefore":-540}]}"#;
         let written = parsed(
-            &event_write(&CoreCalendarEventDraft {
-                raw: Some(stored.into()),
-                ..event()
-            })
+            &event_write(
+                &CoreCalendarEventDraft {
+                    raw: Some(stored.into()),
+                    ..event()
+                },
+                NOW,
+            )
             .unwrap(),
         );
         assert!(!written.contains_key("alerts"));

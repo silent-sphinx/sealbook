@@ -33,7 +33,13 @@ pub const TASK_IMPORT_REFUSAL: &str =
     "Unrecognised format. Expected a Sealbook task export or a JSON array of tasks.";
 
 /// The `@type` of a task export file.
-pub const TASK_EXPORT_TYPE: &str = "sealbook-task-export";
+pub const TASK_EXPORT_TYPE: &str = "SealbookTasksExport";
+
+/// The tag exports carried before the spelling was unified. Read, never written.
+pub const LEGACY_TASK_EXPORT_TYPE: &str = "sealbook-task-export";
+
+/// The export format's own version, a string `major.minor` like every other.
+pub const TASK_EXPORT_VERSION: &str = "1.1";
 
 /// The host's clock, and a task's stored values in the host's local time.
 ///
@@ -659,7 +665,7 @@ pub fn task_export(tasks: &[CoreTask], lists: &[CoreTaskList], now: &str) -> Str
         .collect();
     let document = json!({
         "@type": TASK_EXPORT_TYPE,
-        "version": 1,
+        "version": TASK_EXPORT_VERSION,
         "exportedAt": now,
         "tasks": tasks.iter().map(|task| export_entry(task, lists)).collect::<Vec<_>>(),
         "lists": lists_out,
@@ -677,10 +683,15 @@ pub fn task_import(text: &str) -> Result<CoreTaskImport, CoreError> {
         serde_json::from_str(text.trim()).map_err(|_| CoreError::malformed(TASK_IMPORT_REFUSAL))?;
     let entries = match &parsed {
         Value::Array(entries) => entries,
-        Value::Object(body) if body.get("@type") == Some(&json!(TASK_EXPORT_TYPE)) => body
-            .get("tasks")
-            .and_then(Value::as_array)
-            .ok_or_else(|| CoreError::malformed(TASK_IMPORT_REFUSAL))?,
+        Value::Object(body)
+            if [TASK_EXPORT_TYPE, LEGACY_TASK_EXPORT_TYPE]
+                .iter()
+                .any(|tag| body.get("@type") == Some(&json!(tag))) =>
+        {
+            body.get("tasks")
+                .and_then(Value::as_array)
+                .ok_or_else(|| CoreError::malformed(TASK_IMPORT_REFUSAL))?
+        }
         _ => return Err(CoreError::malformed(TASK_IMPORT_REFUSAL)),
     };
     let mut tasks = Vec::new();

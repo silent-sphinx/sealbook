@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use crate::payload::{
-    as_object, declared_readable, refuse_newer_major, text, trimmed, write_payload,
+    as_object, declared_readable, refuse_newer_major, stamp, text, trimmed, upgraded, write_payload,
 };
 use crate::CoreError;
 use sealbook_protocol::PAYLOAD_SCHEMA_VERSION;
@@ -78,6 +78,8 @@ pub const NOTEBOOK_KEYS: &[&str] = &[
     "color",
     "archived",
     "hideFromAll",
+    "createdAt",
+    "updatedAt",
 ];
 
 /// The owned set for a write that has an opinion about `pinned`.
@@ -221,6 +223,13 @@ pub struct CoreNotebook {
     /// When it went into the trash: see `crate::trash`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trashed_at: Option<String>,
+    /// When it was first written. `None` on an object from before this was
+    /// recorded: unknown, never invented.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    /// When it was last written. `None` as for `created_at`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
     pub readable: bool,
     pub raw: String,
 }
@@ -326,7 +335,7 @@ pub fn note_write(draft: &CoreNoteDraft, now: &str) -> Result<String, CoreError>
 }
 
 pub fn notebook_parse(id: &str, raw: &str) -> CoreNotebook {
-    let object = as_object(raw);
+    let object = upgraded(crate::CorePayloadKind::Notebook, as_object(raw));
     let stored = object.as_ref().and_then(|object| trimmed(object, "name"));
     CoreNotebook {
         id: id.to_string(),
@@ -342,6 +351,12 @@ pub fn notebook_parse(id: &str, raw: &str) -> CoreNotebook {
             .and_then(|object| object.get("hideFromAll"))
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        created_at: object
+            .as_ref()
+            .and_then(|object| trimmed(object, "createdAt")),
+        updated_at: object
+            .as_ref()
+            .and_then(|object| trimmed(object, "updatedAt")),
         trashed_at: object.as_ref().and_then(|object| {
             crate::trash::stored_trashed_at(crate::CorePayloadKind::Notebook, object)
         }),
@@ -359,6 +374,7 @@ pub fn notebook_write(
     archived: bool,
     hide_from_all: bool,
     previous_raw: Option<&str>,
+    now: &str,
 ) -> Result<String, CoreError> {
     refuse_newer_major(previous_raw)?;
     let mut fields = json!({
@@ -374,6 +390,9 @@ pub fn notebook_write(
     }
     if hide_from_all {
         fields["hideFromAll"] = json!(true);
+    }
+    if let Some(object) = fields.as_object_mut() {
+        stamp(object, previous_raw, now);
     }
     Ok(write_payload(previous_raw, fields, NOTEBOOK_KEYS))
 }
@@ -553,6 +572,7 @@ pub mod ffi {
         archived: bool,
         hide_from_all: bool,
         previous_raw: Option<String>,
+        now: String,
     ) -> Result<String, CoreError> {
         super::notebook_write(
             &name,
@@ -560,6 +580,7 @@ pub mod ffi {
             archived,
             hide_from_all,
             previous_raw.as_deref(),
+            &now,
         )
     }
 
@@ -794,7 +815,7 @@ mod tests {
     fn a_notebook_rename_carries_what_it_does_not_own() {
         let stored = r#"{"@type":"Notebook","version":"1.0","name":"old","colour":"blue"}"#;
         let renamed =
-            as_object(&notebook_write("  new  ", None, false, false, Some(stored)).unwrap())
+            as_object(&notebook_write("  new  ", None, false, false, Some(stored), NOW).unwrap())
                 .unwrap();
         assert_eq!(renamed["name"], "new");
         assert_eq!(renamed["colour"], "blue");
@@ -802,12 +823,12 @@ mod tests {
 
     #[test]
     fn a_notebook_colour_is_written_and_cleared() {
-        let coloured = notebook_write("Work", Some(" #123456 "), false, false, None).unwrap();
+        let coloured = notebook_write("Work", Some(" #123456 "), false, false, None, NOW).unwrap();
         assert_eq!(
             notebook_parse("n", &coloured).color.as_deref(),
             Some("#123456")
         );
-        let cleared = notebook_write("Work", None, false, false, Some(&coloured)).unwrap();
+        let cleared = notebook_write("Work", None, false, false, Some(&coloured), NOW).unwrap();
         assert_eq!(notebook_parse("n", &cleared).color, None);
         assert!(!cleared.contains("color"));
     }
