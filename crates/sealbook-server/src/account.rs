@@ -434,6 +434,10 @@ pub(crate) async fn delete_account(
         .await
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
 
+    if let Err(error) = db::checkpoint_wal(&state.db).await {
+        tracing::warn!(%error, "checkpointing the WAL after an account deletion failed");
+    }
+
     Ok(Json(SimpleStatusResponse {
         status: "ok".into(),
     }))

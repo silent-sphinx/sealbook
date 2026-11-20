@@ -380,6 +380,7 @@ pub async fn app_with(
     let db = open_migrated(db_path).await?;
     verify_db_integrity(&db).await?;
     db::log_contents(&db).await?;
+    db::log_pre_upgrade_report(&db).await?;
     let opaque = load_or_create_setup(&db).await?;
     let dummy_record = load_or_create_dummy(&db, &opaque).await?;
     let dummy_hpke_pk = load_or_create_dummy_hpke(&db).await?;
@@ -566,8 +567,10 @@ fn spawn_session_sweeper(state: Shared) {
                     tracing::warn!(%error, "sweeping expired sessions failed");
                 }
             }
+            let mut pruned = 0;
             match prune_old_revisions(&state.db, retention).await {
                 Ok(deleted) if deleted > 0 => {
+                    pruned += deleted;
                     info!(deleted, "pruned superseded object revisions");
                 }
                 Ok(_) => {}
@@ -580,11 +583,17 @@ fn spawn_session_sweeper(state: Shared) {
             // writes, instead of being bounded only by the retention window.
             match prune_oversized_revision_logs(&state.db, state.limits.max_bytes).await {
                 Ok(deleted) if deleted > 0 => {
+                    pruned += deleted;
                     info!(deleted, "pruned revision logs past their byte budget");
                 }
                 Ok(_) => {}
                 Err(error) => {
                     tracing::warn!(%error, "pruning oversized revision logs failed");
+                }
+            }
+            if pruned > 0 {
+                if let Err(error) = db::checkpoint_wal(&state.db).await {
+                    tracing::warn!(%error, "checkpointing the WAL failed");
                 }
             }
             match attachments::sweep_pending_attachments(&state.db).await {

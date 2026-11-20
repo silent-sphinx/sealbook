@@ -4,8 +4,13 @@
 # which have to be kept together — the database is useless to a pinned client
 # without the certificate it was served with.
 #
-# Uses SQLite's online backup, so it is safe to run against a live server. A
-# plain file copy is not: newer committed pages may still be in the WAL.
+# Uses VACUUM INTO, so it is safe to run against a live server and writes only
+# live pages. SQLite's .backup would copy every page, including free pages that
+# still hold deleted rows. A plain file copy is not safe: newer committed pages
+# may still be in the WAL.
+#
+# A backup holds the OPAQUE server setup and the TLS key as well as the vault
+# ciphertext. Keep backups on encrypted storage or encrypt them at rest.
 #
 # Usage:
 #   sealbook-backup.sh <data-dir> <backup-dir> [keep]
@@ -23,7 +28,7 @@ BACKUP_DIR=${2:-}
 KEEP=${3:-14}
 
 if [[ -z $DATA_DIR || -z $BACKUP_DIR ]]; then
-    sed -n '2,20p' "$0" >&2
+    sed -n "2,22p" "$0" >&2
     exit 2
 fi
 
@@ -43,7 +48,7 @@ rm -rf "$PARTIAL"
 mkdir -p "$PARTIAL"
 chmod 700 "$PARTIAL"
 
-sqlite3 "$DB" ".backup '$PARTIAL/sealbook.db'"
+sqlite3 "$DB" "VACUUM INTO '$PARTIAL/sealbook.db'"
 chmod 600 "$PARTIAL/sealbook.db"
 
 # Fold the WAL into the copy so the backup is one self-contained file. Without

@@ -127,6 +127,73 @@ pub(crate) async fn log_contents(db: &Pool<Sqlite>) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Accounts the next protocol version cannot migrate in place. Both lists hold
+/// account ids only, never usernames, so they are safe to log.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct PreUpgradeReport {
+    /// Accounts whose collection has no manifest, so a verified read of it is
+    /// impossible.
+    pub(crate) without_manifest: Vec<String>,
+    /// Accounts with a live device that holds no key wrap. Wraps are replaced
+    /// at each rotation, so a wrap that exists is a wrap at the current epoch.
+    pub(crate) devices_without_wrap: Vec<String>,
+}
+
+impl PreUpgradeReport {
+    pub(crate) fn is_clean(&self) -> bool {
+        self.without_manifest.is_empty() && self.devices_without_wrap.is_empty()
+    }
+}
+
+pub(crate) async fn pre_upgrade_report(db: &Pool<Sqlite>) -> Result<PreUpgradeReport, sqlx::Error> {
+    let without_manifest = sqlx::query_scalar::<_, String>(
+        "SELECT c.account_id FROM collections c
+         WHERE NOT EXISTS (SELECT 1 FROM manifests m WHERE m.collection_id = c.id)
+         ORDER BY c.account_id",
+    )
+    .fetch_all(db)
+    .await?;
+    let devices_without_wrap = sqlx::query_scalar::<_, String>(
+        "SELECT DISTINCT d.account_id FROM devices d
+         JOIN collections c ON c.account_id = d.account_id
+         WHERE d.revoked_at IS NULL
+           AND NOT EXISTS (
+               SELECT 1 FROM key_wraps w
+               WHERE w.collection_id = c.id
+                 AND w.recipient_kind = 'device'
+                 AND w.recipient_id = d.id)
+         ORDER BY d.account_id",
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(PreUpgradeReport {
+        without_manifest,
+        devices_without_wrap,
+    })
+}
+
+/// Logs what a v1 client could still repair before the operator upgrades.
+/// Both counts are expected to be zero.
+pub(crate) async fn log_pre_upgrade_report(db: &Pool<Sqlite>) -> anyhow::Result<()> {
+    let report = pre_upgrade_report(db).await?;
+    if report.is_clean() {
+        tracing::info!(
+            collections_without_manifest = 0,
+            accounts_with_unwrapped_device = 0,
+            "pre-upgrade check clean"
+        );
+    } else {
+        tracing::warn!(
+            collections_without_manifest = report.without_manifest.len(),
+            accounts_without_manifest = ?report.without_manifest,
+            accounts_with_unwrapped_device = report.devices_without_wrap.len(),
+            accounts_with_unwrapped_device_ids = ?report.devices_without_wrap,
+            "pre-upgrade check found accounts the next version cannot migrate; fix them before upgrading"
+        );
+    }
+    Ok(())
+}
+
 pub(crate) async fn schema_version(db: &Pool<Sqlite>) -> anyhow::Result<i64> {
     Ok(sqlx::query_scalar::<_, i64>("PRAGMA user_version")
         .fetch_one(db)
@@ -466,6 +533,18 @@ async fn migrate_to_v2(db: &Pool<Sqlite>) -> anyhow::Result<()> {
 /// and was making startup time grow with the vault. Set
 /// `SEALBOOK_FULL_INTEGRITY_CHECK=1` to do the exhaustive one, which is worth it
 /// after a crash or a restore.
+/// Folds the WAL back into the database file and truncates it. Run after a job
+/// that deletes a lot, so the deleted rows do not linger in a large WAL that a
+/// plain file copy of the data directory would carry. A reader holding the WAL
+/// open makes the checkpoint partial, which is reported by the pragma's result
+/// rather than as an error, so only a real failure is returned.
+pub(crate) async fn checkpoint_wal(db: &Pool<Sqlite>) -> Result<(), sqlx::Error> {
+    sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
 pub(crate) async fn verify_db_integrity(db: &Pool<Sqlite>) -> anyhow::Result<()> {
     let full = std::env::var("SEALBOOK_FULL_INTEGRITY_CHECK")
         .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
@@ -606,6 +685,72 @@ mod tests {
         let path = dir.join("sealbook.db");
         let db = open_db(path.to_str().unwrap()).await.unwrap();
         (dir, db)
+    }
+
+    #[tokio::test]
+    async fn the_pre_upgrade_report_names_accounts_with_no_manifest_or_wrap() {
+        let (dir, db) = temp_db().await;
+        migrate(&db).await.unwrap();
+        for (account, device) in [("good", "d-good"), ("bad", "d-bad")] {
+            sqlx::query(
+                "INSERT INTO accounts (id, username, opaque_record, kdf_salt, created_at)
+                 VALUES (?, ?, X'', X'', 0)",
+            )
+            .bind(account)
+            .bind(account)
+            .execute(&db)
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO devices (id, account_id, mldsa_pk, ed25519_pk, xwing_hpke_pk, created_at)
+                 VALUES (?, ?, X'', X'', X'', 0)",
+            )
+            .bind(device)
+            .bind(account)
+            .execute(&db)
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO collections (id, account_id, kind, created_at)
+                 VALUES (?, ?, 'vault', 0)",
+            )
+            .bind(format!("c-{account}"))
+            .bind(account)
+            .execute(&db)
+            .await
+            .unwrap();
+        }
+        sqlx::query(
+            "INSERT INTO key_wraps (collection_id, recipient_kind, recipient_id, hpke_enc, wrapped_ck, ciphersuite)
+             VALUES ('c-good', 'device', 'd-good', X'', X'', 'x')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO manifests (collection_id, manifest_seq, key_epoch, latest_revision, object_count,
+                 digest, device_id, mldsa_sig, ed25519_sig, updated_at)
+             VALUES ('c-good', 1, 1, 0, 0, X'', 'd-good', X'', X'', 0)",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+
+        let report = pre_upgrade_report(&db).await.unwrap();
+        assert_eq!(report.without_manifest, vec!["bad".to_string()]);
+        assert_eq!(report.devices_without_wrap, vec!["bad".to_string()]);
+
+        sqlx::query("UPDATE devices SET revoked_at = 1 WHERE id = 'd-bad'")
+            .execute(&db)
+            .await
+            .unwrap();
+        let report = pre_upgrade_report(&db).await.unwrap();
+        assert!(
+            report.devices_without_wrap.is_empty(),
+            "a revoked device needs no wrap"
+        );
+        db.close().await;
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[tokio::test]
