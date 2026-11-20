@@ -35,6 +35,23 @@ both builds already require for the wasm module and the JNI library.
   (`LiveServerTest`, native library under a JVM) against it. Both skip when
   `SEALBOOK_E2E_SERVER` is unset.
 
+- `crypto/known-answers.json` - fixed inputs and the outputs the pinned crypto
+  crates must give for them: an IKM to its X-Wing public key, a stored device
+  wrap to its collection key, fixed seeds to the ML-DSA-65 and Ed25519 public
+  keys and a signature that verifies under them, and a fixed phrase to its
+  lookup id, recovery public keys and phrase wrap. Every other test generates
+  fresh keys, so only these notice a dependency changing how it expands a seed,
+  which would lock out every stored device secret and every phrase. `hpke`,
+  `x-wing`, `ml-kem` and `ml-dsa` are pinned with `=` in the workspace
+  `Cargo.toml`; an upgrade is a deliberate change that either passes these
+  unchanged or ships with a rotation. Run by
+  `crates/sealbook-crypto/tests/known_answers.rs`. Regenerate only for such a
+  change:
+
+  ```
+  REGENERATE_CRYPTO_FIXTURE=1 cargo test -p sealbook-crypto --test known_answers -- --ignored regenerate
+  ```
+
 - `payloads/trash.json` - the trash rules in core's `trash` module: stamping
   and restoring a payload, and which items a trashed one hides, lists,
   re-homes, purges and expires. Hand-written; every case is in `corpus.json`, so

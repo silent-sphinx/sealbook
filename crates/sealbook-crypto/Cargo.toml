@@ -14,13 +14,20 @@ hkdf.workspace = true
 hmac.workspace = true
 hpke.workspace = true
 ml-dsa.workspace = true
+# Not called directly: hpke pulls them in, and naming them here lets the workspace pin hold.
+ml-kem.workspace = true
 opaque-ke.workspace = true
 rand.workspace = true
 sha2.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
+x-wing.workspace = true
 zeroize.workspace = true
+
+[dev-dependencies]
+hex.workspace = true
+serde_json.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }

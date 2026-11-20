@@ -33,8 +33,12 @@ keyring = "3"
 hkdf = "0.12"
 jiff = "0.2"
 hmac = "0.12"
-hpke = { version = "0.14", default-features = false, features = ["x25519", "mlkem", "hkdfsha2", "getrandom", "chacha", "alloc"] }
-ml-dsa = { version = "0.1", features = ["getrandom"] }
+# Pinned exactly: stored device secrets and phrase-derived keys depend on these crates' encodings.
+# Bump deliberately and re-run the known answers in crates/sealbook-protocol/fixtures/crypto/.
+hpke = { version = "=0.14.1", default-features = false, features = ["x25519", "mlkem", "hkdfsha2", "getrandom", "chacha", "alloc"] }
+ml-dsa = { version = "=0.1.1", features = ["getrandom"] }
+ml-kem = { version = "=0.3.2", default-features = false }
+x-wing = { version = "=0.1.0", default-features = false }
 opaque-ke = { version = "4", features = ["argon2", "ristretto255"] }
 rand = "0.8"
 rpassword = "7"
