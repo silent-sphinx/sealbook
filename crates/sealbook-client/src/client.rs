@@ -16,8 +16,12 @@ pub struct SealbookClient {
     /// Epoch the cached `collection_key` belongs to, as of the last login or
     /// refresh. A rotation elsewhere moves the server's epoch past this.
     pub(crate) key_epoch: u64,
-    /// Whether the last login found a recovery's rotation still owing.
-    pub(crate) recovery_pending: bool,
+    /// Why the server said, at the last login, that a rotation is owed. A hint:
+    /// whether the account has migrated is the roster's to say.
+    pub(crate) rotation_hint: Option<sealbook_core::CoreRotationOwed>,
+    /// Whether the unbound device wrap opened the key held now, which a server
+    /// can serve under any epoch and a migrated roster therefore refuses.
+    pub(crate) legacy_wrap: bool,
     /// The verified device roster, with the key epoch it was fetched at.
     ///
     /// Checking a manifest signature needs the roster, and fetching it per write
@@ -28,12 +32,22 @@ pub struct SealbookClient {
     pub(crate) roster_cache: Option<sealbook_core::CoreRoster>,
     /// Rows the last full read could not open, for a caller of a typed listing.
     pub(crate) last_unreadable: u64,
-    /// Whether the last roster this device pinned commits to its epoch's key,
-    /// or `None` before any pin this session.
-    pub(crate) roster_key_committed: Option<bool>,
+    /// Whether the last roster this device pinned is a migrated one, or `None`
+    /// before any pin this session. A roster that is not leaves the account owing
+    /// one rotation, whatever the server says.
+    pub(crate) account_migrated: Option<bool>,
+    /// How many objects the last rotation moved to the current payload schema.
+    pub(crate) last_rotation_upgraded: u32,
 }
 
 impl SealbookClient {
+    /// How many objects the last rotation moved to the current payload schema.
+    /// A vault written before payload version 1.1 comes out of its one migration
+    /// rotation with this set; every later rotation leaves it zero.
+    pub fn last_rotation_upgraded(&self) -> u32 {
+        self.last_rotation_upgraded
+    }
+
     pub fn new() -> Self {
         Self::https(None).expect("https client")
     }
@@ -44,10 +58,12 @@ impl SealbookClient {
             state: None,
             collection_key: None,
             key_epoch: 0,
-            recovery_pending: false,
+            rotation_hint: None,
+            legacy_wrap: false,
             roster_cache: None,
             last_unreadable: 0,
-            roster_key_committed: None,
+            account_migrated: None,
+            last_rotation_upgraded: 0,
         })
     }
 
@@ -57,10 +73,12 @@ impl SealbookClient {
             state: None,
             collection_key: None,
             key_epoch: 0,
-            recovery_pending: false,
+            rotation_hint: None,
+            legacy_wrap: false,
             roster_cache: None,
             last_unreadable: 0,
-            roster_key_committed: None,
+            account_migrated: None,
+            last_rotation_upgraded: 0,
         }
     }
 
@@ -82,10 +100,12 @@ impl SealbookClient {
             state: Some(state),
             collection_key: None,
             key_epoch: 0,
-            recovery_pending: false,
+            rotation_hint: None,
+            legacy_wrap: false,
             roster_cache: None,
             last_unreadable: 0,
-            roster_key_committed: None,
+            account_migrated: None,
+            last_rotation_upgraded: 0,
         })
     }
 

@@ -49,7 +49,7 @@ impl SealbookClient {
         };
         let started = sealbook_core::pair_start(username, &device, &secrets)?;
         let served: serde_json::Value = self
-            .post_raw(&format!("{server}/v1/pair/join"), started.body, None)
+            .post_raw(&format!("{server}/v2/pair/join"), started.body, None)
             .await?;
         let joined = sealbook_core::pair_join_accept(&served.to_string())?;
 
@@ -60,7 +60,6 @@ impl SealbookClient {
             collection_id: Uuid::nil(),
             device_id: device.device_id,
             session_token: None,
-            kdf_salt: Vec::new(),
             hpke_sk: decode(&generated.hpke_sk)?,
             mldsa_seed: secrets.mldsa_seed.clone(),
             ed25519_sk: secrets.ed25519_sk.clone(),
@@ -125,6 +124,9 @@ impl SealbookClient {
                 let state = self.state.as_mut().ok_or(ClientError::NoState)?;
                 state.roster_seq = pin.roster_seq;
                 state.roster_transcript = decode(&pin.transcript)?;
+                // Where the approving device was, so an older, validly signed
+                // manifest is refused rather than served to a device at 0.
+                state.manifest_seq = pin.manifest_seq;
             }
             PairJoinPoll::Expired | PairJoinPoll::Wait { .. } => {}
         }
@@ -240,6 +242,11 @@ impl SealbookClient {
                 state.session_token.clone().ok_or(ClientError::NoState)?,
             )
         };
+        let manifest_seq = self
+            .state
+            .as_ref()
+            .ok_or(ClientError::NoState)?
+            .manifest_seq;
         let approval = sealbook_core::pair_approve(
             &secrets,
             &context,
@@ -247,6 +254,7 @@ impl SealbookClient {
             &verified,
             response,
             preview,
+            manifest_seq,
         )?;
         let _: PairStatusResponse = self
             .post_raw(

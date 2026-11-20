@@ -29,7 +29,9 @@ pub struct UploadedAttachment {
     pub content_hash_b64: String,
     pub chunk_size: u32,
     pub chunk_count: u32,
-    pub total_plaintext_size: u64,
+    /// The file's true length, from the local plan and never from the server.
+    /// The payload keeps it as `byteSize`; the padded length is not stored.
+    pub byte_size: u64,
 }
 
 impl SealbookClient {
@@ -85,7 +87,7 @@ impl SealbookClient {
                 content_hash_b64,
                 chunk_size: plan.chunk_size,
                 chunk_count: plan.chunk_count,
-                total_plaintext_size: plan.total_plaintext_size,
+                byte_size: plan.byte_size,
             }),
             Err(err) => {
                 // The orphan sweep is the backstop if this also fails.
@@ -106,7 +108,9 @@ impl SealbookClient {
         let nonce_len = sealbook_core::attachment_limits().nonce_len as usize;
         let mut digests = Vec::with_capacity(plan.chunk_count as usize);
         for range in sealbook_core::attachment_ranges(plan) {
-            let plaintext = &data[range.start as usize..range.end as usize];
+            let mut plaintext = data[range.start as usize..range.end as usize].to_vec();
+            plaintext.resize(range.len as usize, 0);
+            let plaintext = plaintext.as_slice();
             digests.push(sealbook_core::attachment_chunk_digest(plaintext));
             let sealed = sealbook_core::seal_attachment_chunk(
                 &plan.key,
@@ -152,7 +156,7 @@ impl SealbookClient {
         reference: &UploadedAttachment,
     ) -> Result<Vec<u8>, ClientError> {
         let (server, collection_id, token) = self.attachment_target()?;
-        let mut out = Vec::with_capacity(reference.total_plaintext_size as usize);
+        let mut out = Vec::new();
         let mut digests = Vec::with_capacity(reference.chunk_count as usize);
         for index in 0..reference.chunk_count {
             let (nonce, ciphertext) = self
@@ -185,6 +189,14 @@ impl SealbookClient {
             &reference.content_hash_b64,
             &digests,
         )?;
+        // The digests cover the padded chunks, so the length is checked and the
+        // padding cut off only after they matched.
+        let len = sealbook_core::attachment_read_len(
+            reference.attachment_id,
+            reference.byte_size,
+            out.len() as u64,
+        )?;
+        out.truncate(len as usize);
         Ok(out)
     }
 

@@ -99,6 +99,14 @@ fn batch_ids(mut ids: Vec<Uuid>) -> Result<Vec<Uuid>, ClientError> {
     Ok(ids)
 }
 
+/// The clock for the container and calendar writers, whose callers here pass a
+/// draft and no time. The clock is the client's: core has none.
+fn now_rfc3339() -> String {
+    time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_default()
+}
+
 impl SealbookClient {
     pub async fn put_contact(
         &mut self,
@@ -135,7 +143,7 @@ impl SealbookClient {
         object_id: Uuid,
         draft: &CoreAddressBookDraft,
     ) -> Result<u64, ClientError> {
-        let plaintext = sealbook_core::address_book_write(draft)?;
+        let plaintext = sealbook_core::address_book_write(draft, &now_rfc3339())?;
         self.put_sealed(object_id, plaintext.as_bytes(), ADDRESS_BOOK_CONTENT_TYPE)
             .await
     }
@@ -203,7 +211,7 @@ impl SealbookClient {
         object_id: Uuid,
         draft: &CoreCalendarEventDraft,
     ) -> Result<u64, ClientError> {
-        let plaintext = sealbook_core::event_write(draft)?;
+        let plaintext = sealbook_core::event_write(draft, &now_rfc3339())?;
         self.put_sealed(object_id, plaintext.as_bytes(), CALENDAR_EVENT_CONTENT_TYPE)
             .await
     }
@@ -219,7 +227,7 @@ impl SealbookClient {
         object_id: Uuid,
         draft: &CoreCalendarDraft,
     ) -> Result<u64, ClientError> {
-        let plaintext = sealbook_core::calendar_write(draft)?;
+        let plaintext = sealbook_core::calendar_write(draft, &now_rfc3339())?;
         self.put_sealed(object_id, plaintext.as_bytes(), CALENDAR_CONTENT_TYPE)
             .await
     }
@@ -338,8 +346,14 @@ impl SealbookClient {
         let hide_from_all = stored
             .as_ref()
             .is_some_and(|notebook| notebook.hide_from_all);
-        let plaintext =
-            sealbook_core::notebook_write(name, color, archived, hide_from_all, previous)?;
+        let plaintext = sealbook_core::notebook_write(
+            name,
+            color,
+            archived,
+            hide_from_all,
+            previous,
+            &now_rfc3339(),
+        )?;
         self.put_sealed(object_id, plaintext.as_bytes(), NOTEBOOK_CONTENT_TYPE)
             .await
     }
@@ -452,10 +466,13 @@ impl SealbookClient {
         if lists.iter().any(|(id, _)| *id == DEFAULT_TASK_LIST_ID) {
             return Ok(DEFAULT_TASK_LIST_ID);
         }
-        let plaintext = sealbook_core::task_list_write(&sealbook_core::CoreTaskListDraft {
-            name: DEFAULT_TASK_LIST_NAME.to_string(),
-            ..Default::default()
-        })?;
+        let plaintext = sealbook_core::task_list_write(
+            &sealbook_core::CoreTaskListDraft {
+                name: DEFAULT_TASK_LIST_NAME.to_string(),
+                ..Default::default()
+            },
+            &now_rfc3339(),
+        )?;
         self.put_task_list(DEFAULT_TASK_LIST_ID, &plaintext).await?;
         Ok(DEFAULT_TASK_LIST_ID)
     }
@@ -531,7 +548,7 @@ impl SealbookClient {
             })
             .unwrap_or_default();
         draft.name = name.to_string();
-        let plaintext = sealbook_core::bookmark_collection_write(&draft)?;
+        let plaintext = sealbook_core::bookmark_collection_write(&draft, &now_rfc3339())?;
         self.put_sealed(
             object_id,
             plaintext.as_bytes(),
@@ -547,7 +564,7 @@ impl SealbookClient {
         object_id: Uuid,
         draft: &sealbook_core::CoreBookmarkCollectionDraft,
     ) -> Result<u64, ClientError> {
-        let plaintext = sealbook_core::bookmark_collection_write(draft)?;
+        let plaintext = sealbook_core::bookmark_collection_write(draft, &now_rfc3339())?;
         self.put_sealed(
             object_id,
             plaintext.as_bytes(),
@@ -1014,7 +1031,7 @@ impl SealbookClient {
 
         let resp: sealbook_protocol::PutObjectResponse = self
             .put_json(
-                &format!("{server}/v1/collections/{collection_id}/objects"),
+                &format!("{server}/v2/collections/{collection_id}/objects"),
                 &PutObjectRequest {
                     id: object_id,
                     revision,
@@ -1094,7 +1111,7 @@ impl SealbookClient {
             .collect();
         let resp: PutObjectsResponse = self
             .put_json(
-                &format!("{server}/v1/collections/{collection_id}/objects/batch"),
+                &format!("{server}/v2/collections/{collection_id}/objects/batch"),
                 &PutObjectsRequest { objects, manifest },
                 Some(&token),
             )

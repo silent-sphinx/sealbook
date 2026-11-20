@@ -6,7 +6,7 @@ use base64::Engine;
 use uuid::Uuid;
 
 use sealbook_crypto::{
-    key_rotation_transcript, key_wraps_digest, rotated_objects_digest, rotation_recovery_payload,
+    key_rotation_transcript, key_wraps_digest, rotated_objects_digest, rotation_phrase_payload,
     sign, unwrap_for_device, CollectionKey, DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets,
     ObjectDigestEntry, WrapBinding, WrapDigestEntry, XWING_CIPHERSUITE,
 };
@@ -16,8 +16,8 @@ use sealbook_protocol::{
 };
 
 use sealbook_core::{
-    reseal_row, rotation_entries, rotation_plan, rotation_recipients, rotation_wraps_typed,
-    CoreDevice, CoreSealedRow, RotationState, RotationWraps,
+    reseal_row_upgrading, rotation_entries, rotation_plan, rotation_recipients,
+    rotation_wraps_typed, CoreDevice, CoreSealedRow, RotationState, RotationWraps,
 };
 
 use crate::{ClientError, SealbookClient};
@@ -81,12 +81,20 @@ impl SealbookClient {
     ///
     /// Returns the replacement recovery phrase, which the user must write down: a
     /// rotation cannot re-wrap for the old phrase, because no client holds it.
-    pub async fn revoke_device(
+    pub async fn revoke_device(&mut self, device_id: Uuid) -> Result<String, ClientError> {
+        self.revoke_devices(&[device_id], &mut |_| Ok(())).await
+    }
+
+    /// Revokes several devices in one rotation. The ids may come in any order.
+    pub async fn revoke_devices(
         &mut self,
-        device_id: Uuid,
-        password: &str,
+        device_ids: &[Uuid],
+        confirm: &mut dyn FnMut(&str) -> Result<(), ClientError>,
     ) -> Result<String, ClientError> {
-        let phrase = self.rotate(Some(device_id), password).await?;
+        let mut sorted = device_ids.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        let phrase = self.rotate_confirmed(&sorted, confirm).await?;
         // The revoke has landed; a label left behind is only clutter.
         let _ = self.remove_stale_device_labels().await;
         Ok(phrase)
@@ -97,8 +105,8 @@ impl SealbookClient {
     /// Replacing the phrase without rotating would leave anyone who has ever seen
     /// the old phrase able to decrypt: the wrap they captured still opens the same
     /// key. This is also why a completed recovery rotates.
-    pub async fn change_phrase(&mut self, password: &str) -> Result<String, ClientError> {
-        self.rotate(None, password).await
+    pub async fn change_phrase(&mut self) -> Result<String, ClientError> {
+        self.rotate(&[]).await
     }
 
     /// Replaces the collection key and re-encrypts the vault under it.
@@ -107,10 +115,22 @@ impl SealbookClient {
     /// because they all need the same work: read everything under the current key,
     /// generate a new one, re-wrap it for each device that keeps access plus the
     /// password and a fresh phrase, re-encrypt every object, and sign the lot.
-    pub async fn rotate(
+    ///
+    /// `revoke_device_ids` must be strictly ascending: the signed transcript
+    /// hashes the list as sent and the server refuses any other order.
+    pub async fn rotate(&mut self, revoke_device_ids: &[Uuid]) -> Result<String, ClientError> {
+        self.rotate_confirmed(revoke_device_ids, &mut |_| Ok(()))
+            .await
+    }
+
+    /// As [`Self::rotate`], showing the new recovery phrase to `confirm` before
+    /// anything is posted. The rotation retires the old phrase, so a caller that
+    /// makes the user prove they wrote the new one down does it here, while an
+    /// abort still leaves the account as it was.
+    pub async fn rotate_confirmed(
         &mut self,
-        revoke_device_id: Option<Uuid>,
-        password: &str,
+        revoke_device_ids: &[Uuid],
+        confirm: &mut dyn FnMut(&str) -> Result<(), ClientError>,
     ) -> Result<String, ClientError> {
         let (server, username, collection_id, self_device_id, token, secrets) = {
             let state = self.state.as_ref().ok_or(ClientError::NoState)?;
@@ -136,7 +156,7 @@ impl SealbookClient {
         // does not read the whole vault first.
         let roster = self.verified_roster().await?;
         let devices: Vec<CoreDevice> = roster.devices.iter().map(CoreDevice::from).collect();
-        let recipients = rotation_recipients(self_device_id, revoke_device_id, &devices)?;
+        let recipients = rotation_recipients(self_device_id, revoke_device_ids, &devices)?;
         let remaining: Vec<DevicePublicKeys> = recipients
             .iter()
             .map(DevicePublicKeys::try_from)
@@ -162,7 +182,6 @@ impl SealbookClient {
         let new_ck = CollectionKey::generate();
         let RotationWraps {
             key_wraps,
-            kdf_salt: salt,
             phrase,
             phrase_recovery,
         } = rotation_wraps_typed(
@@ -173,16 +192,17 @@ impl SealbookClient {
             },
             &recipients,
             &username,
-            password,
         )?;
 
         let new_ck_b64 = URL_SAFE_NO_PAD.encode(new_ck.as_bytes());
         let mut objects = Vec::with_capacity(plan.reseal.len());
         let mut resealed = Vec::with_capacity(plan.reseal.len());
+        let mut upgraded = 0u32;
         for row in &plan.reseal {
-            let sealed = reseal_row(&old_ck_b64, &new_ck_b64, collection_id, row)?;
-            objects.push(rotated_object(&sealed)?);
-            resealed.push(sealed);
+            let outcome = reseal_row_upgrading(&old_ck_b64, &new_ck_b64, collection_id, row)?;
+            upgraded += u32::from(outcome.upgraded);
+            objects.push(rotated_object(&outcome.row)?);
+            resealed.push(outcome.row);
         }
 
         let key_epoch = plan.manifest.key_epoch;
@@ -228,13 +248,12 @@ impl SealbookClient {
         )?;
         let transcript = key_rotation_transcript(
             collection_id,
-            revoke_device_id,
+            revoke_device_ids,
             key_epoch,
             &key_wraps_digest(&wrap_entries),
             &rotated_objects_digest(&object_entries),
             &manifest_digest_bytes,
-            &rotation_recovery_payload(
-                &salt,
+            &rotation_phrase_payload(
                 &phrase_recovery.mldsa_pk,
                 &phrase_recovery.ed25519_pk,
                 &phrase_recovery.lookup_id,
@@ -242,14 +261,14 @@ impl SealbookClient {
             ),
         );
         let signature = sign(&secrets, &transcript)?;
+        confirm(&phrase)?;
 
         let response: sealbook_protocol::RotateResponse = self
             .post_json(
-                &format!("{server}/v1/collections/{collection_id}/rotate"),
+                &format!("{server}/v2/collections/{collection_id}/rotate"),
                 &RotateRequest {
                     key_epoch,
-                    revoke_device_id,
-                    kdf_salt: salt.to_vec(),
+                    revoke_device_ids: revoke_device_ids.to_vec(),
                     key_wraps,
                     phrase_recovery,
                     objects,
@@ -267,12 +286,11 @@ impl SealbookClient {
 
         self.collection_key = Some(new_ck);
         self.key_epoch = response.key_epoch;
-        if let Some(state) = self.state.as_mut() {
-            state.kdf_salt = salt.to_vec();
-        }
         // The rotation carried a manifest at this sequence, like any other write.
         self.accept_manifest_seq(plan.manifest.manifest_seq)?;
         self.pin_roster(&new_roster)?;
+        self.rotation_hint = None;
+        self.last_rotation_upgraded = upgraded;
         Ok(phrase)
     }
 
@@ -288,7 +306,7 @@ impl SealbookClient {
         let resp: CollectionKeysResponse = self
             .get_json(
                 &format!(
-                    "{}/v1/collections/{}/keys",
+                    "{}/v2/collections/{}/keys",
                     state.server, state.collection_id
                 ),
                 Some(token),
@@ -316,7 +334,7 @@ impl SealbookClient {
         };
         let resp: CollectionKeysResponse = self
             .get_json(
-                &format!("{server}/v1/collections/{collection_id}/keys"),
+                &format!("{server}/v2/collections/{collection_id}/keys"),
                 Some(&token),
             )
             .await?;
@@ -327,7 +345,7 @@ impl SealbookClient {
                 wrap.recipient_kind == "device" && wrap.recipient_id == device_id.to_string()
             })
             .ok_or(ClientError::NoCollectionKey)?;
-        let key = unwrap_for_device(
+        let (key, form) = unwrap_for_device(
             &DeviceHpkeSecret::from_bytes(hpke_sk),
             &DeviceHpkeWrap {
                 enc: wrap.hpke_enc.clone(),
@@ -339,7 +357,12 @@ impl SealbookClient {
                 key_epoch: resp.key_epoch,
             },
         )?;
-        self.adopt_key(key, resp.key_epoch).await?;
+        self.adopt_key(
+            key,
+            resp.key_epoch,
+            form == sealbook_crypto::WrapForm::Legacy,
+        )
+        .await?;
         Ok(resp.key_epoch)
     }
 }

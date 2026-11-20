@@ -55,10 +55,15 @@ impl SealbookClient {
         };
 
         let objects = newest(rows);
-        match &walk.manifest_json {
-            Some(manifest) => self.verify_manifest(manifest, &entries(&objects)).await?,
-            None => self.manifest_absence_ok()?,
-        }
+        // A missing manifest is a refusal: a device just paired, recovered or
+        // reinstalled has seen none, so accepting the absence would let a server
+        // serve any subset of the vault.
+        let manifest = walk.manifest_json.as_deref().ok_or_else(|| {
+            ClientError::Manifest(crate::ManifestError(
+                "the server served no signed manifest for this collection".into(),
+            ))
+        })?;
+        self.verify_manifest(manifest, &entries(&objects)).await?;
         Ok(VerifiedObjects {
             objects,
             tombstone_floor: walk.tombstone_floor,

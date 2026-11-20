@@ -52,7 +52,7 @@ impl SealbookClient {
         self.login(password).await
     }
 
-    /// Changes the account password, re-wrapping the collection key under it.
+    /// Changes the account password.
     ///
     /// Signs in with the current password first, which is what proves the caller
     /// holds it rather than only a live session token.
@@ -73,16 +73,10 @@ impl SealbookClient {
             new_password,
             &started.opaque_response,
         )?;
-        let changed = sealbook_core::change_password_request(
-            &self.core_state()?,
-            &self.core_session(),
-            new_password,
-            &upload,
-            &started,
-        )?;
+        let changed =
+            sealbook_core::change_password_request(&self.core_state()?, &upload, &started)?;
         self.post(&server, &changed.request, Some(&token)).await?;
         if let Some(state) = self.state.as_mut() {
-            state.kdf_salt = decode(&changed.kdf_salt)?;
             state.session_token = None;
         }
         self.login(new_password).await
@@ -116,9 +110,4 @@ impl SealbookClient {
     pub fn core_state(&self) -> Result<sealbook_core::CoreDeviceState, ClientError> {
         Ok(self.state.as_ref().ok_or(ClientError::NoState)?.to_core())
     }
-}
-
-fn decode(text: &str) -> Result<Vec<u8>, ClientError> {
-    base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, text)
-        .map_err(|err| ClientError::Server(format!("core returned an unreadable salt: {err}")))
 }

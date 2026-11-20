@@ -6,10 +6,10 @@
 //! and the signer but cannot go and get them.
 
 use sealbook_core::{
-    core_entries, manifest_absence_ok, manifest_accept, manifest_buckets_accept,
-    manifest_buckets_from_whole, manifest_buckets_request, manifest_request, manifest_signer,
-    manifest_verify, wire_entries, AppliedManifest, BucketedManifest, BucketsOutcome, CoreDevice,
-    ManifestContext, ManifestOutcome, ManifestPlan, ManifestSigner,
+    core_entries, manifest_accept, manifest_buckets_accept, manifest_buckets_request,
+    manifest_request, manifest_signer, manifest_verify, wire_entries, AppliedManifest,
+    BucketedManifest, BucketsOutcome, CoreDevice, ManifestContext, ManifestOutcome, ManifestPlan,
+    ManifestSigner,
 };
 use sealbook_crypto::DeviceSigningSecrets;
 use sealbook_protocol::{ManifestBody, ManifestEntry};
@@ -63,15 +63,6 @@ impl SealbookClient {
                     wire_entries(&entries)?,
                 ))
             }
-            ManifestOutcome::Unmanifested {
-                latest_revision,
-                entries,
-            } => Ok((
-                0,
-                self.server_key_epoch().await?,
-                latest_revision,
-                wire_entries(&entries)?,
-            )),
         }
     }
 
@@ -89,22 +80,6 @@ impl SealbookClient {
             BucketsOutcome::Signed { held } => {
                 self.accept_manifest_seq(held.plan.manifest_seq)?;
                 Ok(held)
-            }
-            BucketsOutcome::Unmanifested => {
-                // A bucket answer carries no revision for the entries it did not
-                // serve, so the collection's next revision cannot be chosen from
-                // it. One extra request, on a path nothing takes once anything
-                // has written a manifest.
-                let (manifest_seq, key_epoch, latest_revision, entries) =
-                    self.manifest_state().await?;
-                Ok(manifest_buckets_from_whole(
-                    &ManifestPlan {
-                        manifest_seq,
-                        key_epoch,
-                        latest_revision,
-                    },
-                    &core_entries(&entries),
-                )?)
             }
         }
     }
@@ -128,11 +103,6 @@ impl SealbookClient {
         let plan = manifest_verify(&context, manifest_json, &core_entries(entries), &devices)?;
         self.accept_manifest_seq(plan.manifest_seq)?;
         Ok(())
-    }
-
-    /// The rule for a server that served objects with no manifest at all.
-    pub(crate) fn manifest_absence_ok(&self) -> Result<(), ClientError> {
-        Ok(manifest_absence_ok(&self.manifest_context()?)?)
     }
 
     /// Signs a manifest over entries core assembled, which a rotation's are:

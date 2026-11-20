@@ -31,7 +31,6 @@ pub use state::LocalState;
 pub use tls::{certificate_from_pem, pq_tls_config, TrustAnchors};
 pub use trash::{trash_nodes, TrashObject};
 
-pub use sealbook_core::CoreError;
 /// The content-payload decisions, straight from core: every client writes a
 /// note through these, so the CLI has no key list of its own.
 pub use sealbook_core::{
@@ -81,6 +80,7 @@ pub use sealbook_core::{
     trash_expired, trash_hidden, trash_node, trash_purge_plan, trash_restore_plan, trash_roots,
     CorePayloadKind, TrashNode, TrashRehome, TrashRoot, TRASH_RETENTION_DAYS,
 };
+pub use sealbook_core::{upgrade_pending_message, CoreError};
 
 pub use sealbook_protocol::{
     merge_payload, ACCOUNT_EXPORT_TYPE, ACCOUNT_EXPORT_VERSION, ADDRESS_BOOK_CONTENT_TYPE,

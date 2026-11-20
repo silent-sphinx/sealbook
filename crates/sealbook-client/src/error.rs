@@ -73,6 +73,20 @@ pub enum ClientError {
          issues a new recovery phrase"
     )]
     RecoveryRotationPending,
+    /// The account has not moved to this protocol version: its key was wrapped
+    /// under the old scheme, and the server kept a copy a password protected.
+    /// Call `complete_rotation`; the server refuses writes until it is done.
+    #[error(
+        "this account has not moved to the current protocol: the collection key must be \
+         rotated, which issues a new recovery phrase"
+    )]
+    UpgradeRotationPending,
+    /// The server served a key that does not open the vault this device holds.
+    #[error("the server served a key that does not match your vault")]
+    KeyMismatch,
+    /// Key material in a form a migrated account no longer uses.
+    #[error("the server served key material in a form this account no longer uses")]
+    LegacyKeyMaterial,
     /// The collection key this device holds decrypted none of the vault's
     /// rows. Never retried away: it is the server-substituted key the roster's
     /// key commitment exists to catch, on an account that has no commitment
@@ -122,6 +136,9 @@ impl From<sealbook_core::CoreError> for ClientError {
             CoreError::PairPending => ClientError::PairPending,
             CoreError::CollectionBusy => ClientError::CollectionBusy,
             CoreError::RecoveryRotationPending => ClientError::RecoveryRotationPending,
+            CoreError::UpgradeRotationPending => ClientError::UpgradeRotationPending,
+            CoreError::KeyMismatch => ClientError::KeyMismatch,
+            CoreError::LegacyKeyMaterial => ClientError::LegacyKeyMaterial,
             CoreError::WrongCollectionKey { rows } => ClientError::WrongCollectionKey(rows),
             // Each refusal states its own condition, and the CLI prints it as
             // the reason the rotation did not start.

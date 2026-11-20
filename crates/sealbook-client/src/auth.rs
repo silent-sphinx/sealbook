@@ -27,8 +27,7 @@ impl SealbookClient {
         let response =
             sealbook_core::register_start_accept(&self.post(server, &start, None).await?)?;
         let upload = sealbook_core::opaque_register_upload(&opaque.state, password, &response)?;
-        let registering =
-            sealbook_core::register_finish_request(username, password, &upload, &identity)?;
+        let registering = sealbook_core::register_finish_request(username, &upload, &identity)?;
         let served = self.post(server, &registering.request, None).await?;
         let state =
             sealbook_core::register_accept(server, username, &identity, &registering.pin, &served)?;
@@ -42,36 +41,35 @@ impl SealbookClient {
     /// Signs this device in.
     ///
     /// Fails with [`ClientError::RecoveryRotationPending`] if a recovery left the
-    /// collection key unrotated, because carrying on as though the account were
-    /// healthy is what left a used recovery phrase working. The session is live
-    /// by then, so a caller that means to deal with it calls
-    /// [`Self::complete_recovery_rotation`].
+    /// collection key unrotated, and with [`ClientError::UpgradeRotationPending`]
+    /// if the account has not moved to this protocol version. Carrying on as
+    /// though the account were healthy is what left a used recovery phrase
+    /// working. The session is live by then, so a caller that means to deal with
+    /// it calls [`Self::complete_rotation`].
     pub async fn login(&mut self, password: &str) -> Result<(), ClientError> {
         self.login_inner(password, false).await
     }
 
-    /// Finishes the rotation an interrupted recovery left owing.
+    /// Finishes the rotation an interrupted recovery or an unmigrated account owes,
+    /// revoking `revoke` along with it.
     ///
     /// Returns the replacement recovery phrase, which the caller must show to the
     /// user: the rotation retires the old one. Safe to call when nothing is owed,
     /// in which case it rotates anyway and still issues a new phrase.
-    pub async fn complete_recovery_rotation(
+    pub async fn complete_rotation(
         &mut self,
         password: &str,
+        revoke: &[uuid::Uuid],
+        confirm: &mut dyn FnMut(&str) -> Result<(), ClientError>,
     ) -> Result<String, ClientError> {
         self.login_inner(password, true).await?;
-        self.rotate(None, password).await
-    }
-
-    /// True when the last login found a recovery's rotation still outstanding.
-    pub fn recovery_rotation_pending(&self) -> bool {
-        self.recovery_pending
+        self.rotate_confirmed(revoke, confirm).await
     }
 
     async fn login_inner(
         &mut self,
         password: &str,
-        allow_recovery_pending: bool,
+        allow_rotation_owed: bool,
     ) -> Result<(), ClientError> {
         let (server, core_state) = {
             let state = self.state.as_ref().ok_or(ClientError::NoState)?;
@@ -100,19 +98,31 @@ impl SealbookClient {
             &started,
         )?;
         let finished = self.post(&server, &finish, None).await?;
-        let logged = sealbook_core::login_accept(&core_state, password, &finished)?;
+        let logged = sealbook_core::login_accept(&core_state, &finished)?;
 
         self.collection_key = None;
-        self.recovery_pending = logged.recovery_pending;
+        self.rotation_hint = logged.rotation_owed;
         self.state = Some(LocalState::from_core(logged.state));
         // Before anything reads or writes the vault: the roster is what shows
         // the key just opened is the account's and not one the server sealed to
         // this device, what every later device-set decision is made from, and
         // where a device that has been revoked finds out.
-        self.adopt_key(key_from(&logged.collection_key)?, logged.key_epoch)
-            .await?;
-        if self.recovery_pending && !allow_recovery_pending {
-            return Err(ClientError::RecoveryRotationPending);
+        self.adopt_key(
+            key_from(&logged.collection_key)?,
+            logged.key_epoch,
+            logged.legacy_wrap,
+        )
+        .await?;
+        if !allow_rotation_owed {
+            match self.rotation_owed() {
+                Some(sealbook_core::CoreRotationOwed::Recovery) => {
+                    return Err(ClientError::RecoveryRotationPending)
+                }
+                Some(sealbook_core::CoreRotationOwed::Upgrade) => {
+                    return Err(ClientError::UpgradeRotationPending)
+                }
+                None => {}
+            }
         }
         Ok(())
     }
@@ -151,9 +161,8 @@ impl SealbookClient {
             &started.opaque_response,
         )?;
         let device = sealbook_core::new_device()?;
-        let recovering = sealbook_core::recover_finish_request(
-            username, phrase, password, &started, &device, &upload,
-        )?;
+        let recovering =
+            sealbook_core::recover_finish_request(username, phrase, &started, &device, &upload)?;
         let served = self.post(server, &recovering.request, None).await?;
         let state = sealbook_core::recover_accept(
             server,
@@ -171,7 +180,7 @@ impl SealbookClient {
         // else's copy of it, because enrolling a device does not change the key it
         // unwraps. Rotate, which issues a fresh phrase and leaves the old one
         // unable to open anything.
-        self.rotate(None, password).await
+        self.rotate(&[]).await
     }
 
     /// Posts a request core built and hands back the response for core to read.

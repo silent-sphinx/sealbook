@@ -19,6 +19,7 @@ impl SealbookClient {
             collection_key: self.collection_key.as_ref().map(|key| key.0),
             key_epoch: self.key_epoch,
             verified_roster: None,
+            legacy_wrap: self.legacy_wrap,
         }
     }
 
@@ -26,6 +27,7 @@ impl SealbookClient {
         let state = self.state.as_mut().ok_or(ClientError::NoState)?;
         let pin = sealbook_core::CoreRosterPin {
             roster_seq: roster.roster_seq,
+            manifest_seq: 0,
             transcript: base64::Engine::encode(
                 &base64::engine::general_purpose::URL_SAFE_NO_PAD,
                 roster.pin(state.collection_id).transcript,
@@ -38,18 +40,23 @@ impl SealbookClient {
             &next.roster_transcript,
         )
         .map_err(|err| roster_error(&format!("core returned an unreadable pin: {err}")))?;
-        self.roster_key_committed = Some(!roster.key_commitment.is_empty());
+        self.account_migrated = Some(roster.migrated);
         Ok(())
     }
 
-    /// True when the roster this device last pinned predates key commitments.
+    /// Why a rotation of the collection key is owed, if one is.
     ///
-    /// Such a roster vouches for the collection key by its MAC alone, which a
-    /// server that sealed a key of its own to this device can recompute. Only a
-    /// roster step adds a commitment, and the one a user can take at will is a
-    /// rotation, which also issues a new recovery phrase.
-    pub fn roster_lacks_key_commitment(&self) -> bool {
-        self.roster_key_committed == Some(false)
+    /// A recovery that has not rotated, or an account whose latest roster is not
+    /// a migrated one. The roster decides the second whatever the server says:
+    /// the server's word is only a hint, so it cannot talk a device out of it.
+    /// While one is owed the rotation is the only write the server allows.
+    pub fn rotation_owed(&self) -> Option<sealbook_core::CoreRotationOwed> {
+        use sealbook_core::CoreRotationOwed::{Recovery, Upgrade};
+        match (self.rotation_hint, self.account_migrated) {
+            (Some(Recovery), _) => Some(Recovery),
+            (_, Some(false)) | (Some(Upgrade), _) => Some(Upgrade),
+            _ => None,
+        }
     }
 
     /// The account's current roster, verified from this device's pin.
@@ -77,20 +84,76 @@ impl SealbookClient {
         &mut self,
         key: CollectionKey,
         key_epoch: u64,
+        legacy_wrap: bool,
     ) -> Result<Vec<DevicePublicKeys>, ClientError> {
         let response = self.fetch_roster().await?;
         let session = CoreSession {
             collection_key: Some(key.0),
             key_epoch,
             verified_roster: None,
+            legacy_wrap,
         };
         let verified = roster_accept_key(&self.roster_context()?, &session, &response)?;
         let roster: RosterBody = serde_json::from_str(&verified.roster_json)
             .map_err(|err| roster_error(&format!("core returned an unreadable roster: {err}")))?;
         self.collection_key = Some(key);
         self.key_epoch = key_epoch;
+        self.legacy_wrap = legacy_wrap;
+        if !verified.key_committed {
+            // No commitment to check the key against, so the vault is the only
+            // witness. Held tentatively for the read, dropped if it fails.
+            if let Err(error) = self.check_key_against_vault().await {
+                self.collection_key = None;
+                return Err(error);
+            }
+        }
         self.pin_roster(&roster)?;
         Ok(roster.devices)
+    }
+
+    /// Checks a key adopted under a roster with no key commitment against the
+    /// first live object the signed manifest lists.
+    ///
+    /// A roster of that kind vouches for the key by a MAC the server can
+    /// recompute, so a server that sealed a key of its own to this device passes
+    /// the roster check. It cannot make that key open an object it did not
+    /// write. An empty vault has nothing to check, and the rotation that
+    /// migrates the account replaces the key anyway.
+    async fn check_key_against_vault(&mut self) -> Result<(), ClientError> {
+        let collection_id = self
+            .state
+            .as_ref()
+            .ok_or(ClientError::NoState)?
+            .collection_id;
+        let key = CollectionKey::from_bytes(
+            *self
+                .collection_key
+                .as_ref()
+                .ok_or(ClientError::NoCollectionKey)?
+                .as_bytes(),
+        );
+        let verified = self.fetch_verified_objects().await?;
+        let Some(object) = verified.objects.iter().find(|object| !object.tombstone) else {
+            return Ok(());
+        };
+        let Ok(nonce) = <[u8; 24]>::try_from(object.nonce.as_slice()) else {
+            return Err(ClientError::Server(
+                "an object has a malformed nonce".into(),
+            ));
+        };
+        let opened = sealbook_crypto::decrypt_object(
+            &key,
+            &sealbook_crypto::EncryptedObject {
+                nonce,
+                ciphertext: object.ciphertext.clone(),
+                padded_size: object.padded_size,
+            },
+            &sealbook_crypto::object_aad(object.id.as_bytes(), collection_id.as_bytes()),
+        );
+        if opened.is_err() {
+            return Err(sealbook_core::CoreError::KeyMismatch.into());
+        }
+        Ok(())
     }
 
     fn roster_context(&self) -> Result<RosterContext, ClientError> {
