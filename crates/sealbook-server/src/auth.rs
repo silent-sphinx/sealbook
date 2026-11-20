@@ -104,9 +104,6 @@ pub(crate) async fn register_finish(
     }
     let record = server_register_finish(&body.upload)
         .map_err(|e| err(StatusCode::BAD_REQUEST, e.to_string()))?;
-    if body.kdf_salt.len() != 16 {
-        return Err(err(StatusCode::BAD_REQUEST, "invalid kdf salt"));
-    }
     let enroll = enrollment_transcript(
         body.device.device_id,
         &body.device.mldsa_pk,
@@ -144,14 +141,13 @@ pub(crate) async fn register_finish(
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
     sqlx::query(
         "INSERT INTO accounts
-             (id, username, opaque_record, kdf_salt, created_at,
+             (id, username, opaque_record, created_at,
               phrase_mldsa_pk, phrase_ed25519_pk, phrase_lookup_id, phrase_scheme)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(account_id.to_string())
     .bind(&body.username)
     .bind(&record)
-    .bind(&body.kdf_salt)
     .bind(ts)
     .bind(&body.phrase_recovery.mldsa_pk)
     .bind(&body.phrase_recovery.ed25519_pk)
@@ -455,14 +451,13 @@ pub(crate) async fn login_finish(
     session_key.zeroize();
     pending.challenge.zeroize();
 
-    let account = sqlx::query("SELECT id, kdf_salt FROM accounts WHERE username = ?")
+    let account = sqlx::query("SELECT id FROM accounts WHERE username = ?")
         .bind(&body.username)
         .fetch_optional(&state.db)
         .await
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
         .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "invalid credentials"))?;
     let account_id: String = account.get("id");
-    let kdf_salt: Vec<u8> = account.get("kdf_salt");
 
     let device = sqlx::query("SELECT id, mldsa_pk, ed25519_pk FROM devices WHERE id = ? AND account_id = ? AND revoked_at IS NULL")
         .bind(body.device_id.to_string())
@@ -535,15 +530,14 @@ pub(crate) async fn login_finish(
     .await
     .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
 
-    let recovery_pending = crate::recovery::rotation_owed(&state.db, &account_id).await?;
+    let rotation_owed = crate::recovery::rotation_owed(&state.db, &account_id).await?;
 
     Ok(Json(LoginFinishResponse {
         account_id: Uuid::parse_str(&account_id).unwrap(),
         collection_id: Uuid::parse_str(&collection_id).unwrap(),
         session_token: token,
-        kdf_salt,
         key_wraps,
         key_epoch: key_epoch as u64,
-        recovery_pending,
+        rotation_owed,
     }))
 }

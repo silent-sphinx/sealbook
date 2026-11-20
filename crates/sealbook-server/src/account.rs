@@ -11,8 +11,7 @@ use uuid::Uuid;
 use sealbook_crypto::opaque::{server_register_finish, server_register_start};
 use sealbook_crypto::{
     account_op_transcript, ct_eq, delete_account_payload, generate_login_challenge,
-    is_supported_recovery_ciphersuite, password_change_payload, username_change_payload, verify,
-    DeviceSigningPublic, DualSignature, HPKE_AEAD_TAG_LEN,
+    password_change_payload, username_change_payload, verify, DeviceSigningPublic, DualSignature,
 };
 use sealbook_protocol::{
     valid_username, AccountChallengeResponse, ChangePasswordRequest, ChangePasswordStartRequest,
@@ -303,35 +302,18 @@ pub(crate) async fn change_password(
     {
         return Err(err(StatusCode::UNAUTHORIZED, "invalid password change"));
     }
-    // The signature covers the replacement recovery wrap as well as the new
-    // verifier, so a caller cannot substitute key material the account holder
-    // never produced — which is how a stolen token could destroy password-based
-    // recovery while looking like a legitimate password change.
+    // The signature covers the new verifier, so a stolen token cannot swap in
+    // one the account holder never produced.
     verify_device_signature(
         &state,
         &session,
         "password",
         body.password_change_id,
         &body.challenge,
-        &password_change_payload(
-            &body.upload,
-            &body.kdf_salt,
-            &body.recovery_nonce,
-            &body.recovery_wrapped_ck,
-            &body.recovery_ciphersuite,
-        ),
+        &password_change_payload(&body.upload),
         &body.signature,
     )
     .await?;
-    if body.kdf_salt.len() != 16 {
-        return Err(err(StatusCode::BAD_REQUEST, "invalid kdf salt"));
-    }
-    if !is_supported_recovery_ciphersuite(&body.recovery_ciphersuite)
-        || body.recovery_nonce.len() != 24
-        || body.recovery_wrapped_ck.len() != 32 + HPKE_AEAD_TAG_LEN
-    {
-        return Err(err(StatusCode::BAD_REQUEST, "invalid ciphersuite"));
-    }
     let record = server_register_finish(&body.upload)
         .map_err(|_| err(StatusCode::BAD_REQUEST, "opaque finish"))?;
 
@@ -341,46 +323,12 @@ pub(crate) async fn change_password(
         .await
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
 
-    let account = sqlx::query("SELECT username FROM accounts WHERE id = ?")
-        .bind(&session.account_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|_| err(StatusCode::NOT_FOUND, "account not found"))?;
-    let username: String = account.get("username");
-
-    let collection = sqlx::query("SELECT id FROM collections WHERE account_id = ?")
-        .bind(&session.account_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "collection not found"))?;
-    let collection_id: String = collection.get("id");
-
-    sqlx::query("UPDATE accounts SET opaque_record = ?, kdf_salt = ? WHERE id = ?")
+    sqlx::query("UPDATE accounts SET opaque_record = ? WHERE id = ?")
         .bind(&record)
-        .bind(&body.kdf_salt)
         .bind(&session.account_id)
         .execute(&mut *tx)
         .await
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-
-    sqlx::query("DELETE FROM key_wraps WHERE collection_id = ? AND recipient_kind = 'recovery'")
-        .bind(&collection_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-
-    sqlx::query(
-        "INSERT INTO key_wraps (collection_id, recipient_kind, recipient_id, hpke_enc, wrapped_ck, ciphersuite)
-         VALUES (?, 'recovery', ?, ?, ?, ?)",
-    )
-    .bind(&collection_id)
-    .bind(&username)
-    .bind(&body.recovery_nonce)
-    .bind(&body.recovery_wrapped_ck)
-    .bind(&body.recovery_ciphersuite)
-    .execute(&mut *tx)
-    .await
-    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
 
     sqlx::query("DELETE FROM sessions WHERE account_id = ?")
         .bind(&session.account_id)

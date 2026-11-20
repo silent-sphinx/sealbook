@@ -32,7 +32,7 @@ use sealbook_protocol::{
     AccountChallengeResponse, AttachmentListEntry, AttachmentMetaResponse, AttachmentOpAuth,
     CommitAttachmentResponse, CreateAttachmentRequest, CreateAttachmentResponse, ErrorBody,
     ListAttachmentsResponse, ATTACHMENT_CHUNK_SIZE, ATTACHMENT_CHUNK_TAG_LEN,
-    ATTACHMENT_STATE_COMMITTED, ATTACHMENT_STATE_PENDING, MAX_ATTACHMENT_SIZE,
+    ATTACHMENT_STATE_COMMITTED, ATTACHMENT_STATE_PENDING, MAX_PADDED_ATTACHMENT_SIZE,
 };
 
 use crate::account::authorise_account_op;
@@ -151,7 +151,7 @@ async fn authorise_attachment_op(
     op: &str,
     collection_id: Uuid,
     attachment_id: Uuid,
-    sizes: (u64, u32, u32),
+    chunking: (u32, u32),
     auth: &AttachmentOpAuth,
 ) -> Result<(), (StatusCode, Json<ErrorBody>)> {
     crate::recovery::require_rotation_not_owed(state, &session.account_id).await?;
@@ -162,7 +162,7 @@ async fn authorise_attachment_op(
         op,
         auth.challenge_id,
         &auth.challenge,
-        &attachment_op_payload(collection_id, attachment_id, sizes.0, sizes.1, sizes.2),
+        &attachment_op_payload(collection_id, attachment_id, chunking.0, chunking.1),
         &auth.signature,
     )
     .await
@@ -182,15 +182,17 @@ pub(crate) async fn create_attachment(
         "attachment-create",
         collection_id,
         body.attachment_id,
-        (body.total_plaintext_size, body.chunk_size, body.chunk_count),
+        (body.chunk_size, body.chunk_count),
         &body.auth,
     )
     .await?;
 
-    if body.total_plaintext_size == 0 || body.chunk_size == 0 || body.chunk_count == 0 {
+    if body.chunk_size == 0 || body.chunk_count == 0 {
         return Err(err(StatusCode::BAD_REQUEST, "empty attachment"));
     }
-    if body.total_plaintext_size > MAX_ATTACHMENT_SIZE as u64 {
+    // Only the final chunk may be short, so every chunk before it is a full one.
+    // The server never sees the plaintext size; this is the bound it can enforce.
+    if (body.chunk_count as u64 - 1) * body.chunk_size as u64 >= MAX_PADDED_ATTACHMENT_SIZE as u64 {
         return Err(err(StatusCode::PAYLOAD_TOO_LARGE, "attachment too large"));
     }
     if body.chunk_size as usize > ATTACHMENT_CHUNK_SIZE {
@@ -202,16 +204,6 @@ pub(crate) async fn create_attachment(
     if body.chunk_count > 1 && (body.chunk_size as usize) < MIN_ATTACHMENT_CHUNK_SIZE {
         return Err(err(StatusCode::BAD_REQUEST, "chunk size too small"));
     }
-    // The declared chunking must be the one and only tiling of the declared size,
-    // so the completeness check at commit (count of stored chunks) is meaningful.
-    let expected_chunks = body.total_plaintext_size.div_ceil(body.chunk_size as u64);
-    if expected_chunks != body.chunk_count as u64 {
-        return Err(err(
-            StatusCode::BAD_REQUEST,
-            "chunk count does not match size",
-        ));
-    }
-
     // An upper-bound reservation: every chunk at full size plus its AEAD tag. The
     // final, shorter chunk makes this a slight over-estimate, reconciled at commit.
     let reserved =
@@ -266,8 +258,8 @@ pub(crate) async fn create_attachment(
     sqlx::query(
         "INSERT INTO attachments
          (account_id, collection_id, attachment_id, state, chunk_size, chunk_count,
-          total_plaintext_size, total_ciphertext_size, created_at, committed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+          total_ciphertext_size, created_at, committed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
     )
     .bind(&session.account_id)
     .bind(collection_id.to_string())
@@ -275,7 +267,6 @@ pub(crate) async fn create_attachment(
     .bind(ATTACHMENT_STATE_PENDING)
     .bind(body.chunk_size as i64)
     .bind(body.chunk_count as i64)
-    .bind(body.total_plaintext_size as i64)
     .bind(reserved)
     .bind(now())
     .execute(&mut *tx)
@@ -366,8 +357,17 @@ pub(crate) async fn upload_chunk(
     // One sealed chunk is at most its plaintext plus the AEAD tag. A larger body
     // than the declared chunking allows is a client bug or an attempt to smuggle
     // bytes past the reservation.
-    if body.len() as i64 > chunk_size + ATTACHMENT_CHUNK_TAG_LEN as i64 {
+    let full = chunk_size + ATTACHMENT_CHUNK_TAG_LEN as i64;
+    if body.len() as i64 > full {
         return Err(err(StatusCode::BAD_REQUEST, "chunk larger than declared"));
+    }
+    // Every chunk but the last is exactly one full chunk, so a chunk's length
+    // does not say where in the file it sits.
+    if (index as i64) + 1 < chunk_count && body.len() as i64 != full {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "every chunk but the last must be a full chunk",
+        ));
     }
     if body.is_empty() {
         return Err(err(StatusCode::BAD_REQUEST, "empty chunk"));
@@ -412,7 +412,7 @@ pub(crate) async fn commit_attachment(
         "attachment-commit",
         collection_id,
         attachment_id,
-        (0, 0, 0),
+        (0, 0),
         &auth,
     )
     .await?;
@@ -573,7 +573,7 @@ pub(crate) async fn delete_attachment(
         "attachment-delete",
         collection_id,
         attachment_id,
-        (0, 0, 0),
+        (0, 0),
         &auth,
     )
     .await?;

@@ -11,14 +11,13 @@ use uuid::Uuid;
 
 use sealbook_crypto::opaque::{server_register_finish, server_register_start};
 use sealbook_crypto::{
-    ct_eq, generate_login_challenge, is_supported_recovery_ciphersuite,
-    phrase_recovery_start_transcript, phrase_recovery_transcript, recovery_password_payload,
-    verify_phrase_recovery, DeviceSigningPublic, DualSignature, HPKE_AEAD_TAG_LEN, KDF_SALT_LEN,
-    NONCE_LEN, PHRASE_LOOKUP_ID_LEN,
+    ct_eq, generate_login_challenge, phrase_recovery_start_transcript, phrase_recovery_transcript,
+    recovery_password_payload, verify_phrase_recovery, DeviceSigningPublic, DualSignature,
+    PHRASE_LOOKUP_ID_LEN,
 };
 use sealbook_protocol::{
     valid_username, ErrorBody, KeyWrapBody, RecoverFinishRequest, RecoverFinishResponse,
-    RecoverStartRequest, RecoverStartResponse,
+    RecoverStartRequest, RecoverStartResponse, RotationOwed,
 };
 
 use crate::decoy::recovery_decoy;
@@ -211,15 +210,6 @@ pub(crate) async fn recover_finish(
             })
         })
         .unwrap_or_else(|| state.dummy_phrase_recovery_pk.clone());
-    if body.kdf_salt.len() != KDF_SALT_LEN {
-        return Err(err(StatusCode::BAD_REQUEST, "invalid kdf salt"));
-    }
-    if !is_supported_recovery_ciphersuite(&body.recovery_ciphersuite)
-        || body.recovery_nonce.len() != NONCE_LEN
-        || body.recovery_wrapped_ck.len() != 32 + HPKE_AEAD_TAG_LEN
-    {
-        return Err(err(StatusCode::BAD_REQUEST, "invalid ciphersuite"));
-    }
     let transcript = phrase_recovery_transcript(
         &body.username,
         body.recovery_id,
@@ -228,13 +218,7 @@ pub(crate) async fn recover_finish(
         &body.device.mldsa_pk,
         &body.device.ed25519_pk,
         &body.device.xwing_hpke_pk,
-        &recovery_password_payload(
-            &body.upload,
-            &body.kdf_salt,
-            &body.recovery_nonce,
-            &body.recovery_wrapped_ck,
-            &body.recovery_ciphersuite,
-        ),
+        &recovery_password_payload(&body.upload),
     );
     let proof = DualSignature {
         mldsa: body.phrase_proof.mldsa.clone(),
@@ -291,34 +275,17 @@ pub(crate) async fn recover_finish(
     // top of a password the user may no longer have.
     let record = server_register_finish(&body.upload)
         .map_err(|_| err(StatusCode::BAD_REQUEST, "opaque finish"))?;
-    sqlx::query("UPDATE accounts SET opaque_record = ?, kdf_salt = ? WHERE id = ?")
+    sqlx::query("UPDATE accounts SET opaque_record = ? WHERE id = ?")
         .bind(&record)
-        .bind(&body.kdf_salt)
         .bind(&account_id)
         .execute(&mut *tx)
         .await
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-    // The password wrap of the collection key was made under the old password, so
-    // it is replaced with the one the client re-made under the new one. Left
-    // alone, the account would have a password that logs in but cannot decrypt.
-    sqlx::query(
-        "UPDATE key_wraps SET hpke_enc = ?, wrapped_ck = ?, ciphersuite = ?
-         WHERE collection_id = ? AND recipient_kind = 'recovery'",
-    )
-    .bind(&body.recovery_nonce)
-    .bind(&body.recovery_wrapped_ck)
-    .bind(&body.recovery_ciphersuite)
-    .bind(&collection_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-
     // The phrase that was just used still unwraps the current collection key, and
     // so does every other copy of it. Only a client can rotate, so the debt is
     // recorded here and `rotate` is what clears it; until then this account is
     // held to it by `require_rotation_not_owed`.
-    sqlx::query("UPDATE accounts SET recovery_pending = ? WHERE id = ?")
-        .bind(now())
+    sqlx::query("UPDATE accounts SET rotation_owed = 'recovery' WHERE id = ?")
         .bind(&account_id)
         .execute(&mut *tx)
         .await
@@ -337,29 +304,36 @@ pub(crate) async fn recover_finish(
     }))
 }
 
-/// Whether a recovery has left this account owing a key rotation.
+/// Why this account owes a key rotation, if it does.
 pub(crate) async fn rotation_owed<'e, E>(
     db: E,
     account_id: &str,
-) -> Result<bool, (StatusCode, Json<ErrorBody>)>
+) -> Result<Option<RotationOwed>, (StatusCode, Json<ErrorBody>)>
 where
     E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
 {
-    let pending: i64 = sqlx::query_scalar("SELECT recovery_pending FROM accounts WHERE id = ?")
-        .bind(account_id)
-        .fetch_optional(db)
-        .await
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
-        .unwrap_or(0);
-    Ok(pending != 0)
+    let owed: Option<String> =
+        sqlx::query_scalar("SELECT rotation_owed FROM accounts WHERE id = ?")
+            .bind(account_id)
+            .fetch_optional(db)
+            .await
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
+            .flatten();
+    Ok(match owed.as_deref() {
+        Some("recovery") => Some(RotationOwed::Recovery),
+        Some(_) => Some(RotationOwed::Upgrade),
+        None => None,
+    })
 }
 
-/// Refuses an operation while a recovery's rotation is still outstanding.
+/// Refuses an operation while a rotation is still outstanding.
 ///
 /// A recovery enrols a device without replacing the collection key, so until the
-/// rotation lands the phrase just used — and any other copy of it — still opens
-/// the vault. Letting the account carry on as normal is what turned "the client
-/// crashed before it rotated" into a phrase that stayed valid for ever.
+/// rotation lands the phrase just used, and any other copy of it, still opens
+/// the vault. An account that has not moved to this protocol version owes a
+/// rotation for the same reason: its key was wrapped under the old scheme.
+/// Letting the account carry on as normal is what turned "the client crashed
+/// before it rotated" into a phrase that stayed valid for ever.
 ///
 /// Reading is deliberately still allowed: a rotation has to re-encrypt every
 /// object, so it has to be able to read them first.
@@ -367,12 +341,17 @@ pub(crate) async fn require_rotation_not_owed(
     state: &AppState,
     account_id: &str,
 ) -> Result<(), (StatusCode, Json<ErrorBody>)> {
-    if rotation_owed(&state.db, account_id).await? {
-        return Err(err(
+    match rotation_owed(&state.db, account_id).await? {
+        None => Ok(()),
+        Some(RotationOwed::Recovery) => Err(err(
             StatusCode::CONFLICT,
             "this account has an unfinished recovery: the collection key must be rotated \
              before it can be used again, which issues a new recovery phrase",
-        ));
+        )),
+        Some(RotationOwed::Upgrade) => Err(err(
+            StatusCode::CONFLICT,
+            "this account has not moved to the current protocol: the collection key must be \
+             rotated before it can be used again, which issues a new recovery phrase",
+        )),
     }
-    Ok(())
 }

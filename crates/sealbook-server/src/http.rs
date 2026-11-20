@@ -10,7 +10,7 @@ use axum::Json;
 use serde::Serialize;
 
 use sealbook_crypto::opaque::OPAQUE_KSF;
-use sealbook_crypto::{PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE};
+use sealbook_crypto::{PHRASE_SCHEME, XWING_CIPHERSUITE};
 use sealbook_protocol::PROTOCOL_VERSION;
 use tower_http::cors::AllowOrigin;
 
@@ -26,7 +26,6 @@ pub(crate) struct CryptoProfile {
     signature_algorithms: [&'static str; 2],
     object_aead: &'static str,
     phrase_recovery_scheme: &'static str,
-    recovery_ciphersuite: &'static str,
     opaque_ksf: &'static str,
     /// Whether the server withholds the OPAQUE credential response until the
     /// device has proved possession of its keys.
@@ -43,7 +42,6 @@ pub(crate) async fn crypto_profile() -> Json<CryptoProfile> {
         signature_algorithms: ["ML-DSA-65", "Ed25519"],
         object_aead: "XChaCha20-Poly1305-256",
         phrase_recovery_scheme: PHRASE_SCHEME,
-        recovery_ciphersuite: RECOVERY_CIPHERSUITE,
         opaque_ksf: OPAQUE_KSF,
         opaque_requires_device_proof: true,
     })

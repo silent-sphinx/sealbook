@@ -5,9 +5,8 @@ use axum::http::StatusCode;
 use axum::Json;
 
 use sealbook_crypto::{
-    is_supported_recovery_ciphersuite, ED25519_PUBLIC_KEY_LEN, HPKE_AEAD_TAG_LEN,
-    MLDSA65_PUBLIC_KEY_LEN, PHRASE_CIPHERSUITE, PHRASE_LOOKUP_ID_LEN, PHRASE_SCHEME,
-    XWING_CIPHERSUITE, XWING_ENCAPSULATED_KEY_LEN,
+    ED25519_PUBLIC_KEY_LEN, HPKE_AEAD_TAG_LEN, MLDSA65_PUBLIC_KEY_LEN, PHRASE_CIPHERSUITE,
+    PHRASE_LOOKUP_ID_LEN, PHRASE_SCHEME, XWING_CIPHERSUITE, XWING_ENCAPSULATED_KEY_LEN,
 };
 use sealbook_protocol::{
     BatchObject, ErrorBody, KeyWrapBody, PhraseRecoveryBody, PutObjectRequest, RotatedObject,
@@ -41,7 +40,6 @@ pub(crate) fn validate_wraps(
     wraps: &[KeyWrapBody],
 ) -> Result<(), (StatusCode, Json<ErrorBody>)> {
     let mut device = 0;
-    let mut recovery = 0;
     let mut phrase = 0;
     for wrap in wraps {
         match wrap.recipient_kind.as_str() {
@@ -55,15 +53,6 @@ pub(crate) fn validate_wraps(
                 }
                 device += 1;
             }
-            "recovery" => {
-                if !is_supported_recovery_ciphersuite(&wrap.ciphersuite)
-                    || wrap.hpke_enc.len() != 24
-                    || wrap.wrapped_ck.len() != 32 + HPKE_AEAD_TAG_LEN
-                {
-                    return Err(err(StatusCode::BAD_REQUEST, "invalid key wrap"));
-                }
-                recovery += 1;
-            }
             "phrase" => {
                 if wrap.recipient_id != username
                     || wrap.ciphersuite != PHRASE_CIPHERSUITE
@@ -77,21 +66,20 @@ pub(crate) fn validate_wraps(
             _ => return Err(err(StatusCode::BAD_REQUEST, "invalid key wrap")),
         }
     }
-    if device != 1 || recovery != 1 || phrase != 1 {
+    if device != 1 || phrase != 1 {
         return Err(err(StatusCode::BAD_REQUEST, "invalid key wrap"));
     }
     Ok(())
 }
 
 /// The new wraps must cover every remaining device exactly once, plus the
-/// password and phrase recipients, and nothing else.
+/// phrase recipient, and nothing else.
 pub(crate) fn validate_rotation_wraps(
     remaining: &[String],
     username: &str,
     wraps: &[KeyWrapBody],
 ) -> Result<(), (StatusCode, Json<ErrorBody>)> {
     let mut devices: Vec<String> = Vec::new();
-    let mut recovery = 0;
     let mut phrase = 0;
     for wrap in wraps {
         match wrap.recipient_kind.as_str() {
@@ -104,15 +92,6 @@ pub(crate) fn validate_rotation_wraps(
                 }
                 devices.push(wrap.recipient_id.clone());
             }
-            "recovery" => {
-                if !is_supported_recovery_ciphersuite(&wrap.ciphersuite)
-                    || wrap.hpke_enc.len() != 24
-                    || wrap.wrapped_ck.len() != 32 + HPKE_AEAD_TAG_LEN
-                {
-                    return Err(err(StatusCode::BAD_REQUEST, "invalid key wrap"));
-                }
-                recovery += 1;
-            }
             "phrase" => {
                 if wrap.recipient_id != username
                     || wrap.ciphersuite != PHRASE_CIPHERSUITE
@@ -126,7 +105,7 @@ pub(crate) fn validate_rotation_wraps(
             _ => return Err(err(StatusCode::BAD_REQUEST, "invalid key wrap")),
         }
     }
-    if recovery != 1 || phrase != 1 {
+    if phrase != 1 {
         return Err(err(StatusCode::BAD_REQUEST, "invalid key wrap"));
     }
     devices.sort();

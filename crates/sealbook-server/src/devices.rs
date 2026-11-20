@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use sealbook_crypto::{
     content_digest, key_rotation_transcript, key_wraps_digest, rotated_objects_digest,
-    rotation_recovery_payload, verify, DeviceSigningPublic, DualSignature, ObjectDigestEntry,
+    rotation_phrase_payload, verify, DeviceSigningPublic, DualSignature, ObjectDigestEntry,
     WrapDigestEntry,
 };
 use sealbook_protocol::{ErrorBody, RotateRequest, RotateResponse};
@@ -49,9 +49,26 @@ pub(crate) async fn rotate(
     {
         return Err(err(StatusCode::TOO_MANY_REQUESTS, "rate limited"));
     }
+    // Strictly ascending is checked here, before anything is read, because the
+    // signed transcript hashes the list exactly as sent: a signed `[A]` resent as
+    // `[A, A]` must fail on shape, not be normalised into something that verifies.
     if body
-        .revoke_device_id
-        .is_some_and(|device| device.to_string() == session.device_id)
+        .revoke_device_ids
+        .windows(2)
+        .any(|pair| pair[0] >= pair[1])
+    {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "revoked devices must be listed once each, in ascending order",
+        ));
+    }
+    if body.revoke_device_ids.iter().any(Uuid::is_nil) {
+        return Err(err(StatusCode::BAD_REQUEST, "invalid device id"));
+    }
+    if body
+        .revoke_device_ids
+        .iter()
+        .any(|device| device.to_string() == session.device_id)
     {
         return Err(err(
             StatusCode::BAD_REQUEST,
@@ -59,9 +76,6 @@ pub(crate) async fn rotate(
         ));
     }
     validate_phrase_recovery(&body.phrase_recovery)?;
-    if body.kdf_salt.len() != 16 {
-        return Err(err(StatusCode::BAD_REQUEST, "invalid kdf salt"));
-    }
 
     // Everything that depends only on the request body is done before the
     // transaction opens, because all of it hashes the whole body: the object
@@ -121,11 +135,10 @@ pub(crate) async fn rotate(
         return Err(err(StatusCode::BAD_REQUEST, "invalid manifest digest"));
     }
     manifest_digest.copy_from_slice(&body.manifest.digest);
-    // The salt and phrase record this rotation is about to write into `accounts`
-    // are signed too, so a modified request body cannot install recovery material
-    // the account holder never produced.
-    let recovery_payload = rotation_recovery_payload(
-        &body.kdf_salt,
+    // The phrase record this rotation is about to write into `accounts` is
+    // signed too, so a modified request body cannot install recovery material the
+    // account holder never produced.
+    let phrase_payload = rotation_phrase_payload(
         &body.phrase_recovery.mldsa_pk,
         &body.phrase_recovery.ed25519_pk,
         &body.phrase_recovery.lookup_id,
@@ -133,12 +146,12 @@ pub(crate) async fn rotate(
     );
     let transcript = key_rotation_transcript(
         collection_id,
-        body.revoke_device_id,
+        &body.revoke_device_ids,
         body.key_epoch,
         &key_wraps_digest(&wrap_entries),
         &rotated_objects_digest(&object_entries),
         &manifest_digest,
-        &recovery_payload,
+        &phrase_payload,
     );
 
     // Everything this rotation checks against the vault, and everything it then
@@ -169,7 +182,7 @@ pub(crate) async fn rotate(
         return Err(err(StatusCode::CONFLICT, "stale key epoch"));
     }
 
-    if let Some(device_id) = body.revoke_device_id {
+    for device_id in &body.revoke_device_ids {
         let target = sqlx::query(
             "SELECT id FROM devices WHERE id = ? AND account_id = ? AND revoked_at IS NULL",
         )
@@ -184,29 +197,25 @@ pub(crate) async fn rotate(
     }
 
     // Every device that keeps access must get a wrap of the new key.
-    let revoked = body
-        .revoke_device_id
+    // The caller is never in the revoked list, so at least one device remains.
+    let revoked: Vec<String> = body
+        .revoke_device_ids
+        .iter()
         .map(|device| device.to_string())
-        .unwrap_or_default();
+        .collect();
     let remaining: Vec<String> = sqlx::query(
         "SELECT id FROM devices
-         WHERE account_id = ? AND revoked_at IS NULL AND id != ?
+         WHERE account_id = ? AND revoked_at IS NULL
          ORDER BY created_at ASC",
     )
     .bind(&session.account_id)
-    .bind(&revoked)
     .fetch_all(&mut *tx)
     .await
     .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?
     .into_iter()
     .map(|row| row.get::<String, _>("id"))
+    .filter(|id| !revoked.contains(id))
     .collect();
-    if remaining.is_empty() {
-        return Err(err(
-            StatusCode::BAD_REQUEST,
-            "cannot revoke the last device",
-        ));
-    }
 
     let account = sqlx::query("SELECT username FROM accounts WHERE id = ?")
         .bind(&session.account_id)
@@ -320,7 +329,7 @@ pub(crate) async fn rotate(
     )
     .map_err(|_| err(StatusCode::BAD_REQUEST, "rotation signature"))?;
 
-    if let Some(device_id) = body.revoke_device_id {
+    for device_id in &body.revoke_device_ids {
         let updated = sqlx::query(
             "UPDATE devices SET revoked_at = ?
              WHERE id = ? AND account_id = ? AND revoked_at IS NULL",
@@ -367,11 +376,10 @@ pub(crate) async fn rotate(
 
     sqlx::query(
         "UPDATE accounts
-         SET kdf_salt = ?, phrase_mldsa_pk = ?, phrase_ed25519_pk = ?,
+         SET phrase_mldsa_pk = ?, phrase_ed25519_pk = ?,
              phrase_lookup_id = ?, phrase_scheme = ?
          WHERE id = ?",
     )
-    .bind(&body.kdf_salt)
     .bind(&body.phrase_recovery.mldsa_pk)
     .bind(&body.phrase_recovery.ed25519_pk)
     .bind(&body.phrase_recovery.lookup_id)
@@ -461,10 +469,21 @@ pub(crate) async fn rotate(
     .await
     .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
 
-    // A rotation is exactly what an unfinished recovery owes: a new collection
+    // Every earlier revision is sealed under the key this rotation retires, and
+    // includes content since edited or deleted. Keeping the rows would keep that
+    // content readable to anyone who later obtains the old key. A client behind
+    // the new floor is told to resync, not to replay them.
+    sqlx::query("DELETE FROM object_revisions WHERE account_id = ? AND revision < ?")
+        .bind(&session.account_id)
+        .bind(first_revision)
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+
+    // A rotation is exactly what an owed rotation asks for: a new collection
     // key, a new phrase, and every object re-encrypted. Whatever prompted it, it
     // settles the debt.
-    sqlx::query("UPDATE accounts SET recovery_pending = 0 WHERE id = ?")
+    sqlx::query("UPDATE accounts SET rotation_owed = NULL WHERE id = ?")
         .bind(&session.account_id)
         .execute(&mut *tx)
         .await
@@ -512,7 +531,7 @@ pub(crate) async fn rotate(
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
 
     info!(
-        revoked = ?body.revoke_device_id,
+        revoked = body.revoke_device_ids.len(),
         epoch = body.key_epoch,
         "collection key rotated"
     );

@@ -31,40 +31,22 @@ use uuid::Uuid;
 /// the phrase proof must cover.
 struct RecoveryPassword {
     upload: Vec<u8>,
-    kdf_salt: Vec<u8>,
-    nonce: Vec<u8>,
-    wrapped_ck: Vec<u8>,
-    ciphersuite: String,
     payload: [u8; 32],
 }
 
-/// Finishes the OPAQUE registration a `recover/start` began and re-wraps the
-/// collection key under the new password, as a recovering client would.
+/// Finishes the OPAQUE registration a `recover/start` began, as a recovering
+/// client would. The password no longer wraps the collection key, so the proof
+/// covers only the upload.
 fn recovery_password(
     password: &str,
     opaque_response: &[u8],
     registration: sealbook_crypto::opaque::ClientRegistration<SealbookCipherSuite>,
-    ck: &CollectionKey,
+    _ck: &CollectionKey,
 ) -> RecoveryPassword {
     let upload =
         client_register_finish(registration, password.as_bytes(), opaque_response).unwrap();
-    let kdf_salt = sealbook_crypto::generate_kdf_salt();
-    let wrap = sealbook_crypto::wrap_collection_key(password.as_bytes(), &kdf_salt, ck).unwrap();
-    let payload = sealbook_crypto::recovery_password_payload(
-        &upload,
-        &kdf_salt,
-        &wrap.nonce,
-        &wrap.ciphertext,
-        &wrap.ciphersuite,
-    );
-    RecoveryPassword {
-        upload,
-        kdf_salt: kdf_salt.to_vec(),
-        nonce: wrap.nonce.to_vec(),
-        wrapped_ck: wrap.ciphertext,
-        ciphersuite: wrap.ciphersuite,
-        payload,
-    }
+    let payload = sealbook_crypto::recovery_password_payload(&upload);
+    RecoveryPassword { upload, payload }
 }
 
 /// A `recover/start` body signed by the phrase `entropy` came from, as a
@@ -123,6 +105,7 @@ fn hand_roster(
         key_commitment: sealbook_crypto::key_commitment(key, collection_id, key_epoch)
             .unwrap()
             .to_vec(),
+        migrated: true,
         signature: sealbook_crypto::DualSignature {
             mldsa: Vec::new(),
             ed25519: Vec::new(),
@@ -340,7 +323,7 @@ async fn each_pairing_step_happens_once_and_only_from_the_answering_device() {
     let mut colliding: serde_json::Value = serde_json::from_str(&started.body).unwrap();
     colliding["nameplate"] = serde_json::json!(nameplate);
     let status = http
-        .post(format!("{base}/v1/pair/join"))
+        .post(format!("{base}/v2/pair/join"))
         .json(&colliding)
         .send()
         .await
@@ -362,7 +345,7 @@ async fn each_pairing_step_happens_once_and_only_from_the_answering_device() {
         .clone()
         .unwrap();
     let status = http
-        .post(format!("{base}/v1/pair/{nameplate}/respond"))
+        .post(format!("{base}/v2/pair/{nameplate}/respond"))
         .bearer_auth(&second_token)
         .json(&serde_json::json!({ "share": URL_SAFE_NO_PAD.encode([1u8; 32]) }))
         .send()
@@ -377,7 +360,7 @@ async fn each_pairing_step_happens_once_and_only_from_the_answering_device() {
         PairJoinPoll::Confirm
     );
     let status = http
-        .post(format!("{base}/v1/pair/{}/confirm", pairing.pair_id))
+        .post(format!("{base}/v2/pair/{}/confirm", pairing.pair_id))
         .json(&serde_json::json!({ "hello": URL_SAFE_NO_PAD.encode([2u8; 64]) }))
         .send()
         .await
@@ -390,7 +373,7 @@ async fn each_pairing_step_happens_once_and_only_from_the_answering_device() {
     let collection_id = owner.state.as_ref().unwrap().collection_id;
     let rosters: serde_json::Value = http
         .get(format!(
-            "{base}/v1/collections/{collection_id}/roster?from=1"
+            "{base}/v2/collections/{collection_id}/roster?from=1"
         ))
         .bearer_auth(&second_token)
         .send()
@@ -407,7 +390,7 @@ async fn each_pairing_step_happens_once_and_only_from_the_answering_device() {
         .clone();
     let zeros = |len: usize| URL_SAFE_NO_PAD.encode(vec![0u8; len]);
     let response_body = http
-        .post(format!("{base}/v1/pair/{nameplate}/approve"))
+        .post(format!("{base}/v2/pair/{nameplate}/approve"))
         .bearer_auth(&second_token)
         .json(&serde_json::json!({
             "wrap": {
@@ -511,7 +494,7 @@ async fn recovery_challenge_cannot_be_replayed() {
     columns.close().await;
     let (opaque_request, registration) = client_register_start(b"correct horse battery").unwrap();
     let response: RecoverStartResponse = reqwest::Client::new()
-        .post(format!("{base}/v1/recover/start"))
+        .post(format!("{base}/v2/recover/start"))
         .json(&{
             let entropy = entropy_from_phrase(&phrase).unwrap();
             signed_start(
@@ -607,21 +590,17 @@ async fn recovery_challenge_cannot_be_replayed() {
         },
         roster,
         upload: pw.upload.clone(),
-        kdf_salt: pw.kdf_salt.clone(),
-        recovery_nonce: pw.nonce.clone(),
-        recovery_wrapped_ck: pw.wrapped_ck.clone(),
-        recovery_ciphersuite: pw.ciphersuite.clone(),
     };
     let http = reqwest::Client::new();
     let first = http
-        .post(format!("{base}/v1/recover/finish"))
+        .post(format!("{base}/v2/recover/finish"))
         .json(&finish)
         .send()
         .await
         .unwrap();
     assert!(first.error_for_status().is_ok());
     let replay = http
-        .post(format!("{base}/v1/recover/finish"))
+        .post(format!("{base}/v2/recover/finish"))
         .json(&finish)
         .send()
         .await
@@ -648,7 +627,7 @@ async fn password_change_completion_requires_transaction() {
         .and_then(|state| state.session_token.as_deref())
         .unwrap();
     let response = reqwest::Client::new()
-        .post(format!("{base}/v1/account/password"))
+        .post(format!("{base}/v2/account/password"))
         .bearer_auth(token)
         .json(&serde_json::json!({
             "password_change_id": Uuid::new_v4(),
@@ -1829,10 +1808,6 @@ async fn crypto_profile_reports_hybrid_algorithms() {
     assert_eq!(profile["opaque_requires_device_proof"], true);
     // The Argon2 cost parameters must be visible, not just the algorithm name.
     assert!(profile["opaque_ksf"].as_str().unwrap().contains("m65536"));
-    assert!(profile["recovery_ciphersuite"]
-        .as_str()
-        .unwrap()
-        .contains("m65536"));
 }
 
 /// The central fix for the OPAQUE finding: an attacker who cannot sign as a
@@ -1855,7 +1830,7 @@ async fn login_start_releases_no_opaque_response_without_a_device_proof() {
 
     let http = reqwest::Client::new();
     let challenge: LoginChallengeResponse = http
-        .post(format!("{base}/v1/opaque/login/challenge"))
+        .post(format!("{base}/v2/opaque/login/challenge"))
         .json(&LoginChallengeRequest {
             username: "proofalice".into(),
             device_id,
@@ -1883,7 +1858,7 @@ async fn login_start_releases_no_opaque_response_without_a_device_proof() {
         },
     };
     let response = http
-        .post(format!("{base}/v1/opaque/login/start"))
+        .post(format!("{base}/v2/opaque/login/start"))
         .json(&forged)
         .send()
         .await
@@ -1924,7 +1899,7 @@ async fn login_start_rejects_a_classically_valid_but_pq_forged_proof() {
 
     let http = reqwest::Client::new();
     let challenge: LoginChallengeResponse = http
-        .post(format!("{base}/v1/opaque/login/challenge"))
+        .post(format!("{base}/v2/opaque/login/challenge"))
         .json(&LoginChallengeRequest {
             username: "forgealice".into(),
             device_id,
@@ -1969,7 +1944,7 @@ async fn login_start_rejects_a_classically_valid_but_pq_forged_proof() {
     let rogue = sign(&rogue_sk, &transcript).unwrap();
 
     let response = http
-        .post(format!("{base}/v1/opaque/login/start"))
+        .post(format!("{base}/v2/opaque/login/start"))
         .json(&LoginStartRequest {
             challenge_id: challenge.challenge_id,
             username: "forgealice".into(),
@@ -2006,7 +1981,7 @@ async fn recovery_rejects_a_proof_with_a_foreign_mldsa_signature() {
     let http = reqwest::Client::new();
     let (opaque_request, registration) = client_register_start(b"correct horse battery").unwrap();
     let start: RecoverStartResponse = http
-        .post(format!("{base}/v1/recover/start"))
+        .post(format!("{base}/v2/recover/start"))
         .json(&signed_start(
             "forgebob",
             &entropy,
@@ -2073,7 +2048,7 @@ async fn recovery_rejects_a_proof_with_a_foreign_mldsa_signature() {
     let foreign = sign_phrase_recovery(&[9u8; 32], &transcript).unwrap();
 
     let response = http
-        .post(format!("{base}/v1/recover/finish"))
+        .post(format!("{base}/v2/recover/finish"))
         .json(&RecoverFinishRequest {
             username: "forgebob".into(),
             recovery_id: start.recovery_id,
@@ -2101,10 +2076,6 @@ async fn recovery_rejects_a_proof_with_a_foreign_mldsa_signature() {
             },
             roster,
             upload: pw.upload,
-            kdf_salt: pw.kdf_salt,
-            recovery_nonce: pw.nonce,
-            recovery_wrapped_ck: pw.wrapped_ck,
-            recovery_ciphersuite: pw.ciphersuite,
         })
         .send()
         .await
@@ -2131,7 +2102,7 @@ async fn recover_start_does_not_disclose_recovery_public_keys() {
     let public = sealbook_crypto::phrase_recovery_public(&entropy).unwrap();
 
     let body = reqwest::Client::new()
-        .post(format!("{base}/v1/recover/start"))
+        .post(format!("{base}/v2/recover/start"))
         .json(&signed_start(
             "lookupbob",
             &entropy,
@@ -2183,7 +2154,7 @@ async fn a_recovery_lookup_that_matched_nothing_is_answered_like_one_that_did() 
         let http = http.clone();
         let base = base.clone();
         async move {
-            http.post(format!("{base}/v1/recover/start"))
+            http.post(format!("{base}/v2/recover/start"))
                 .json(&signed_start(
                     username,
                     &entropy,
@@ -2307,7 +2278,7 @@ async fn a_pairing_join_for_an_unknown_username_is_answered_like_one_for_an_acco
             };
             let started = sealbook_core::pair_start(username, &device.device, &secrets).unwrap();
             let joined: serde_json::Value = http
-                .post(format!("{base}/v1/pair/join"))
+                .post(format!("{base}/v2/pair/join"))
                 .header("content-type", "application/json")
                 .body(started.body)
                 .send()
@@ -2320,7 +2291,7 @@ async fn a_pairing_join_for_an_unknown_username_is_answered_like_one_for_an_acco
                 .unwrap();
             let pair_id = joined["pair_id"].as_str().unwrap().to_string();
             let polled: serde_json::Value = http
-                .get(format!("{base}/v1/pair/{pair_id}"))
+                .get(format!("{base}/v2/pair/{pair_id}"))
                 .send()
                 .await
                 .unwrap()
@@ -2386,7 +2357,7 @@ async fn a_recovery_start_evaluates_the_password_oprf_only_for_the_phrase_holder
     let start = |signer: [u8; 32], lookup_id: Vec<u8>| {
         let (http, base, opaque_request) = (http.clone(), base.clone(), opaque_request.clone());
         async move {
-            http.post(format!("{base}/v1/recover/start"))
+            http.post(format!("{base}/v2/recover/start"))
                 .json(&signed_start("oprfbob", &signer, lookup_id, opaque_request))
                 .send()
                 .await
@@ -2490,10 +2461,7 @@ async fn revoking_a_device_rotates_the_collection_key() {
     );
 
     // Revoke it from the owner device.
-    let new_phrase = owner
-        .revoke_device(joiner_device, "correct horse battery")
-        .await
-        .expect("revoke");
+    let new_phrase = owner.revoke_device(joiner_device).await.expect("revoke");
     assert_eq!(new_phrase.split_whitespace().count(), 24);
 
     // The key actually changed, and the epoch advanced.
@@ -2583,10 +2551,7 @@ async fn revocation_removes_the_old_key_wraps() {
     joiner.login("correct horse battery").await.expect("login");
     let joiner_device = joiner.state.as_ref().unwrap().device_id;
 
-    owner
-        .revoke_device(joiner_device, "correct horse battery")
-        .await
-        .expect("revoke");
+    owner.revoke_device(joiner_device).await.expect("revoke");
 
     let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
         .await
@@ -2602,8 +2567,8 @@ async fn revocation_removes_the_old_key_wraps() {
             .any(|row| row.get::<String, _>("recipient_id") == joiner_device.to_string()),
         "the revoked device's key wrap survived the rotation"
     );
-    // Still exactly one wrap each for the remaining device, password and phrase.
-    assert_eq!(wraps.len(), 3);
+    // Still exactly one wrap each for the remaining device and the phrase.
+    assert_eq!(wraps.len(), 2);
 }
 
 /// The new phrase must work and the old one must not, since the collection key
@@ -2635,10 +2600,7 @@ async fn rotation_issues_a_working_new_recovery_phrase() {
     joiner.login("correct horse battery").await.expect("login");
     let joiner_device = joiner.state.as_ref().unwrap().device_id;
 
-    let new_phrase = owner
-        .revoke_device(joiner_device, "correct horse battery")
-        .await
-        .expect("revoke");
+    let new_phrase = owner.revoke_device(joiner_device).await.expect("revoke");
     assert_ne!(new_phrase, old_phrase);
 
     let mut stale = SealbookClient::plaintext_http();
@@ -2719,7 +2681,7 @@ async fn revoking_a_device_works_on_a_vault_larger_than_the_default_body_limit()
     );
 
     owner
-        .revoke_device(joiner_device, "correct horse battery")
+        .revoke_device(joiner_device)
         .await
         .expect("revoke a device holding a large vault");
 
@@ -2934,7 +2896,7 @@ async fn a_replayed_manifest_sequence_is_refused() {
     .await
     .unwrap();
     let response = reqwest::Client::new()
-        .put(format!("{base}/v1/collections/{collection}/objects"))
+        .put(format!("{base}/v2/collections/{collection}/objects"))
         .bearer_auth(&token)
         .json(&serde_json::json!({
             "id": Uuid::new_v4(),
@@ -2981,7 +2943,7 @@ async fn a_manifest_that_does_not_match_the_write_is_refused() {
         .unwrap();
 
     let response = reqwest::Client::new()
-        .put(format!("{base}/v1/collections/{collection}/objects"))
+        .put(format!("{base}/v2/collections/{collection}/objects"))
         .bearer_auth(&token)
         .json(&serde_json::json!({
             "id": Uuid::new_v4(),
@@ -3033,7 +2995,7 @@ async fn a_password_change_without_a_device_signature_is_refused() {
     let (request, _state) =
         sealbook_crypto::opaque::client_register_start(b"attacker password").unwrap();
     let start: serde_json::Value = reqwest::Client::new()
-        .post(format!("{base}/v1/account/password/start"))
+        .post(format!("{base}/v2/account/password/start"))
         .bearer_auth(&token)
         .json(&serde_json::json!({ "request": URL_SAFE_NO_PAD.encode(&request) }))
         .send()
@@ -3044,7 +3006,7 @@ async fn a_password_change_without_a_device_signature_is_refused() {
         .unwrap();
 
     let response = reqwest::Client::new()
-        .post(format!("{base}/v1/account/password"))
+        .post(format!("{base}/v2/account/password"))
         .bearer_auth(&token)
         .json(&serde_json::json!({
             "password_change_id": start["password_change_id"],
@@ -3088,7 +3050,7 @@ async fn deleting_an_account_without_a_device_signature_is_refused() {
         .unwrap();
 
     let challenge: serde_json::Value = reqwest::Client::new()
-        .post(format!("{base}/v1/account/challenge"))
+        .post(format!("{base}/v2/account/challenge"))
         .bearer_auth(&token)
         .json(&serde_json::json!({}))
         .send()
@@ -3098,7 +3060,7 @@ async fn deleting_an_account_without_a_device_signature_is_refused() {
         .await
         .unwrap();
     let response = reqwest::Client::new()
-        .delete(format!("{base}/v1/account"))
+        .delete(format!("{base}/v2/account"))
         .bearer_auth(&token)
         .json(&serde_json::json!({
             "challenge_id": challenge["challenge_id"],
@@ -3207,10 +3169,7 @@ async fn changing_the_phrase_rotates_the_key_and_retires_the_old_one() {
         .expect("put");
     let key_before = owner.collection_key().unwrap().as_bytes().to_vec();
 
-    let new_phrase = owner
-        .change_phrase("correct horse battery")
-        .await
-        .expect("change phrase");
+    let new_phrase = owner.change_phrase().await.expect("change phrase");
     assert_ne!(new_phrase, old_phrase);
     assert_ne!(
         owner.collection_key().unwrap().as_bytes().to_vec(),
@@ -3433,7 +3392,7 @@ async fn the_change_feed_paginates() {
 
     let page: serde_json::Value = reqwest::Client::new()
         .get(format!(
-            "{base}/v1/collections/{collection}/changes?after=0&limit=2"
+            "{base}/v2/collections/{collection}/changes?after=0&limit=2"
         ))
         .bearer_auth(&token)
         .send()
@@ -3489,7 +3448,7 @@ async fn a_changes_page_is_bounded_by_bytes_and_not_only_by_count() {
     // ceiling doing it.
     let page: serde_json::Value = reqwest::Client::new()
         .get(format!(
-            "{base}/v1/collections/{collection}/changes?after=0&limit=2000&snapshot=true"
+            "{base}/v2/collections/{collection}/changes?after=0&limit=2000&snapshot=true"
         ))
         .bearer_auth(&token)
         .send()
@@ -3538,7 +3497,7 @@ async fn authenticated_reads_are_metered_per_account_and_route() {
     for attempt in 1..=700 {
         let status = http
             .get(format!(
-                "{base}/v1/collections/{collection}/changes?after=0&limit=1"
+                "{base}/v2/collections/{collection}/changes?after=0&limit=1"
             ))
             .bearer_auth(&token)
             .send()
@@ -3560,7 +3519,7 @@ async fn authenticated_reads_are_metered_per_account_and_route() {
     // Per route, so exhausting the change feed does not take the manifest with
     // it: a client that has been throttled on one read can still check another.
     let manifest = http
-        .get(format!("{base}/v1/collections/{collection}/manifest"))
+        .get(format!("{base}/v2/collections/{collection}/manifest"))
         .bearer_auth(&token)
         .send()
         .await
@@ -3693,10 +3652,7 @@ async fn the_incremental_manifest_digest_matches_a_full_rebuild() {
         .expect("approve");
     joiner.login("correct horse battery").await.expect("login");
     let joiner_device = joiner.state.as_ref().unwrap().device_id;
-    owner
-        .revoke_device(joiner_device, "correct horse battery")
-        .await
-        .expect("revoke");
+    owner.revoke_device(joiner_device).await.expect("revoke");
 
     // Still writable, which means the rebuilt state still agrees with the client.
     owner
@@ -3717,9 +3673,8 @@ async fn the_incremental_manifest_digest_matches_a_full_rebuild() {
 #[tokio::test]
 async fn a_rotation_that_tombstones_a_live_object_is_refused() {
     use sealbook_crypto::{
-        generate_kdf_salt, generate_phrase, phrase_lookup_id, phrase_recovery_public,
-        wrap_collection_key, wrap_for_device, wrap_for_phrase, DeviceHpkePublic,
-        PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE,
+        generate_phrase, phrase_lookup_id, phrase_recovery_public, wrap_for_device,
+        wrap_for_phrase, DeviceHpkePublic, PHRASE_CIPHERSUITE, PHRASE_SCHEME,
     };
     use sealbook_protocol::{ManifestBody, PhraseRecoveryBody, RotateRequest, RotatedObject};
 
@@ -3758,7 +3713,6 @@ async fn a_rotation_that_tombstones_a_live_object_is_refused() {
     // Wraps the server will accept, so that the request reaches the object checks
     // rather than being turned away earlier.
     let new_ck = CollectionKey::generate();
-    let salt = generate_kdf_salt();
     let (_phrase, entropy) = generate_phrase().unwrap();
     let device_wrap = wrap_for_device(
         &DeviceHpkePublic(device.xwing_hpke_pk.clone()),
@@ -3769,9 +3723,15 @@ async fn a_rotation_that_tombstones_a_live_object_is_refused() {
         },
     )
     .expect("wrap for device");
-    let recovery_wrap =
-        wrap_collection_key(password.as_bytes(), &salt, &new_ck).expect("wrap for password");
-    let phrase_wrap = wrap_for_phrase(&entropy, &new_ck).expect("wrap for phrase");
+    let phrase_wrap = wrap_for_phrase(
+        &entropy,
+        &new_ck,
+        &WrapBinding {
+            collection_id,
+            key_epoch: owner.server_key_epoch().await.unwrap() + 1,
+        },
+    )
+    .expect("wrap for phrase");
     let phrase_public = phrase_recovery_public(&entropy).unwrap();
     let key_epoch = owner.server_key_epoch().await.unwrap() + 1;
 
@@ -3780,8 +3740,7 @@ async fn a_rotation_that_tombstones_a_live_object_is_refused() {
     // is wrong.
     let request = RotateRequest {
         key_epoch,
-        revoke_device_id: None,
-        kdf_salt: salt.to_vec(),
+        revoke_device_ids: Vec::new(),
         key_wraps: vec![
             KeyWrapBody {
                 recipient_kind: "device".into(),
@@ -3789,13 +3748,6 @@ async fn a_rotation_that_tombstones_a_live_object_is_refused() {
                 hpke_enc: device_wrap.enc,
                 wrapped_ck: device_wrap.ciphertext,
                 ciphersuite: XWING_CIPHERSUITE.into(),
-            },
-            KeyWrapBody {
-                recipient_kind: "recovery".into(),
-                recipient_id: "tombalice".into(),
-                hpke_enc: recovery_wrap.nonce.to_vec(),
-                wrapped_ck: recovery_wrap.ciphertext,
-                ciphersuite: RECOVERY_CIPHERSUITE.into(),
             },
             KeyWrapBody {
                 recipient_kind: "phrase".into(),
@@ -3854,7 +3806,7 @@ async fn a_rotation_that_tombstones_a_live_object_is_refused() {
     };
 
     let response = http
-        .post(format!("{base}/v1/collections/{collection_id}/rotate"))
+        .post(format!("{base}/v2/collections/{collection_id}/rotate"))
         .bearer_auth(&token)
         .json(&request)
         .send()
@@ -3897,11 +3849,10 @@ async fn a_rotation_that_tombstones_a_live_object_is_refused() {
 #[tokio::test]
 async fn a_rotation_whose_recovery_material_was_modified_after_signing_is_refused() {
     use sealbook_crypto::{
-        generate_kdf_salt, generate_phrase, key_rotation_transcript, key_wraps_digest,
-        manifest_digest, manifest_transcript, phrase_lookup_id, phrase_recovery_public,
-        rotated_objects_digest, rotation_recovery_payload, wrap_collection_key, wrap_for_device,
-        wrap_for_phrase, DeviceHpkePublic, ObjectDigestEntry, WrapDigestEntry, PHRASE_CIPHERSUITE,
-        PHRASE_SCHEME, RECOVERY_CIPHERSUITE,
+        generate_phrase, key_rotation_transcript, key_wraps_digest, manifest_digest,
+        manifest_transcript, phrase_lookup_id, phrase_recovery_public, rotated_objects_digest,
+        rotation_phrase_payload, wrap_for_device, wrap_for_phrase, DeviceHpkePublic,
+        ObjectDigestEntry, WrapDigestEntry, PHRASE_CIPHERSUITE, PHRASE_SCHEME,
     };
     use sealbook_protocol::{ManifestBody, PhraseRecoveryBody, RotateRequest};
 
@@ -3941,7 +3892,6 @@ async fn a_rotation_whose_recovery_material_was_modified_after_signing_is_refuse
     // A rotation of an empty vault: no objects to re-encrypt, so the only moving
     // parts are the wraps, the recovery record and the manifest.
     let new_ck = CollectionKey::generate();
-    let salt = generate_kdf_salt();
     let (_phrase, entropy) = generate_phrase().unwrap();
     let device_wrap = wrap_for_device(
         &DeviceHpkePublic(device.xwing_hpke_pk.clone()),
@@ -3952,9 +3902,15 @@ async fn a_rotation_whose_recovery_material_was_modified_after_signing_is_refuse
         },
     )
     .expect("wrap for device");
-    let recovery_wrap =
-        wrap_collection_key(password.as_bytes(), &salt, &new_ck).expect("wrap for password");
-    let phrase_wrap = wrap_for_phrase(&entropy, &new_ck).expect("wrap for phrase");
+    let phrase_wrap = wrap_for_phrase(
+        &entropy,
+        &new_ck,
+        &WrapBinding {
+            collection_id,
+            key_epoch: owner.server_key_epoch().await.unwrap() + 1,
+        },
+    )
+    .expect("wrap for phrase");
     let key_wraps = vec![
         KeyWrapBody {
             recipient_kind: "device".into(),
@@ -3962,13 +3918,6 @@ async fn a_rotation_whose_recovery_material_was_modified_after_signing_is_refuse
             hpke_enc: device_wrap.enc,
             wrapped_ck: device_wrap.ciphertext,
             ciphersuite: XWING_CIPHERSUITE.into(),
-        },
-        KeyWrapBody {
-            recipient_kind: "recovery".into(),
-            recipient_id: "tamperalice".into(),
-            hpke_enc: recovery_wrap.nonce.to_vec(),
-            wrapped_ck: recovery_wrap.ciphertext,
-            ciphersuite: RECOVERY_CIPHERSUITE.into(),
         },
         KeyWrapBody {
             recipient_kind: "phrase".into(),
@@ -4023,13 +3972,12 @@ async fn a_rotation_whose_recovery_material_was_modified_after_signing_is_refuse
         &secrets,
         &key_rotation_transcript(
             collection_id,
-            None,
+            &[],
             key_epoch,
             &key_wraps_digest(&wrap_entries),
             &rotated_objects_digest(&no_objects),
             &empty_digest,
-            &rotation_recovery_payload(
-                &salt,
+            &rotation_phrase_payload(
                 &phrase_recovery.mldsa_pk,
                 &phrase_recovery.ed25519_pk,
                 &phrase_recovery.lookup_id,
@@ -4051,8 +3999,7 @@ async fn a_rotation_whose_recovery_material_was_modified_after_signing_is_refuse
     );
     let valid = RotateRequest {
         key_epoch,
-        revoke_device_id: None,
-        kdf_salt: salt.to_vec(),
+        revoke_device_ids: Vec::new(),
         key_wraps,
         phrase_recovery,
         objects: Vec::new(),
@@ -4064,7 +4011,7 @@ async fn a_rotation_whose_recovery_material_was_modified_after_signing_is_refuse
         roster,
         drop_tombstones: Vec::new(),
     };
-    let url = format!("{base}/v1/collections/{collection_id}/rotate");
+    let url = format!("{base}/v2/collections/{collection_id}/rotate");
 
     // Swap the phrase lookup id for one an attacker knows, leaving everything else
     // — including the signature — untouched. This is the request that used to be
@@ -4089,10 +4036,13 @@ async fn a_rotation_whose_recovery_material_was_modified_after_signing_is_refuse
         "a substituted phrase lookup id must be refused"
     );
 
-    // The same for the KDF salt, which is what a password recovery is derived
-    // against.
+    // The same for the phrase's Ed25519 key, which is what a later recovery
+    // verifies against.
     let forged = RotateRequest {
-        kdf_salt: vec![0xCD; valid.kdf_salt.len()],
+        phrase_recovery: PhraseRecoveryBody {
+            ed25519_pk: vec![0xCD; valid.phrase_recovery.ed25519_pk.len()],
+            ..valid.phrase_recovery.clone()
+        },
         ..valid.clone()
     };
     let response = http
@@ -4105,7 +4055,7 @@ async fn a_rotation_whose_recovery_material_was_modified_after_signing_is_refuse
     assert_eq!(
         response.status(),
         400,
-        "a substituted KDF salt must be refused"
+        "a substituted phrase key must be refused"
     );
 
     // And the control: untouched, the same rotation is accepted. Without this the
@@ -4167,7 +4117,7 @@ async fn a_client_behind_the_retained_revisions_is_told_to_resync() {
         let (http, token, base) = (http.clone(), token.clone(), base.clone());
         async move {
             http.get(format!(
-                "{base}/v1/collections/{collection_id}/changes?after={after}&snapshot={snapshot}"
+                "{base}/v2/collections/{collection_id}/changes?after={after}&snapshot={snapshot}"
             ))
             .bearer_auth(&token)
             .send()
@@ -4362,7 +4312,7 @@ async fn an_account_cannot_enrol_devices_without_limit() {
         .map(|device| device.device_id)
         .find(|id| *id != owner_device)
         .unwrap();
-    owner.revoke_device(victim, password).await.expect("revoke");
+    owner.revoke_device(victim).await.expect("revoke");
     assert_eq!(owner.list_devices().await.expect("list").len(), 15);
 
     let mut replacement = SealbookClient::plaintext_http();
@@ -4507,10 +4457,7 @@ async fn an_account_at_the_device_cap_can_still_recover() {
         .map(|device| device.device_id)
         .find(|id| *id != recovered.state.as_ref().unwrap().device_id)
         .unwrap();
-    recovered
-        .revoke_device(victim, chosen)
-        .await
-        .expect("revoke");
+    recovered.revoke_device(victim).await.expect("revoke");
     assert_eq!(recovered.list_devices().await.expect("list").len(), 16);
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -4632,7 +4579,7 @@ async fn roster_history_is_pruned_to_a_floor_a_stale_device_cannot_walk_back_pas
     let token = owner.state.as_ref().unwrap().session_token.clone().unwrap();
     let served: serde_json::Value = reqwest::Client::new()
         .get(format!(
-            "{base}/v1/collections/{collection_id}/roster?from=1"
+            "{base}/v2/collections/{collection_id}/roster?from=1"
         ))
         .bearer_auth(&token)
         .send()
@@ -4739,7 +4686,7 @@ async fn a_write_landing_mid_walk_restarts_the_sync_rather_than_crying_tamper() 
     let fake = format!("http://{}", listener.local_addr().unwrap());
     tokio::spawn(async move {
         let app =
-            axum::Router::new().route("/v1/collections/{id}/changes", axum::routing::get(changes));
+            axum::Router::new().route("/v2/collections/{id}/changes", axum::routing::get(changes));
         axum::serve(listener, app).await.unwrap();
     });
 
@@ -4941,10 +4888,7 @@ async fn the_quota_counters_never_drift_from_the_objects() {
         .expect("approve");
     joiner.login("correct horse battery").await.expect("login");
     let joiner_device = joiner.state.as_ref().unwrap().device_id;
-    owner
-        .revoke_device(joiner_device, "correct horse battery")
-        .await
-        .expect("revoke");
+    owner.revoke_device(joiner_device).await.expect("revoke");
     assert_eq!(check("a key rotation", db_path.clone()).await, 3);
 
     let _ = std::fs::remove_dir_all(dir);
@@ -4990,7 +4934,7 @@ async fn a_revocation_succeeds_with_a_tombstone_in_the_vault() {
     let joiner_device = joiner.state.as_ref().unwrap().device_id;
 
     owner
-        .revoke_device(joiner_device, "correct horse battery")
+        .revoke_device(joiner_device)
         .await
         .expect("a tombstone must not block revocation");
 
@@ -5175,7 +5119,7 @@ async fn a_device_the_server_injects_never_receives_the_collection_key() {
 
     // A rotation wraps only for the roster, so the server, which expects a wrap
     // for its device too, refuses it. Refusing is the safe failure: no key left.
-    assert!(owner.change_phrase(password).await.is_err());
+    assert!(owner.change_phrase().await.is_err());
     let wraps: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM key_wraps WHERE recipient_kind = 'device' AND recipient_id = ?",
     )
@@ -5212,7 +5156,7 @@ async fn the_server_serves_no_unsigned_device_list() {
     let token = owner.state.as_ref().unwrap().session_token.clone().unwrap();
 
     let response = reqwest::Client::new()
-        .get(format!("{base}/v1/account/devices"))
+        .get(format!("{base}/v2/account/devices"))
         .bearer_auth(&token)
         .send()
         .await
@@ -5376,7 +5320,7 @@ async fn a_forged_roster_is_rejected_with_or_without_a_pin() {
         owner.list_devices().await.is_err(),
         "a pinned device accepted a roster step no member signed"
     );
-    assert!(owner.change_phrase(password).await.is_err());
+    assert!(owner.change_phrase().await.is_err());
 
     let mut unpinned_state = state.clone();
     unpinned_state.roster_seq = 0;
@@ -5541,7 +5485,12 @@ async fn a_paired_device_pins_the_manifest_it_syncs() {
         .await
         .unwrap();
     joiner.login(password).await.unwrap();
-    assert_eq!(joiner.state.as_ref().unwrap().manifest_seq, 0);
+    // The pin carries the approver's manifest sequence, so the joiner starts
+    // where the owner is and not at zero.
+    assert_eq!(
+        joiner.state.as_ref().unwrap().manifest_seq,
+        owner.state.as_ref().unwrap().manifest_seq
+    );
 
     assert_eq!(joiner.list_contacts().await.expect("list").len(), 1);
     assert_eq!(
@@ -5578,7 +5527,7 @@ async fn an_interrupted_recovery_blocks_writes_until_the_key_is_rotated() {
     let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
         .await
         .unwrap();
-    sqlx::query("UPDATE accounts SET recovery_pending = 1 WHERE username = 'owedalice'")
+    sqlx::query("UPDATE accounts SET rotation_owed = 'recovery' WHERE username = 'owedalice'")
         .execute(&pool)
         .await
         .unwrap();
@@ -5600,17 +5549,17 @@ async fn an_interrupted_recovery_blocks_writes_until_the_key_is_rotated() {
     assert_eq!(owner.list_contacts().await.expect("read").len(), 1);
 
     let phrase = owner
-        .complete_recovery_rotation(password)
+        .complete_rotation(password, &[], &mut |_| Ok(()))
         .await
         .expect("finishing the recovery");
     assert_eq!(phrase.split_whitespace().count(), 24);
 
-    let pending: i64 =
-        sqlx::query_scalar("SELECT recovery_pending FROM accounts WHERE username = 'owedalice'")
+    let pending: Option<String> =
+        sqlx::query_scalar("SELECT rotation_owed FROM accounts WHERE username = 'owedalice'")
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(pending, 0, "the rotation must settle the debt");
+    assert_eq!(pending, None, "the rotation must settle the debt");
     pool.close().await;
 
     owner
@@ -5651,7 +5600,7 @@ async fn a_recovery_that_never_rotated_is_caught_at_the_next_login() {
     let http = reqwest::Client::new();
     let (opaque_request, registration) = client_register_start(password.as_bytes()).unwrap();
     let start: RecoverStartResponse = http
-        .post(format!("{base}/v1/recover/start"))
+        .post(format!("{base}/v2/recover/start"))
         .json(&signed_start(
             "owedbob",
             &entropy,
@@ -5715,7 +5664,7 @@ async fn a_recovery_that_never_rotated_is_caught_at_the_next_login() {
     )
     .unwrap();
     let roster = recovery_roster(&start, &entropy, &device, owner.collection_key().unwrap());
-    http.post(format!("{base}/v1/recover/finish"))
+    http.post(format!("{base}/v2/recover/finish"))
         .json(&RecoverFinishRequest {
             username: "owedbob".into(),
             recovery_id: start.recovery_id,
@@ -5738,10 +5687,6 @@ async fn a_recovery_that_never_rotated_is_caught_at_the_next_login() {
             },
             roster,
             upload: pw.upload,
-            kdf_salt: pw.kdf_salt,
-            recovery_nonce: pw.nonce,
-            recovery_wrapped_ck: pw.wrapped_ck,
-            recovery_ciphersuite: pw.ciphersuite,
         })
         .send()
         .await
@@ -5763,7 +5708,7 @@ async fn a_recovery_that_never_rotated_is_caught_at_the_next_login() {
     );
 
     let second_phrase = owner
-        .complete_recovery_rotation(password)
+        .complete_rotation(password, &[], &mut |_| Ok(()))
         .await
         .expect("finishing the recovery");
     assert_ne!(second_phrase, first_phrase);
@@ -5872,7 +5817,7 @@ async fn a_recovery_whose_new_password_was_modified_after_signing_is_refused() {
     let http = reqwest::Client::new();
     let (opaque_request, registration) = client_register_start(password.as_bytes()).unwrap();
     let start: RecoverStartResponse = http
-        .post(format!("{base}/v1/recover/start"))
+        .post(format!("{base}/v2/recover/start"))
         .json(&signed_start(
             "tamperbob",
             &entropy,
@@ -5959,19 +5904,15 @@ async fn a_recovery_whose_new_password_was_modified_after_signing_is_refused() {
         },
         roster,
         upload: pw.upload,
-        kdf_salt: pw.kdf_salt,
-        recovery_nonce: pw.nonce,
-        recovery_wrapped_ck: pw.wrapped_ck,
-        recovery_ciphersuite: pw.ciphersuite,
     };
 
-    // Substitute the KDF salt, leaving the signature untouched.
+    // Substitute the password upload, leaving the signature untouched.
     let forged = RecoverFinishRequest {
-        kdf_salt: vec![0xCD; valid.kdf_salt.len()],
+        upload: vec![0xCD; valid.upload.len()],
         ..valid.clone()
     };
     let response = http
-        .post(format!("{base}/v1/recover/finish"))
+        .post(format!("{base}/v2/recover/finish"))
         .json(&forged)
         .send()
         .await
@@ -5979,14 +5920,14 @@ async fn a_recovery_whose_new_password_was_modified_after_signing_is_refused() {
     assert_eq!(
         response.status(),
         401,
-        "a substituted KDF salt must be refused"
+        "a substituted password upload must be refused"
     );
 
     // The challenge is single use, so a fresh one is needed for the control. That
     // the unmodified request is accepted is what makes the rejection meaningful.
     let (opaque_request, registration) = client_register_start(password.as_bytes()).unwrap();
     let start: RecoverStartResponse = http
-        .post(format!("{base}/v1/recover/start"))
+        .post(format!("{base}/v2/recover/start"))
         .json(&signed_start(
             "tamperbob",
             &entropy,
@@ -6036,14 +5977,10 @@ async fn a_recovery_whose_new_password_was_modified_after_signing_is_refused() {
         },
         roster,
         upload: pw.upload,
-        kdf_salt: pw.kdf_salt,
-        recovery_nonce: pw.nonce,
-        recovery_wrapped_ck: pw.wrapped_ck,
-        recovery_ciphersuite: pw.ciphersuite,
         ..valid
     };
     let response = http
-        .post(format!("{base}/v1/recover/finish"))
+        .post(format!("{base}/v2/recover/finish"))
         .json(&control)
         .send()
         .await
@@ -6216,7 +6153,7 @@ async fn a_pairing_survives_a_rotation_in_the_middle() {
     let pairing = joiner.pair_join(&base, "midalice").await.expect("join");
     let response = owner.pair_respond(&pairing.code).await.expect("respond");
     // A new phrase rotates the key and advances the roster.
-    owner.change_phrase(password).await.expect("rotate");
+    owner.change_phrase().await.expect("rotate");
     assert_eq!(
         joiner.pair_join_step(&pairing, "test").await.unwrap(),
         PairJoinPoll::Confirm
@@ -6449,7 +6386,7 @@ async fn a_per_kind_content_type_is_refused() {
     .unwrap();
 
     let response = reqwest::Client::new()
-        .put(format!("{base}/v1/collections/{collection}/objects"))
+        .put(format!("{base}/v2/collections/{collection}/objects"))
         .bearer_auth(&token)
         .json(&serde_json::json!({
             "id": Uuid::new_v4(),
@@ -6540,7 +6477,7 @@ async fn a_rotation_retires_tombstones_the_change_feed_can_no_longer_carry() {
 
     // Rotating is the only thing that can retire them, because it is the only
     // thing that signs a new manifest over the whole collection.
-    client.change_phrase(password).await.expect("rotate");
+    client.change_phrase().await.expect("rotate");
 
     assert_eq!(
         tombstone_rows(&pool).await,
@@ -6593,7 +6530,7 @@ async fn a_rotation_keeps_tombstones_the_change_feed_can_still_carry() {
     client.delete_contact(doomed).await.expect("delete");
 
     // No pruning, so the delete is still in the log and still reachable.
-    client.change_phrase(password).await.expect("rotate");
+    client.change_phrase().await.expect("rotate");
 
     let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
         .await
@@ -6625,12 +6562,11 @@ async fn tombstone_rows(pool: &sqlx::SqlitePool) -> i64 {
 #[tokio::test]
 async fn a_rotation_that_retires_a_tombstone_above_the_floor_is_refused() {
     use sealbook_crypto::{
-        content_digest, generate_kdf_salt, generate_phrase, key_rotation_transcript,
-        key_wraps_digest, manifest_digest, manifest_transcript, phrase_lookup_id,
-        phrase_recovery_public, rotated_objects_digest, rotation_recovery_payload, sign,
-        wrap_collection_key, wrap_for_device, wrap_for_phrase, CollectionKey, DeviceHpkePublic,
-        DeviceSigningSecrets, ManifestDigestEntry, ObjectDigestEntry, WrapDigestEntry,
-        PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
+        content_digest, generate_phrase, key_rotation_transcript, key_wraps_digest,
+        manifest_digest, manifest_transcript, phrase_lookup_id, phrase_recovery_public,
+        rotated_objects_digest, rotation_phrase_payload, sign, wrap_for_device, wrap_for_phrase,
+        CollectionKey, DeviceHpkePublic, DeviceSigningSecrets, ManifestDigestEntry,
+        ObjectDigestEntry, WrapDigestEntry, PHRASE_CIPHERSUITE, PHRASE_SCHEME, XWING_CIPHERSUITE,
     };
     use sealbook_protocol::{ManifestBody, PhraseRecoveryBody, RotateRequest};
 
@@ -6690,7 +6626,6 @@ async fn a_rotation_that_retires_a_tombstone_above_the_floor_is_refused() {
         .expect("the registering device must be enrolled");
 
     let new_ck = CollectionKey::generate();
-    let salt = generate_kdf_salt();
     let (_phrase, entropy) = generate_phrase().unwrap();
     let device_wrap = wrap_for_device(
         &DeviceHpkePublic(device.xwing_hpke_pk.clone()),
@@ -6701,8 +6636,15 @@ async fn a_rotation_that_retires_a_tombstone_above_the_floor_is_refused() {
         },
     )
     .unwrap();
-    let recovery_wrap = wrap_collection_key(password.as_bytes(), &salt, &new_ck).unwrap();
-    let phrase_wrap = wrap_for_phrase(&entropy, &new_ck).unwrap();
+    let phrase_wrap = wrap_for_phrase(
+        &entropy,
+        &new_ck,
+        &WrapBinding {
+            collection_id,
+            key_epoch: owner.server_key_epoch().await.unwrap() + 1,
+        },
+    )
+    .unwrap();
     let key_wraps = vec![
         KeyWrapBody {
             recipient_kind: "device".into(),
@@ -6710,13 +6652,6 @@ async fn a_rotation_that_retires_a_tombstone_above_the_floor_is_refused() {
             hpke_enc: device_wrap.enc,
             wrapped_ck: device_wrap.ciphertext,
             ciphersuite: XWING_CIPHERSUITE.into(),
-        },
-        KeyWrapBody {
-            recipient_kind: "recovery".into(),
-            recipient_id: "flooralice".into(),
-            hpke_enc: recovery_wrap.nonce.to_vec(),
-            wrapped_ck: recovery_wrap.ciphertext,
-            ciphersuite: RECOVERY_CIPHERSUITE.into(),
         },
         KeyWrapBody {
             recipient_kind: "phrase".into(),
@@ -6779,13 +6714,12 @@ async fn a_rotation_that_retires_a_tombstone_above_the_floor_is_refused() {
         &secrets,
         &key_rotation_transcript(
             collection_id,
-            None,
+            &[],
             key_epoch,
             &key_wraps_digest(&wrap_entries),
             &rotated_objects_digest(&no_objects),
             &digest,
-            &rotation_recovery_payload(
-                &salt,
+            &rotation_phrase_payload(
                 &phrase_recovery.mldsa_pk,
                 &phrase_recovery.ed25519_pk,
                 &phrase_recovery.lookup_id,
@@ -6807,8 +6741,7 @@ async fn a_rotation_that_retires_a_tombstone_above_the_floor_is_refused() {
     );
     let valid = RotateRequest {
         key_epoch,
-        revoke_device_id: None,
-        kdf_salt: salt.to_vec(),
+        revoke_device_ids: Vec::new(),
         key_wraps,
         phrase_recovery,
         objects: Vec::new(),
@@ -6820,7 +6753,7 @@ async fn a_rotation_that_retires_a_tombstone_above_the_floor_is_refused() {
         roster,
         drop_tombstones: Vec::new(),
     };
-    let url = format!("{base}/v1/collections/{collection_id}/rotate");
+    let url = format!("{base}/v2/collections/{collection_id}/rotate");
 
     // The delete is still in the log, so this tombstone is above the floor and
     // must not be retirable. Everything else about the request is valid.
@@ -6889,7 +6822,7 @@ async fn a_write_reads_one_bucket_not_the_whole_collection() {
     let http = reqwest::Client::new();
     let response: ManifestBucketsResponse = http
         .get(format!(
-            "{base}/v1/collections/{collection}/manifest/buckets?buckets={bucket:02x}"
+            "{base}/v2/collections/{collection}/manifest/buckets?buckets={bucket:02x}"
         ))
         .bearer_auth(&token)
         .send()
@@ -7068,7 +7001,7 @@ async fn a_cached_roster_still_accepts_a_manifest_from_a_newly_paired_device() {
 
     // And a rotation moves the epoch, which is what a revocation looks like, so
     // the cache has to be dropped for that too.
-    owner.change_phrase(password).await.expect("rotate");
+    owner.change_phrase().await.expect("rotate");
     owner
         .put_contact(
             Uuid::new_v4(),
@@ -7386,7 +7319,7 @@ async fn a_batch_naming_one_object_twice_is_refused() {
         tombstone: false,
     };
     let response = reqwest::Client::new()
-        .put(format!("{base}/v1/collections/{collection}/objects/batch"))
+        .put(format!("{base}/v2/collections/{collection}/objects/batch"))
         .bearer_auth(&token)
         .json(&PutObjectsRequest {
             objects: vec![object.clone(), object],
@@ -7452,7 +7385,7 @@ async fn a_write_after_someone_else_rotated_is_not_sealed_under_the_old_key() {
         .expect("approve");
     joiner.login(password).await.expect("joiner login");
     let stale_epoch = owner.cached_key_epoch();
-    joiner.change_phrase(password).await.expect("rotate");
+    joiner.change_phrase().await.expect("rotate");
     assert_eq!(
         owner.cached_key_epoch(),
         stale_epoch,
@@ -7484,7 +7417,7 @@ async fn a_write_after_someone_else_rotated_is_not_sealed_under_the_old_key() {
     // recovered from: a rotation re-encrypts every live object under the current
     // key, so one row sealed under an older one wedges it for good.
     owner
-        .change_phrase(password)
+        .change_phrase()
         .await
         .expect("the vault must still be rotatable");
     assert_eq!(owner.list_contacts().await.expect("list").len(), 2);
@@ -7682,7 +7615,8 @@ async fn an_uncommitted_or_incomplete_attachment_is_not_served() {
     let plan = sealbook_core::AttachmentPlan {
         attachment_id,
         key: String::new(),
-        total_plaintext_size: 3 * sealbook_protocol::ATTACHMENT_CHUNK_SIZE as u64,
+        byte_size: 3 * sealbook_protocol::ATTACHMENT_CHUNK_SIZE as u64,
+        padded_size: 3 * sealbook_protocol::ATTACHMENT_CHUNK_SIZE as u64,
         chunk_size: sealbook_protocol::ATTACHMENT_CHUNK_SIZE as u32,
         chunk_count: 3,
     };
@@ -7720,7 +7654,7 @@ async fn an_uncommitted_or_incomplete_attachment_is_not_served() {
     // A chunk of a pending attachment is not served.
     let chunk = http
         .get(format!(
-            "{server}/v1/collections/{collection_id}/attachments/{attachment_id}/chunks/0"
+            "{server}/v2/collections/{collection_id}/attachments/{attachment_id}/chunks/0"
         ))
         .bearer_auth(&token)
         .send()
@@ -7730,7 +7664,7 @@ async fn an_uncommitted_or_incomplete_attachment_is_not_served() {
 }
 
 async fn attachment_challenge(http: &reqwest::Client, server: &str, token: &str) -> String {
-    http.post(format!("{server}/v1/attachments/challenge"))
+    http.post(format!("{server}/v2/attachments/challenge"))
         .bearer_auth(token)
         .json(&serde_json::json!({}))
         .send()
@@ -7773,7 +7707,7 @@ async fn attachment_changes_need_a_device_signature() {
     };
     let http = reqwest::Client::new();
     let state = client.core_state().unwrap();
-    let attachments = format!("{server}/v1/collections/{collection_id}/attachments");
+    let attachments = format!("{server}/v2/collections/{collection_id}/attachments");
     let one = format!("{attachments}/{}", uploaded.attachment_id);
 
     // A bare token (an empty or unsigned body) cannot delete or commit.
@@ -7984,10 +7918,7 @@ async fn rotating_a_device_does_not_touch_attachment_chunks() {
         .expect("approve");
     joiner.login("correct horse battery").await.expect("login");
     let joiner_device = joiner.state.as_ref().unwrap().device_id;
-    owner
-        .revoke_device(joiner_device, "correct horse battery")
-        .await
-        .expect("revoke");
+    owner.revoke_device(joiner_device).await.expect("revoke");
 
     // The chunk ciphertext is byte-identical after the rotation.
     let after: Vec<(i64, Vec<u8>, Vec<u8>)> = {
@@ -8138,10 +8069,7 @@ async fn devices_label_themselves_and_lose_the_label_on_revoke() {
         .expect("relabel");
     assert_eq!(revisions().await, before);
 
-    owner
-        .revoke_device(joiner_id, password)
-        .await
-        .expect("revoke");
+    owner.revoke_device(joiner_id).await.expect("revoke");
     let after = owner.device_entries().await.expect("entries");
     assert_eq!(after.len(), 1);
     assert_eq!(after[0].device_id, owner_id);
@@ -8203,7 +8131,7 @@ async fn failed_logins_from_outsiders_do_not_lock_the_owner_out() {
             username: "lockalice".into(),
             device_id,
         };
-        post_as(&app, from, "/v1/opaque/login/challenge", &challenge).await;
+        post_as(&app, from, "/v2/opaque/login/challenge", &challenge).await;
 
         let (request, _state) = client_login_start(b"guessed password").unwrap();
         let forged = LoginStartRequest {
@@ -8217,7 +8145,7 @@ async fn failed_logins_from_outsiders_do_not_lock_the_owner_out() {
                 ed25519: vec![0u8; 64],
             },
         };
-        let status = post_as(&app, from, "/v1/opaque/login/start", &forged).await;
+        let status = post_as(&app, from, "/v2/opaque/login/start", &forged).await;
         assert_eq!(status, 401, "forged login/start {index}");
 
         let recover = RecoverStartRequest {
@@ -8229,7 +8157,7 @@ async fn failed_logins_from_outsiders_do_not_lock_the_owner_out() {
                 ed25519: vec![0u8; 64],
             },
         };
-        post_as(&app, from, "/v1/recover/start", &recover).await;
+        post_as(&app, from, "/v2/recover/start", &recover).await;
     }
 
     owner
@@ -8281,7 +8209,7 @@ async fn outsiders_cannot_hold_recovery_or_pairing_closed() {
     // Any roster will do for the forged finishes, which never get as far as
     // reading it.
     let roster = reqwest::Client::new()
-        .post(format!("{base}/v1/recover/start"))
+        .post(format!("{base}/v2/recover/start"))
         .json(&start)
         .send()
         .await
@@ -8300,7 +8228,7 @@ async fn outsiders_cannot_hold_recovery_or_pairing_closed() {
 
     for index in 0..40u8 {
         let from = std::net::IpAddr::from([10, 0, 1, index]);
-        post_as(&app, from, "/v1/recover/start", &start).await;
+        post_as(&app, from, "/v2/recover/start", &start).await;
 
         let finish = RecoverFinishRequest {
             username: "holdalice".into(),
@@ -8318,12 +8246,8 @@ async fn outsiders_cannot_hold_recovery_or_pairing_closed() {
             },
             roster: roster.clone(),
             upload: vec![0u8; 32],
-            kdf_salt: vec![0u8; 16],
-            recovery_nonce: vec![0u8; 12],
-            recovery_wrapped_ck: vec![0u8; 48],
-            recovery_ciphersuite: XWING_CIPHERSUITE.into(),
         };
-        let status = post_as(&app, from, "/v1/recover/finish", &finish).await;
+        let status = post_as(&app, from, "/v2/recover/finish", &finish).await;
         assert_eq!(status, 401, "forged recover/finish {index}");
 
         let join = PairJoinRequest {
@@ -8334,7 +8258,7 @@ async fn outsiders_cannot_hold_recovery_or_pairing_closed() {
             sid: vec![0u8; 16],
             share: vec![0u8; 32],
         };
-        post_as(&app, from, "/v1/pair/join", &join).await;
+        post_as(&app, from, "/v2/pair/join", &join).await;
     }
 
     let mut joiner = SealbookClient::plaintext_http();
@@ -8350,14 +8274,16 @@ async fn outsiders_cannot_hold_recovery_or_pairing_closed() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// An account whose roster predates key commitments is reported as such, and a
-/// rotation, the step a user can take at will, upgrades it.
+/// An account whose latest roster is not a migrated one owes the upgrade
+/// rotation whatever the server says: it may be read, nothing but the rotation
+/// may be written, and the rotation migrates it.
 ///
 /// The legacy account is made by hand: the stored genesis roster is resealed
-/// under the v1 transcript, and the device's pin moved onto it, as a device
-/// enrolled before commitments existed would hold.
+/// under the v1 transcript, the device's pin moved onto it, and the account
+/// marked as the migration marks every account, as a device enrolled before
+/// protocol v2 would find it.
 #[tokio::test]
-async fn a_legacy_roster_is_reported_until_a_rotation_commits_to_the_key() {
+async fn an_unmigrated_account_reads_and_owes_one_rotation() {
     let dir = std::env::temp_dir().join(format!("sealbook-legacy-roster-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let db = dir.join("sealbook.db");
@@ -8374,7 +8300,7 @@ async fn a_legacy_roster_is_reported_until_a_rotation_commits_to_the_key() {
         .await
         .unwrap();
     client.login(password).await.unwrap();
-    assert!(!client.roster_lacks_key_commitment());
+    assert_eq!(client.rotation_owed(), None);
 
     let state = client.state.clone().unwrap();
     let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
@@ -8397,7 +8323,8 @@ async fn a_legacy_roster_is_reported_until_a_rotation_commits_to_the_key() {
             key_epoch: 1,
         },
     )
-    .unwrap();
+    .unwrap()
+    .0;
     let stored: String = sqlx::query_scalar("SELECT body FROM device_rosters WHERE roster_seq = 1")
         .fetch_one(&pool)
         .await
@@ -8406,6 +8333,7 @@ async fn a_legacy_roster_is_reported_until_a_rotation_commits_to_the_key() {
         .unwrap()
         .to_roster();
     legacy.key_commitment.clear();
+    legacy.migrated = false;
     let transcript = legacy.transcript(state.collection_id);
     legacy.signature = sign(
         &DeviceSigningSecrets {
@@ -8423,24 +8351,48 @@ async fn a_legacy_roster_is_reported_until_a_rotation_commits_to_the_key() {
         .execute(&pool)
         .await
         .unwrap();
+    sqlx::query("UPDATE accounts SET rotation_owed = 'upgrade' WHERE username = 'legacyalice'")
+        .execute(&pool)
+        .await
+        .unwrap();
     pool.close().await;
 
     let mut legacy_pinned = state;
     legacy_pinned.roster_seq = 1;
     legacy_pinned.roster_transcript = transcript.to_vec();
     let mut client = SealbookClient::with_state(legacy_pinned);
-    client
+    let owed = client
         .login(password)
         .await
-        .expect("a legacy roster still verifies by MAC");
-    assert!(client.roster_lacks_key_commitment());
+        .expect_err("an unmigrated account owes a rotation");
+    assert!(
+        matches!(owed, sealbook_client::ClientError::UpgradeRotationPending),
+        "{owed:?}"
+    );
+    assert_eq!(
+        client.rotation_owed(),
+        Some(sealbook_core::CoreRotationOwed::Upgrade)
+    );
+    // Reads still work: the rotation has to read every object.
     assert_eq!(client.list_contacts().await.unwrap().len(), 1);
+    // Writes are refused until it lands.
+    assert!(client
+        .put_contact(Uuid::new_v4(), r#"{"@type":"Card","name":{"full":"Bob"}}"#)
+        .await
+        .is_err());
 
-    client.change_phrase(password).await.expect("rotate");
-    assert!(!client.roster_lacks_key_commitment());
+    client
+        .complete_rotation(password, &[], &mut |_| Ok(()))
+        .await
+        .expect("rotate");
+    assert_eq!(client.rotation_owed(), None);
     client.login(password).await.unwrap();
-    assert!(!client.roster_lacks_key_commitment());
+    assert_eq!(client.rotation_owed(), None);
     assert_eq!(client.list_contacts().await.unwrap().len(), 1);
+    client
+        .put_contact(Uuid::new_v4(), r#"{"@type":"Card","name":{"full":"Bob"}}"#)
+        .await
+        .expect("writes resume once the account has migrated");
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -8614,5 +8566,452 @@ async fn a_trashed_notebook_takes_its_notes_and_brings_them_back() {
         .iter()
         .any(|object| [notebook, parent, child].contains(&object.id)));
 
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── Protocol v2 ──
+
+/// A request on the retired prefix is told why, in the error shape an old
+/// client already parses, rather than getting a bare not-found.
+#[tokio::test]
+async fn a_v1_request_gets_the_retired_error() {
+    let dir = std::env::temp_dir().join(format!("sealbook-retired-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let base = spawn_http(dir.join("sealbook.db").to_str().unwrap()).await;
+    let http = reqwest::Client::new();
+    for path in ["/v1/opaque/login/challenge", "/v1/session"] {
+        let response = http.post(format!("{base}{path}")).send().await.unwrap();
+        assert_eq!(response.status(), 410, "{path}");
+        let body: sealbook_protocol::ErrorBody = response.json().await.unwrap();
+        assert_eq!(body.error, sealbook_protocol::RETIRED_ROUTE_MESSAGE);
+    }
+    // The unprefixed health routes are not part of the versioned surface.
+    let health = http.get(format!("{base}/health")).send().await.unwrap();
+    assert_eq!(health.status(), 200);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The password no longer wraps the collection key, so a register request that
+/// still carries a `recovery` wrap is refused as an unknown recipient kind.
+#[tokio::test]
+async fn a_register_request_carrying_a_recovery_wrap_is_refused() {
+    let dir = std::env::temp_dir().join(format!("sealbook-no-recovery-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let base = spawn_http(dir.join("sealbook.db").to_str().unwrap()).await;
+    let http = reqwest::Client::new();
+    let password = "correct horse battery";
+
+    let identity = sealbook_core::new_registration().unwrap();
+    let opaque = sealbook_core::opaque_register_start(password).unwrap();
+    let start = sealbook_core::register_start_request("wrapalice", &opaque.request).unwrap();
+    let served = http
+        .post(format!("{base}{}", start.path))
+        .body(start.body)
+        .header("content-type", "application/json")
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let response = sealbook_core::register_start_accept(&served).unwrap();
+    let upload = sealbook_core::opaque_register_upload(&opaque.state, password, &response).unwrap();
+    let registering =
+        sealbook_core::register_finish_request("wrapalice", &upload, &identity).unwrap();
+
+    let mut body: serde_json::Value = serde_json::from_str(&registering.request.body).unwrap();
+    body["key_wraps"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "recipient_kind": "recovery",
+            "recipient_id": "wrapalice",
+            "hpke_enc": URL_SAFE_NO_PAD.encode([0u8; 24]),
+            "wrapped_ck": URL_SAFE_NO_PAD.encode([0u8; 48]),
+            "ciphersuite": "xchacha20poly1305-argon2id-v1",
+        }));
+    let refused = http
+        .post(format!("{base}{}", registering.request.path))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), 400);
+
+    let accepted = http
+        .post(format!("{base}{}", registering.request.path))
+        .body(registering.request.body.clone())
+        .header("content-type", "application/json")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        accepted.status(),
+        200,
+        "the unmodified request is the control"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// One rotation revokes two devices. A list that repeats an id, is out of order or
+/// names the nil id is refused before any row changes, and a client behind the
+/// rotation is told to resync rather than handed an error.
+#[tokio::test]
+async fn a_rotation_revokes_several_devices_and_refuses_a_malformed_list() {
+    let dir = std::env::temp_dir().join(format!("sealbook-multi-revoke-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+    let password = "correct horse battery";
+
+    let mut owner = SealbookClient::plaintext_http();
+    owner.register(&base, "multialice", password).await.unwrap();
+    let contact = Uuid::new_v4();
+    for name in ["Ada", "Ada Lovelace", "Ada King"] {
+        owner
+            .put_contact(
+                contact,
+                &format!(r#"{{"@type":"Card","name":{{"full":"{name}"}}}}"#),
+            )
+            .await
+            .unwrap();
+    }
+    let mut first = SealbookClient::plaintext_http();
+    pair_device(&mut first, &mut owner, &base, "multialice")
+        .await
+        .unwrap();
+    let mut second = SealbookClient::plaintext_http();
+    pair_device(&mut second, &mut owner, &base, "multialice")
+        .await
+        .unwrap();
+    first.login(password).await.unwrap();
+    second.login(password).await.unwrap();
+    let mut revoke = [
+        first.state.as_ref().unwrap().device_id,
+        second.state.as_ref().unwrap().device_id,
+    ];
+    revoke.sort_unstable();
+    let (low, high) = (revoke[0], revoke[1]);
+
+    let state = owner.state.clone().unwrap();
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    let epoch_before = owner.server_key_epoch().await.unwrap();
+    let revisions_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM object_revisions")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    // The list is checked before anything is read or signed, so a body with an
+    // otherwise empty rotation is enough to reach the check.
+    let roster_json: String =
+        sqlx::query_scalar("SELECT body FROM device_rosters ORDER BY roster_seq DESC LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let skeleton = |ids: Vec<Uuid>| {
+        serde_json::json!({
+            "key_epoch": epoch_before + 1,
+            "revoke_device_ids": ids,
+            "key_wraps": [],
+            "phrase_recovery": {
+                "mldsa_pk": URL_SAFE_NO_PAD.encode(vec![0u8; sealbook_crypto::MLDSA65_PUBLIC_KEY_LEN]),
+                "ed25519_pk": URL_SAFE_NO_PAD.encode([0u8; 32]),
+                "lookup_id": URL_SAFE_NO_PAD.encode([0u8; sealbook_crypto::PHRASE_LOOKUP_ID_LEN]),
+                "scheme": PHRASE_SCHEME,
+            },
+            "objects": [],
+            "manifest": {
+                "manifest_seq": 99, "key_epoch": epoch_before + 1, "latest_revision": 0,
+                "object_count": 0, "digest": URL_SAFE_NO_PAD.encode([0u8; 32]),
+                "device_id": state.device_id,
+                "signature": {"mldsa": "", "ed25519": ""},
+            },
+            "rotation_signature": {"mldsa": "", "ed25519": ""},
+            "roster": serde_json::from_str::<serde_json::Value>(&roster_json).unwrap(),
+            "drop_tombstones": [],
+        })
+    };
+    let http = reqwest::Client::new();
+    let url = format!("{base}/v2/collections/{}/rotate", state.collection_id);
+    let token = state.session_token.clone().unwrap();
+    for (list, why) in [
+        (vec![low, low], "a repeated id"),
+        (vec![high, low], "a descending list"),
+        (vec![Uuid::nil()], "the nil id"),
+    ] {
+        let response = http
+            .post(&url)
+            .bearer_auth(&token)
+            .json(&skeleton(list))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 400, "{why}");
+    }
+    let revoked: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM devices WHERE revoked_at IS NOT NULL")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(revoked, 0, "a refused list changed a device row");
+    assert_eq!(owner.server_key_epoch().await.unwrap(), epoch_before);
+
+    owner
+        .revoke_devices(&[low, high], &mut |_| Ok(()))
+        .await
+        .expect("a two-device revoke");
+
+    let on_roster = owner.list_devices().await.unwrap();
+    assert_eq!(
+        on_roster.len(),
+        1,
+        "neither revoked device stays on the roster"
+    );
+    assert_eq!(on_roster[0].device_id, state.device_id);
+    let device_wraps: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM key_wraps WHERE recipient_kind = 'device'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(device_wraps, 1, "neither revoked device holds a wrap");
+    assert!(first.login(password).await.is_err());
+    assert!(second.login(password).await.is_err());
+
+    // Nothing sealed under the retired key is left in the revision log.
+    let floor: i64 = sqlx::query_scalar("SELECT MIN(revision) FROM objects WHERE tombstone = 0")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let older: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM object_revisions WHERE revision < ?")
+        .bind(floor)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(older, 0, "revisions older than the rotation survived it");
+    assert!(revisions_before > 1, "the fixture had history to delete");
+
+    // A client behind the new floor is told to resync, not given an error.
+    let changes: serde_json::Value = http
+        .get(format!(
+            "{base}/v2/collections/{}/changes?after=1&limit=10",
+            state.collection_id
+        ))
+        .bearer_auth(owner.state.as_ref().unwrap().session_token.clone().unwrap())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(changes["resync"], true, "{changes}");
+
+    pool.close().await;
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Turns the account's stored roster into one from before protocol v2 and seals
+/// `forged` to the device in place of its key, as a server that held a copy of the
+/// vault key could. The roster MAC is outside the signature, so the server can
+/// recompute it under the key it chose.
+async fn forge_unmigrated_account(
+    db: &std::path::Path,
+    username: &str,
+    state: &sealbook_client::LocalState,
+    forged: &CollectionKey,
+) -> [u8; 32] {
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    let wrap = wrap_for_device(
+        &sealbook_crypto::DeviceHpkePublic(
+            sqlx::query_scalar("SELECT xwing_hpke_pk FROM devices WHERE id = ?")
+                .bind(state.device_id.to_string())
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+        ),
+        forged,
+        &WrapBinding {
+            collection_id: state.collection_id,
+            key_epoch: 1,
+        },
+    )
+    .unwrap();
+    sqlx::query(
+        "UPDATE key_wraps SET hpke_enc = ?, wrapped_ck = ?
+         WHERE recipient_kind = 'device' AND recipient_id = ?",
+    )
+    .bind(&wrap.enc)
+    .bind(&wrap.ciphertext)
+    .bind(state.device_id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+    let stored: String = sqlx::query_scalar("SELECT body FROM device_rosters WHERE roster_seq = 1")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let mut earlier = serde_json::from_str::<sealbook_protocol::RosterBody>(&stored)
+        .unwrap()
+        .to_roster();
+    earlier.key_commitment.clear();
+    earlier.migrated = false;
+    let transcript = earlier.transcript(state.collection_id);
+    earlier.signature = sign(
+        &DeviceSigningSecrets {
+            mldsa_seed: state.mldsa_seed.clone(),
+            ed25519_sk: state.ed25519_sk.clone(),
+        },
+        &transcript,
+    )
+    .unwrap();
+    earlier.mac = sealbook_crypto::roster_mac(forged, &transcript)
+        .unwrap()
+        .to_vec();
+    sqlx::query("UPDATE device_rosters SET body = ? WHERE roster_seq = 1")
+        .bind(serde_json::to_string(&sealbook_protocol::RosterBody::from_roster(earlier)).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE accounts SET rotation_owed = 'upgrade' WHERE username = ?")
+        .bind(username)
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    transcript
+}
+
+/// A roster from before commitments vouches for the key by a MAC the server can
+/// recompute, so the vault is the only witness. A forged key over an empty vault
+/// has nothing to contradict it, is read-only, and the rotation replaces it; over
+/// a vault with objects it is refused as what it is, not as corruption.
+#[tokio::test]
+async fn a_forged_key_under_an_unmigrated_roster_is_checked_against_the_vault() {
+    let password = "correct horse battery";
+    for (username, objects) in [("forgedempty", 0), ("forgedfull", 1)] {
+        let dir = std::env::temp_dir().join(format!("sealbook-forged-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("sealbook.db");
+        let base = spawn_http(db.to_str().unwrap()).await;
+        let mut client = SealbookClient::plaintext_http();
+        client.register(&base, username, password).await.unwrap();
+        for _ in 0..objects {
+            client
+                .put_contact(Uuid::new_v4(), r#"{"@type":"Card","name":{"full":"Ada"}}"#)
+                .await
+                .unwrap();
+        }
+        let state = client.state.clone().unwrap();
+        let forged = CollectionKey::generate();
+        let transcript = forge_unmigrated_account(&db, username, &state, &forged).await;
+
+        let mut pinned = state;
+        pinned.roster_seq = 1;
+        pinned.roster_transcript = transcript.to_vec();
+        let mut victim = SealbookClient::with_state(pinned);
+        let error = victim
+            .login(password)
+            .await
+            .expect_err("an unmigrated account never signs straight in");
+        if objects == 0 {
+            assert!(
+                matches!(error, sealbook_client::ClientError::UpgradeRotationPending),
+                "{username}: {error:?}"
+            );
+            assert_eq!(
+                victim.collection_key().map(|key| key.as_bytes().to_vec()),
+                Some(forged.as_bytes().to_vec()),
+                "an empty vault leaves the forged key adopted for reading"
+            );
+            assert_eq!(
+                victim.rotation_owed(),
+                Some(sealbook_core::CoreRotationOwed::Upgrade)
+            );
+        } else {
+            assert!(
+                matches!(error, sealbook_client::ClientError::KeyMismatch),
+                "{username}: {error:?}"
+            );
+            assert!(victim.collection_key().is_none(), "the forged key was kept");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// A vault written before payload 1.1 comes out of its next rotation entirely
+/// 1.1, once, and a payload this build cannot read comes out untouched. The
+/// padded size the rotation reports is the one the server stores.
+#[tokio::test]
+async fn a_rotation_moves_the_vault_to_the_current_payload_schema() {
+    let dir = std::env::temp_dir().join(format!("sealbook-upgrade-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+    let password = "correct horse battery";
+
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, "upgradeada", password)
+        .await
+        .unwrap();
+
+    let note = Uuid::new_v4();
+    let future = Uuid::new_v4();
+    client
+        .put_note(
+            note,
+            r#"{"@type":"Note","version":"1.0","title":"Old","body":"b","notebookId":"00000000-0000-0000-0000-000000000002","keepMe":{"deep":[1]}}"#,
+        )
+        .await
+        .unwrap();
+    client
+        .put_note(
+            future,
+            r#"{"@type":"Note","version":"2.0","title":"From later"}"#,
+        )
+        .await
+        .unwrap();
+    let card = Uuid::new_v4();
+    client
+        .put_contact(
+            card,
+            r#"{"@type":"Card","version":"1.0","fullName":"Ada Lovelace","sealbook:addressBookId":"00000000-0000-0000-0000-000000000001"}"#,
+        )
+        .await
+        .unwrap();
+
+    client.rotate(&[]).await.expect("rotate");
+    assert_eq!(
+        client.last_rotation_upgraded(),
+        2,
+        "the note and the card, and not the one from a later major"
+    );
+
+    let notes = client.list_notes().await.unwrap();
+    let read = |id: Uuid| -> serde_json::Value {
+        let (_, payload) = notes.iter().find(|(found, _)| *found == id).unwrap();
+        serde_json::from_str(payload).unwrap()
+    };
+    let upgraded = read(note);
+    assert_eq!(upgraded["version"], "1.1");
+    assert_eq!(upgraded["keepMe"]["deep"][0], 1);
+    assert_eq!(read(future)["version"], "2.0");
+    let cards = client.list_contacts().await.unwrap();
+    let card_payload: serde_json::Value =
+        serde_json::from_str(&cards.iter().find(|(id, _)| *id == card).unwrap().1).unwrap();
+    assert_eq!(card_payload["version"], "1.0");
+    assert_eq!(card_payload["sealbook:version"], "1.1");
+    assert_eq!(card_payload["name"]["full"], "Ada Lovelace");
+    assert!(card_payload.get("fullName").is_none());
+
+    client.rotate(&[]).await.expect("rotate again");
+    assert_eq!(
+        client.last_rotation_upgraded(),
+        0,
+        "a second rotation has nothing left to move"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

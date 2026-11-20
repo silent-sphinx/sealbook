@@ -380,7 +380,7 @@ pub async fn app_with(
     let db = open_migrated(db_path).await?;
     verify_db_integrity(&db).await?;
     db::log_contents(&db).await?;
-    db::log_pre_upgrade_report(&db).await?;
+    db::log_migration_state(&db).await?;
     let opaque = load_or_create_setup(&db).await?;
     let dummy_record = load_or_create_dummy(&db, &opaque).await?;
     let dummy_hpke_pk = load_or_create_dummy_hpke(&db).await?;
@@ -881,6 +881,12 @@ const ROTATION_TIMEOUT: Duration = Duration::from_secs(600);
 /// The other attachment routes are small JSON and comfortably under this.
 const MAX_ATTACHMENT_BODY: usize = sealbook_protocol::ATTACHMENT_CHUNK_SIZE + 64 * 1024;
 
+/// What a client of the retired protocol is told, in the same error shape it
+/// already parses, so the person sees why instead of a bare not-found.
+async fn retired_protocol() -> (StatusCode, Json<ErrorBody>) {
+    err(StatusCode::GONE, sealbook_protocol::RETIRED_ROUTE_MESSAGE)
+}
+
 fn router(state: Shared) -> Router<Shared> {
     // The three route groups differ in how much they may carry and how long they
     // may take, so each gets its own budget rather than one number that has to be
@@ -890,36 +896,40 @@ fn router(state: Shared) -> Router<Shared> {
         .route("/logo.png", get(landing::logo))
         .route("/health", get(|| async { "ok" }))
         .route("/health/crypto", get(crypto_profile))
-        .route("/v1/opaque/register/start", post(register_start))
-        .route("/v1/opaque/register/finish", post(register_finish))
-        .route("/v1/opaque/login/challenge", post(login_challenge))
-        .route("/v1/opaque/login/start", post(login_start))
-        .route("/v1/opaque/login/finish", post(login_finish))
-        .route("/v1/collections/{id}/changes", get(changes))
-        .route("/v1/collections/{id}/keys", get(collection_keys))
-        .route("/v1/collections/{id}/manifest", get(collection_manifest))
         .route(
-            "/v1/collections/{id}/manifest/buckets",
+            &format!("{}/{{*rest}}", sealbook_protocol::RETIRED_ROUTE_PREFIX),
+            axum::routing::any(retired_protocol),
+        )
+        .route("/v2/opaque/register/start", post(register_start))
+        .route("/v2/opaque/register/finish", post(register_finish))
+        .route("/v2/opaque/login/challenge", post(login_challenge))
+        .route("/v2/opaque/login/start", post(login_start))
+        .route("/v2/opaque/login/finish", post(login_finish))
+        .route("/v2/collections/{id}/changes", get(changes))
+        .route("/v2/collections/{id}/keys", get(collection_keys))
+        .route("/v2/collections/{id}/manifest", get(collection_manifest))
+        .route(
+            "/v2/collections/{id}/manifest/buckets",
             get(collection_manifest_buckets),
         )
         .route(
-            "/v1/collections/{id}/roster",
+            "/v2/collections/{id}/roster",
             get(roster::collection_roster),
         )
-        .route("/v1/pair/join", post(pair_join))
-        .route("/v1/pair/{id}", get(pair_status))
-        .route("/v1/pair/{id}/respond", post(pair_respond))
-        .route("/v1/pair/{id}/confirm", post(pair_confirm))
-        .route("/v1/pair/{id}/approve", post(pair_approve))
-        .route("/v1/pair/{id}/cancel", post(pair_cancel))
-        .route("/v1/recover/start", post(recover_start))
-        .route("/v1/recover/finish", post(recover_finish))
-        .route("/v1/account/challenge", post(account_challenge))
-        .route("/v1/account/username", post(change_username))
-        .route("/v1/account/password/start", post(change_password_start))
-        .route("/v1/account/password", post(change_password))
-        .route("/v1/session", delete(revoke_session))
-        .route("/v1/account", delete(delete_account))
+        .route("/v2/pair/join", post(pair_join))
+        .route("/v2/pair/{id}", get(pair_status))
+        .route("/v2/pair/{id}/respond", post(pair_respond))
+        .route("/v2/pair/{id}/confirm", post(pair_confirm))
+        .route("/v2/pair/{id}/approve", post(pair_approve))
+        .route("/v2/pair/{id}/cancel", post(pair_cancel))
+        .route("/v2/recover/start", post(recover_start))
+        .route("/v2/recover/finish", post(recover_finish))
+        .route("/v2/account/challenge", post(account_challenge))
+        .route("/v2/account/username", post(change_username))
+        .route("/v2/account/password/start", post(change_password_start))
+        .route("/v2/account/password", post(change_password))
+        .route("/v2/session", delete(revoke_session))
+        .route("/v2/account", delete(delete_account))
         .layer(DefaultBodyLimit::max(MAX_BODY))
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
@@ -927,8 +937,8 @@ fn router(state: Shared) -> Router<Shared> {
         ));
 
     let objects = Router::new()
-        .route("/v1/collections/{id}/objects", put(put_object))
-        .route("/v1/collections/{id}/objects/batch", put(put_objects))
+        .route("/v2/collections/{id}/objects", put(put_object))
+        .route("/v2/collections/{id}/objects/batch", put(put_objects))
         .layer(DefaultBodyLimit::max(MAX_OBJECT_BODY))
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
@@ -946,7 +956,7 @@ fn router(state: Shared) -> Router<Shared> {
     // bounds peak memory: at most `max_concurrent_rotations` bodies exist at
     // once, however many clients ask at the same time.
     let rotation = Router::new()
-        .route("/v1/collections/{id}/rotate", post(rotate))
+        .route("/v2/collections/{id}/rotate", post(rotate))
         .layer(DefaultBodyLimit::max(state.limits.max_rotation_body))
         .layer(ConcurrencyLimitLayer::new(
             state.limits.max_concurrent_rotations.max(1),
@@ -961,21 +971,21 @@ fn router(state: Shared) -> Router<Shared> {
     // change feed. They get the object timeout (a chunk may be slow on a poor
     // uplink) and a chunk-sized body limit.
     let attachments = Router::new()
-        .route("/v1/attachments/challenge", post(attachment_challenge))
+        .route("/v2/attachments/challenge", post(attachment_challenge))
         .route(
-            "/v1/collections/{id}/attachments",
+            "/v2/collections/{id}/attachments",
             post(create_attachment).get(list_attachments),
         )
         .route(
-            "/v1/collections/{id}/attachments/{attachment_id}",
+            "/v2/collections/{id}/attachments/{attachment_id}",
             get(get_attachment_meta).delete(delete_attachment),
         )
         .route(
-            "/v1/collections/{id}/attachments/{attachment_id}/commit",
+            "/v2/collections/{id}/attachments/{attachment_id}/commit",
             post(commit_attachment),
         )
         .route(
-            "/v1/collections/{id}/attachments/{attachment_id}/chunks/{index}",
+            "/v2/collections/{id}/attachments/{attachment_id}/chunks/{index}",
             put(upload_chunk).get(download_chunk),
         )
         .layer(DefaultBodyLimit::max(MAX_ATTACHMENT_BODY))
@@ -1410,8 +1420,8 @@ mod tests {
     #[cfg(test)]
     async fn seed_account(db: &Pool<Sqlite>, account: &str, device: &str, collection: &str) {
         sqlx::query(
-            "INSERT INTO accounts (id, username, opaque_record, kdf_salt, created_at)
-             VALUES (?, ?, X'', X'', 0)",
+            "INSERT INTO accounts (id, username, opaque_record, created_at)
+             VALUES (?, ?, X'', 0)",
         )
         .bind(account)
         .bind(account)

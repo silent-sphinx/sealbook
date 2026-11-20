@@ -56,7 +56,10 @@ pub(crate) async fn open_db(path: &str) -> anyhow::Result<Pool<Sqlite>> {
         .journal_mode(SqliteJournalMode::Wal)
         .synchronous(SqliteSynchronous::Full)
         .busy_timeout(Duration::from_secs(5))
-        .foreign_keys(true);
+        .foreign_keys(true)
+        // Later deletes overwrite the freed content in place instead of leaving
+        // it in a free page.
+        .pragma("secure_delete", "ON");
     SqlitePoolOptions::new()
         .max_connections(5)
         .connect_with(options)
@@ -70,7 +73,75 @@ pub(crate) async fn open_migrated(path: &str) -> anyhow::Result<Pool<Sqlite>> {
     let result = migrate(&migrating).await;
     migrating.close().await;
     result?;
-    open_db(path).await
+    let db = open_db(path).await?;
+    scrub_deleted_key_material(&db).await;
+    Ok(db)
+}
+
+const SCRUB_PENDING: &str = "scrub_pending";
+
+/// Rewrites the database file when a migration has deleted key material, so the
+/// deleted bytes are not left in free pages or in the WAL.
+///
+/// The flag is committed with the deletes, so a crash cannot leave the rows gone
+/// and the scrub forgotten. A failure keeps the flag and the server keeps
+/// serving: the rows are already unreachable through the database, and the next
+/// start tries again.
+async fn scrub_deleted_key_material(db: &Pool<Sqlite>) {
+    let pending = match sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM meta WHERE k = ?")
+        .bind(SCRUB_PENDING)
+        .fetch_one(db)
+        .await
+    {
+        Ok(count) => count > 0,
+        Err(error) => {
+            tracing::error!(%error, "could not read the scrub flag; deleted key material may still be on disk");
+            return;
+        }
+    };
+    if !pending {
+        return;
+    }
+    let started = std::time::Instant::now();
+    match scrub(db).await {
+        Ok(()) => {
+            tracing::info!(
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "scrubbed deleted key material from the database file"
+            );
+        }
+        Err(error) => {
+            tracing::error!(%error, "could not scrub the database file: deleted key material is still on disk; it will be retried at the next start");
+        }
+    }
+}
+
+async fn scrub(db: &Pool<Sqlite>) -> anyhow::Result<()> {
+    // One connection throughout: the pragma and the VACUUM must not interleave
+    // with another connection's checkpoint.
+    let mut conn = db.acquire().await?;
+    truncate_wal(&mut conn).await?;
+    sqlx::query("VACUUM").execute(&mut *conn).await?;
+    // VACUUM in WAL mode writes its result into the WAL, so the old pages stay in
+    // the main file until this checkpoint overwrites them.
+    truncate_wal(&mut conn).await?;
+    sqlx::query("DELETE FROM meta WHERE k = ?")
+        .bind(SCRUB_PENDING)
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}
+
+/// `wal_checkpoint(TRUNCATE)` reports a reader that held it back as a result row,
+/// not an error, so the row is what decides whether it finished.
+async fn truncate_wal(conn: &mut sqlx::SqliteConnection) -> anyhow::Result<()> {
+    let (busy, _, _): (i64, i64, i64) = sqlx::query_as("PRAGMA wal_checkpoint(TRUNCATE)")
+        .fetch_one(&mut *conn)
+        .await?;
+    if busy != 0 {
+        anyhow::bail!("another connection holds the write-ahead log open");
+    }
+    Ok(())
 }
 
 /// Schema version this build expects.
@@ -78,7 +149,7 @@ pub(crate) async fn open_migrated(path: &str) -> anyhow::Result<Pool<Sqlite>> {
 /// Stored in SQLite's `user_version` header field, which is transactional, so a
 /// migration and the version bump that records it commit together or not at all.
 /// Bump this and add a step to `migrate` when the schema changes.
-pub(crate) const SCHEMA_VERSION: i64 = 2;
+pub(crate) const SCHEMA_VERSION: i64 = 3;
 
 /// Brings the database up to `SCHEMA_VERSION`.
 ///
@@ -104,6 +175,9 @@ pub(crate) async fn migrate(db: &Pool<Sqlite>) -> anyhow::Result<()> {
     }
     if version < 2 {
         migrate_to_v2(db).await?;
+    }
+    if version < 3 {
+        migrate_to_v3(db).await?;
     }
     Ok(())
 }
@@ -526,6 +600,73 @@ async fn migrate_to_v2(db: &Pool<Sqlite>) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Protocol v2: the recovery wrap, the KDF salt and the plaintext attachment size
+/// leave the schema, and every account owes one key rotation.
+///
+/// The deletes and the flag that asks for the scrub commit together, so the file
+/// is rewritten at this start or, if that fails, at the next one.
+async fn migrate_to_v3(db: &Pool<Sqlite>) -> anyhow::Result<()> {
+    // Counted before anything changes, and never fatal: an account a v1 client
+    // could still have repaired is reported, then migrated like the rest.
+    log_pre_upgrade_report(db).await?;
+    let mut tx = db.begin().await?;
+    {
+        let db = &mut *tx;
+        sqlx::query("DELETE FROM key_wraps WHERE recipient_kind = 'recovery'")
+            .execute(&mut *db)
+            .await?;
+        sqlx::query("ALTER TABLE accounts DROP COLUMN kdf_salt")
+            .execute(&mut *db)
+            .await?;
+        sqlx::query("ALTER TABLE accounts ADD COLUMN rotation_owed TEXT")
+            .execute(&mut *db)
+            .await?;
+        sqlx::query(
+            "UPDATE accounts
+             SET rotation_owed = CASE WHEN recovery_pending != 0 THEN 'recovery' ELSE 'upgrade' END",
+        )
+        .execute(&mut *db)
+        .await?;
+        sqlx::query("ALTER TABLE accounts DROP COLUMN recovery_pending")
+            .execute(&mut *db)
+            .await?;
+        sqlx::query("ALTER TABLE attachments DROP COLUMN total_plaintext_size")
+            .execute(&mut *db)
+            .await?;
+        sqlx::query("INSERT OR REPLACE INTO meta (k, v) VALUES (?, 1)")
+            .bind(SCRUB_PENDING)
+            .execute(&mut *db)
+            .await?;
+        sqlx::query("PRAGMA user_version = 3")
+            .execute(&mut *db)
+            .await?;
+    }
+    tx.commit().await?;
+    tracing::info!(version = 3, "database schema upgraded");
+    Ok(())
+}
+
+/// Logs how many accounts still owe the upgrade rotation, and warns while a scrub
+/// is outstanding.
+pub(crate) async fn log_migration_state(db: &Pool<Sqlite>) -> anyhow::Result<()> {
+    let owing_upgrade: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE rotation_owed = 'upgrade'")
+            .fetch_one(db)
+            .await?;
+    let scrub_pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM meta WHERE k = ?")
+        .bind(SCRUB_PENDING)
+        .fetch_one(db)
+        .await?;
+    tracing::info!(
+        accounts_owing_upgrade_rotation = owing_upgrade,
+        "migration state"
+    );
+    if scrub_pending > 0 {
+        tracing::warn!("the database file has not been scrubbed of deleted key material");
+    }
+    Ok(())
+}
+
 /// Refuses to start on a corrupt database.
 ///
 /// `quick_check` by default: it finds the corruption that matters — a damaged
@@ -693,8 +834,8 @@ mod tests {
         migrate(&db).await.unwrap();
         for (account, device) in [("good", "d-good"), ("bad", "d-bad")] {
             sqlx::query(
-                "INSERT INTO accounts (id, username, opaque_record, kdf_salt, created_at)
-                 VALUES (?, ?, X'', X'', 0)",
+                "INSERT INTO accounts (id, username, opaque_record, created_at)
+                 VALUES (?, ?, X'', 0)",
             )
             .bind(account)
             .bind(account)
@@ -770,8 +911,8 @@ mod tests {
         // The object hangs off a real account and collection, because the schema
         // now enforces that it must.
         sqlx::query(
-            "INSERT INTO accounts (id, username, opaque_record, kdf_salt, created_at)
-             VALUES ('account', 'account', X'', X'', 0)",
+            "INSERT INTO accounts (id, username, opaque_record, created_at)
+             VALUES ('account', 'account', X'', 0)",
         )
         .execute(&db)
         .await
@@ -805,6 +946,266 @@ mod tests {
         assert_eq!(rows, 1);
         assert_eq!(schema_version(&db).await.unwrap(), SCHEMA_VERSION);
 
+        db.close().await;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    const SALT: [u8; 16] = [0x5c; 16];
+    const RECOVERY_WRAP: [u8; 48] = [0xa7; 48];
+
+    async fn columns(db: &Pool<Sqlite>, table: &str) -> Vec<String> {
+        sqlx::query_scalar::<_, String>(&format!("SELECT name FROM pragma_table_info('{table}')"))
+            .fetch_all(db)
+            .await
+            .unwrap()
+    }
+
+    /// A file-backed database at schema version 2, holding a recovery wrap, a pending
+    /// recovery on one account, a plain second account and an attachment.
+    async fn v2_database_with_recovery_material() -> (std::path::PathBuf, String) {
+        let (dir, db) = temp_db().await;
+        migrate_to_v1(&db).await.unwrap();
+        migrate_to_v2(&db).await.unwrap();
+        for (account, pending) in [("recovering", 77_i64), ("plain", 0)] {
+            sqlx::query(
+                "INSERT INTO accounts (id, username, opaque_record, kdf_salt, created_at, recovery_pending)
+                 VALUES (?, ?, X'00', ?, 0, ?)",
+            )
+            .bind(account)
+            .bind(account)
+            .bind(SALT.as_slice())
+            .bind(pending)
+            .execute(&db)
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO collections (id, account_id, kind, created_at)
+                 VALUES (?, ?, 'vault', 0)",
+            )
+            .bind(format!("c-{account}"))
+            .bind(account)
+            .execute(&db)
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO key_wraps (collection_id, recipient_kind, recipient_id, hpke_enc, wrapped_ck, ciphersuite)
+                 VALUES (?, 'recovery', ?, X'01', ?, 'old')",
+            )
+            .bind(format!("c-{account}"))
+            .bind(account)
+            .bind(RECOVERY_WRAP.as_slice())
+            .execute(&db)
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO key_wraps (collection_id, recipient_kind, recipient_id, hpke_enc, wrapped_ck, ciphersuite)
+                 VALUES (?, 'phrase', ?, X'02', X'03', 'keep')",
+            )
+            .bind(format!("c-{account}"))
+            .bind(account)
+            .execute(&db)
+            .await
+            .unwrap();
+        }
+        sqlx::query(
+            "INSERT INTO attachments
+             (account_id, collection_id, attachment_id, state, chunk_size, chunk_count,
+              total_plaintext_size, total_ciphertext_size, created_at)
+             VALUES ('plain', 'c-plain', 'a', 'committed', 10, 1, 10, 26, 0)",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        db.close().await;
+        let path = dir.join("sealbook.db").to_str().unwrap().to_string();
+        (dir, path)
+    }
+
+    fn raw_bytes_of_every_database_file(path: &str) -> Vec<u8> {
+        let mut all = Vec::new();
+        for suffix in ["", "-wal", "-shm"] {
+            if let Ok(bytes) = std::fs::read(format!("{path}{suffix}")) {
+                all.extend(bytes);
+            }
+        }
+        all
+    }
+
+    fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+        haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
+    }
+
+    #[tokio::test]
+    async fn a_v2_database_migrates_to_v3() {
+        let (dir, path) = v2_database_with_recovery_material().await;
+        let db = open_migrated(&path).await.unwrap();
+
+        assert_eq!(schema_version(&db).await.unwrap(), 3);
+        let recovery_wraps: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM key_wraps WHERE recipient_kind = 'recovery'")
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        assert_eq!(recovery_wraps, 0);
+        let phrase_wraps: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM key_wraps WHERE recipient_kind = 'phrase'")
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        assert_eq!(phrase_wraps, 2, "only the recovery wraps go");
+        let accounts = columns(&db, "accounts").await;
+        assert!(!accounts.contains(&"kdf_salt".to_string()));
+        assert!(!accounts.contains(&"recovery_pending".to_string()));
+        assert!(accounts.contains(&"rotation_owed".to_string()));
+        assert!(!columns(&db, "attachments")
+            .await
+            .contains(&"total_plaintext_size".to_string()));
+        let owed: Vec<(String, String)> =
+            sqlx::query_as("SELECT id, rotation_owed FROM accounts ORDER BY id")
+                .fetch_all(&db)
+                .await
+                .unwrap();
+        assert_eq!(
+            owed,
+            vec![
+                ("plain".to_string(), "upgrade".to_string()),
+                ("recovering".to_string(), "recovery".to_string()),
+            ]
+        );
+        db.close().await;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn deleted_recovery_material_is_gone_from_every_database_file() {
+        let (dir, path) = v2_database_with_recovery_material().await;
+        let before = raw_bytes_of_every_database_file(&path);
+        assert!(
+            contains(&before, &RECOVERY_WRAP) && contains(&before, &SALT),
+            "the fixture must hold the bytes, or this test proves nothing"
+        );
+
+        let db = open_migrated(&path).await.unwrap();
+        // Read while the pool is still open, so the -wal and -shm files are as the
+        // server leaves them.
+        let after = raw_bytes_of_every_database_file(&path);
+        assert!(
+            !contains(&after, &RECOVERY_WRAP),
+            "recovery wrap left on disk"
+        );
+        assert!(!contains(&after, &SALT), "kdf salt left on disk");
+        let pending: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM meta WHERE k = 'scrub_pending'")
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        assert_eq!(pending, 0, "the flag is cleared once the scrub succeeds");
+        db.close().await;
+        let after_close = raw_bytes_of_every_database_file(&path);
+        assert!(!contains(&after_close, &RECOVERY_WRAP));
+        assert!(!contains(&after_close, &SALT));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn migrating_twice_is_a_no_op() {
+        let (dir, path) = v2_database_with_recovery_material().await;
+        let db = open_migrated(&path).await.unwrap();
+        sqlx::query("UPDATE accounts SET rotation_owed = NULL WHERE id = 'plain'")
+            .execute(&db)
+            .await
+            .unwrap();
+        db.close().await;
+
+        let db = open_migrated(&path).await.unwrap();
+        let owed: Option<String> =
+            sqlx::query_scalar("SELECT rotation_owed FROM accounts WHERE id = 'plain'")
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        assert_eq!(owed, None, "a second start must not re-impose the debt");
+        assert_eq!(schema_version(&db).await.unwrap(), 3);
+        db.close().await;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_pending_scrub_runs_at_open_and_clears_the_flag() {
+        let (dir, path) = v2_database_with_recovery_material().await;
+        let db = open_migrated(&path).await.unwrap();
+        // Leave secret bytes behind the way a build without secure_delete would,
+        // then ask for the scrub.
+        sqlx::query("PRAGMA secure_delete = OFF")
+            .execute(&db)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO meta (k, v) VALUES ('leftover', ?)")
+            .bind(RECOVERY_WRAP.as_slice())
+            .execute(&db)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM meta WHERE k = 'leftover'")
+            .execute(&db)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO meta (k, v) VALUES ('scrub_pending', 1)")
+            .execute(&db)
+            .await
+            .unwrap();
+        db.close().await;
+
+        let db = open_migrated(&path).await.unwrap();
+        let pending: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM meta WHERE k = 'scrub_pending'")
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        assert_eq!(pending, 0);
+        assert!(!contains(
+            &raw_bytes_of_every_database_file(&path),
+            &RECOVERY_WRAP
+        ));
+        db.close().await;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_failed_scrub_keeps_the_flag_and_the_server_still_opens() {
+        let (dir, path) = v2_database_with_recovery_material().await;
+        let db = open_migrated(&path).await.unwrap();
+        sqlx::query("INSERT INTO meta (k, v) VALUES ('scrub_pending', 1)")
+            .execute(&db)
+            .await
+            .unwrap();
+        // A reader on an older snapshot stops the checkpoint from truncating the
+        // log, so the scrub cannot finish.
+        let mut reader = db.acquire().await.unwrap();
+        sqlx::query("BEGIN").execute(&mut *reader).await.unwrap();
+        sqlx::query("SELECT COUNT(*) FROM meta")
+            .fetch_one(&mut *reader)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO meta (k, v) VALUES ('after-reader', 1)")
+            .execute(&db)
+            .await
+            .unwrap();
+
+        let second = open_migrated(&path).await.unwrap();
+        let pending: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM meta WHERE k = 'scrub_pending'")
+                .fetch_one(&second)
+                .await
+                .unwrap();
+        assert_eq!(
+            pending, 1,
+            "a failed scrub must be retried at the next start"
+        );
+        second.close().await;
+
+        sqlx::query("ROLLBACK").execute(&mut *reader).await.unwrap();
+        drop(reader);
         db.close().await;
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -1056,8 +1457,8 @@ mod tests {
         let path = dir.join("sealbook.db");
         let db = open_migrated(path.to_str().unwrap()).await.unwrap();
         sqlx::query(
-            "INSERT INTO accounts (id, username, opaque_record, kdf_salt, created_at)
-             VALUES ('account', 'account', X'', X'', 0)",
+            "INSERT INTO accounts (id, username, opaque_record, created_at)
+             VALUES ('account', 'account', X'', 0)",
         )
         .execute(&db)
         .await

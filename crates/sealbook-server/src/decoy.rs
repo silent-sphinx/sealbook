@@ -12,8 +12,8 @@
 
 use sealbook_crypto::{
     decoy_seed, device_hpke_public_from_ikm, phrase_recovery_keys, signing_from_seeds,
-    wrap_for_phrase_with_nonce, CollectionKey, CryptoError, DeviceSigningSecrets, DECOY_KEY_LEN,
-    NONCE_LEN,
+    wrap_for_phrase_with_nonce, CollectionKey, CryptoError, DeviceSigningSecrets, WrapBinding,
+    DECOY_KEY_LEN, NONCE_LEN,
 };
 use sealbook_protocol::{DevicePublicKeys, KeyWrapBody, RosterBody, RosterSignerBody};
 use uuid::{Builder, Uuid};
@@ -79,7 +79,15 @@ pub(crate) fn recovery_decoy(
     // used once.
     let mut nonce = [0u8; NONCE_LEN];
     nonce.copy_from_slice(&seed("wrap-nonce")?[..NONCE_LEN]);
-    let wrap = wrap_for_phrase_with_nonce(&entropy, &ck, &nonce)?;
+    let wrap = wrap_for_phrase_with_nonce(
+        &entropy,
+        &ck,
+        &WrapBinding {
+            collection_id,
+            key_epoch,
+        },
+        &nonce,
+    )?;
     Ok(RecoveryDecoy {
         collection_id,
         wrap: KeyWrapBody {
