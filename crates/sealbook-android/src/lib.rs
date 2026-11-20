@@ -2,10 +2,10 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sealbook_crypto::{
     content_digest, decrypt_object, encrypt_object, key_rotation_transcript, key_wraps_digest,
-    manifest_digest, object_aad, rotated_objects_digest, rotation_recovery_payload, sign,
-    unwrap_collection_key, unwrap_for_device, wrap_for_device, CollectionKey, DeviceHpkePublic,
-    DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets, EncryptedObject, ManifestDigestEntry,
-    ObjectDigestEntry, RecoveryWrap, WrapBinding, WrapDigestEntry, XWING_CIPHERSUITE,
+    manifest_digest, object_aad, rotated_objects_digest, rotation_phrase_payload, sign,
+    unwrap_for_device, wrap_for_device, CollectionKey, DeviceHpkePublic, DeviceHpkeSecret,
+    DeviceHpkeWrap, DeviceSigningSecrets, EncryptedObject, ManifestDigestEntry, ObjectDigestEntry,
+    WrapBinding, WrapDigestEntry, WrapForm, XWING_CIPHERSUITE,
 };
 use sealbook_protocol::envelope::{open_envelope, seal_envelope, Unsealed};
 use sealbook_protocol::{DevicePublicKeys, RosterBody, RosterSignerBody, SEALED_CONTENT_TYPE};
@@ -74,68 +74,53 @@ impl From<sealbook_crypto::CryptoError> for CryptoError {
 
 // ── Collection Key Unwrap ──
 
+/// A collection key opened from a device wrap, and whether the wrap was the
+/// unbound form, which the roster check refuses once an account has migrated.
+#[derive(uniffi::Record)]
+pub struct UnwrappedKey {
+    pub collection_key: String,
+    pub legacy_wrap: bool,
+}
+
 #[uniffi::export]
 pub fn unwrap_ck(
-    password: String,
-    kdf_salt_b64: String,
     hpke_sk_b64: String,
     device_id: String,
     collection_id: String,
     key_epoch: u64,
     wraps_json: String,
-) -> Result<String, CryptoError> {
+) -> Result<UnwrappedKey, CryptoError> {
     #[derive(serde::Deserialize)]
     struct WrapIn {
         recipient_kind: String,
         recipient_id: String,
         hpke_enc: String,
         wrapped_ck: String,
-        ciphersuite: String,
     }
 
     let wraps: Vec<WrapIn> = serde_json::from_str(&wraps_json)
         .map_err(|e| CryptoError::General { msg: e.to_string() })?;
-
-    if let Some(device) = wraps
+    let device = wraps
         .iter()
         .find(|w| w.recipient_kind == "device" && w.recipient_id == device_id)
-    {
-        let key = unwrap_for_device(
-            &DeviceHpkeSecret::from_bytes(unb64(&hpke_sk_b64)?),
-            &DeviceHpkeWrap {
-                enc: unb64(&device.hpke_enc)?,
-                ciphertext: unb64(&device.wrapped_ck)?,
-                ciphersuite: XWING_CIPHERSUITE,
-            },
-            &WrapBinding {
-                collection_id: parse_uuid(&collection_id)?,
-                key_epoch,
-            },
-        )?;
-        return Ok(b64(key.as_bytes()));
-    }
-    if let Some(recovery) = wraps.iter().find(|w| w.recipient_kind == "recovery") {
-        let nonce_bytes = unb64(&recovery.hpke_enc)?;
-        if nonce_bytes.len() != 24 {
-            return Err(CryptoError::General {
-                msg: "recovery nonce must be 24 bytes".into(),
-            });
-        }
-        let mut nonce = [0u8; 24];
-        nonce.copy_from_slice(&nonce_bytes);
-        let key = unwrap_collection_key(
-            password.as_bytes(),
-            &unb64(&kdf_salt_b64)?,
-            &RecoveryWrap {
-                nonce,
-                ciphertext: unb64(&recovery.wrapped_ck)?,
-                ciphersuite: recovery.ciphersuite.clone(),
-            },
-        )?;
-        return Ok(b64(key.as_bytes()));
-    }
-    Err(CryptoError::General {
-        msg: "no collection key wrap found".into(),
+        .ok_or_else(|| CryptoError::General {
+            msg: "no collection key wrap found".into(),
+        })?;
+    let (key, form) = unwrap_for_device(
+        &DeviceHpkeSecret::from_bytes(unb64(&hpke_sk_b64)?),
+        &DeviceHpkeWrap {
+            enc: unb64(&device.hpke_enc)?,
+            ciphertext: unb64(&device.wrapped_ck)?,
+            ciphersuite: XWING_CIPHERSUITE,
+        },
+        &WrapBinding {
+            collection_id: parse_uuid(&collection_id)?,
+            key_epoch,
+        },
+    )?;
+    Ok(UnwrappedKey {
+        collection_key: b64(key.as_bytes()),
+        legacy_wrap: form == WrapForm::Legacy,
     })
 }
 
@@ -373,11 +358,10 @@ pub struct RotationObject {
     pub tombstone: bool,
 }
 
-/// The account-level recovery material a rotation installs, as the signature
-/// covers it. The four byte fields are base64url.
+/// The phrase record a rotation installs, as the signature covers it. The three
+/// byte fields are base64url.
 #[derive(uniffi::Record)]
 pub struct RotationRecovery {
-    pub kdf_salt: String,
     pub phrase_mldsa_pk: String,
     pub phrase_ed25519_pk: String,
     pub phrase_lookup_id: String,
@@ -396,15 +380,14 @@ pub fn rotation_sign(
     ed25519_sk_b64: String,
     collection_id: String,
     // Empty to rotate without revoking a device, which is how a phrase change and
-    // a completed recovery rotate.
-    revoked_device_id: String,
+    // a migration rotate. Strictly ascending, as the transcript covers them in order.
+    revoked_device_ids: Vec<String>,
     key_epoch: u64,
     wraps: Vec<RotationWrap>,
     objects: Vec<RotationObject>,
     manifest_digest_b64: String,
-    // The KDF salt and phrase record this rotation installs. Signed so that a
-    // modified request body cannot swap in recovery material the account holder
-    // never produced.
+    // The phrase record this rotation installs. Signed so that a modified request
+    // body cannot swap in recovery material the account holder never produced.
     recovery: RotationRecovery,
 ) -> Result<DualSigResult, CryptoError> {
     let wrap_bytes = wraps
@@ -447,20 +430,18 @@ pub fn rotation_sign(
         })
         .collect();
 
-    let revoked = if revoked_device_id.trim().is_empty() {
-        None
-    } else {
-        Some(parse_uuid(&revoked_device_id)?)
-    };
+    let revoked = revoked_device_ids
+        .iter()
+        .map(|id| parse_uuid(id))
+        .collect::<Result<Vec<_>, CryptoError>>()?;
     let transcript = key_rotation_transcript(
         parse_uuid(&collection_id)?,
-        revoked,
+        &revoked,
         key_epoch,
         &key_wraps_digest(&wrap_entries),
         &rotated_objects_digest(&object_entries),
         &digest32(&manifest_digest_b64)?,
-        &rotation_recovery_payload(
-            &unb64(&recovery.kdf_salt)?,
+        &rotation_phrase_payload(
             &unb64(&recovery.phrase_mldsa_pk)?,
             &unb64(&recovery.phrase_ed25519_pk)?,
             &unb64(&recovery.phrase_lookup_id)?,
@@ -917,9 +898,9 @@ mod safety_tests {
 
     #[test]
     fn a_dropped_pinned_requirement_is_fatal() {
-        let profile = r#"{"protocol":"sealbook-v1","object_aead":"XChaCha20-Poly1305-256",
+        let profile = r#"{"protocol":"sealbook-v2","object_aead":"XChaCha20-Poly1305-256",
             "signature_algorithms":["ML-DSA-65","Ed25519"],
-            "hpke_ciphersuite":"hpke-xwing-sha256-chacha20poly1305",
+            "hpke_ciphersuite":"hpke-xwing-draft06-sha256-chacha20poly1305",
             "opaque_ksf":"argon2id-m65536-t3-p1","tls_kx_pq_required":true,
             "opaque_requires_device_proof":false}"#;
         assert!(!server_safety_check(profile.into(), None, None).fatal);

@@ -22,14 +22,13 @@ use sealbook_core::{
 use sealbook_crypto::RosterPin;
 use sealbook_crypto::{
     content_digest, decrypt_object, encrypt_object, enrollment_transcript, generate_device_hpke,
-    generate_device_signing, generate_kdf_salt, generate_phrase, key_rotation_transcript,
-    key_wraps_digest, manifest_bucket_digest, manifest_bucket_of, manifest_digest,
-    manifest_transcript, object_aad, phrase_lookup_id, phrase_recovery_public,
-    rotated_objects_digest, rotation_recovery_payload, sign, unwrap_collection_key,
-    unwrap_for_device, wrap_collection_key, wrap_for_device, wrap_for_phrase, CollectionKey,
-    DeviceHpkePublic, DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets, EncryptedObject,
-    ManifestDigestEntry, ObjectDigestEntry, RecoveryWrap, WrapBinding, WrapDigestEntry,
-    MANIFEST_BUCKETS, PHRASE_CIPHERSUITE, PHRASE_SCHEME, RECOVERY_CIPHERSUITE, XWING_CIPHERSUITE,
+    generate_device_signing, generate_phrase, key_rotation_transcript, key_wraps_digest,
+    manifest_bucket_digest, manifest_bucket_of, manifest_digest, manifest_transcript, object_aad,
+    phrase_lookup_id, phrase_recovery_public, rotated_objects_digest, rotation_phrase_payload,
+    sign, unwrap_for_device, wrap_for_device, wrap_for_phrase, CollectionKey, DeviceHpkePublic,
+    DeviceHpkeSecret, DeviceHpkeWrap, DeviceSigningSecrets, EncryptedObject, ManifestDigestEntry,
+    ObjectDigestEntry, WrapBinding, WrapDigestEntry, WrapForm, MANIFEST_BUCKETS,
+    PHRASE_CIPHERSUITE, PHRASE_SCHEME, XWING_CIPHERSUITE,
 };
 use sealbook_protocol::envelope::{open_envelope, seal_envelope, Unsealed};
 use sealbook_protocol::{DevicePublicKeys, RosterBody, RosterSignerBody, SEALED_CONTENT_TYPE};
@@ -80,14 +79,11 @@ pub struct Enrollment {
     mldsa_pk: String,
     ed25519_sk: String,
     ed25519_pk: String,
-    kdf_salt: String,
     collection_key: String,
     enrollment_mldsa: String,
     enrollment_ed25519: String,
     device_enc: String,
     device_wrapped_ck: String,
-    recovery_nonce: String,
-    recovery_wrapped_ck: String,
     phrase: String,
     phrase_nonce: String,
     phrase_wrapped_ck: String,
@@ -97,7 +93,6 @@ pub struct Enrollment {
     phrase_scheme: &'static str,
     phrase_ciphersuite: &'static str,
     xwing_ciphersuite: &'static str,
-    recovery_ciphersuite: &'static str,
 }
 
 #[derive(Deserialize)]
@@ -106,7 +101,6 @@ struct WrapIn {
     recipient_id: String,
     hpke_enc: String,
     wrapped_ck: String,
-    ciphersuite: String,
 }
 
 /// Everything a registration used to mint, kept for the web's own test shim:
@@ -114,24 +108,18 @@ struct WrapIn {
 /// material without a round trip. Production registers through
 /// `core_new_registration`.
 #[wasm_bindgen]
-pub fn create_enrollment(password: &str, collection_id: &str) -> Result<Ts<Enrollment>, JsError> {
+pub fn create_enrollment(collection_id: &str) -> Result<Ts<Enrollment>, JsError> {
     let collection_id = parse_uuid(collection_id)?;
     let (hpke_sk, hpke_pk) = generate_device_hpke().map_err(js_err)?;
     let (sign_sk, sign_pk) = generate_device_signing().map_err(js_err)?;
     let ck = CollectionKey::generate();
-    let salt = generate_kdf_salt();
-    let recovery = wrap_collection_key(password.as_bytes(), &salt, &ck).map_err(js_err)?;
     let (phrase, phrase_entropy) = generate_phrase().map_err(js_err)?;
-    let phrase_wrap = wrap_for_phrase(&phrase_entropy, &ck).map_err(js_err)?;
-    let device_wrap = wrap_for_device(
-        &hpke_pk,
-        &ck,
-        &WrapBinding {
-            collection_id,
-            key_epoch: 1,
-        },
-    )
-    .map_err(js_err)?;
+    let binding = WrapBinding {
+        collection_id,
+        key_epoch: 1,
+    };
+    let phrase_wrap = wrap_for_phrase(&phrase_entropy, &ck, &binding).map_err(js_err)?;
+    let device_wrap = wrap_for_device(&hpke_pk, &ck, &binding).map_err(js_err)?;
     let device_id = Uuid::new_v4();
     let transcript = enrollment_transcript(
         device_id,
@@ -149,14 +137,11 @@ pub fn create_enrollment(password: &str, collection_id: &str) -> Result<Ts<Enrol
         mldsa_pk: b64(&sign_pk.mldsa_pk),
         ed25519_sk: b64(&sign_sk.ed25519_sk),
         ed25519_pk: b64(&sign_pk.ed25519_pk),
-        kdf_salt: b64(&salt),
         collection_key: b64(ck.as_bytes()),
         enrollment_mldsa: b64(&sig.mldsa),
         enrollment_ed25519: b64(&sig.ed25519),
         device_enc: b64(&device_wrap.enc),
         device_wrapped_ck: b64(&device_wrap.ciphertext),
-        recovery_nonce: b64(&recovery.nonce),
-        recovery_wrapped_ck: b64(&recovery.ciphertext),
         phrase,
         phrase_nonce: b64(&phrase_wrap.nonce),
         phrase_wrapped_ck: b64(&phrase_wrap.ciphertext),
@@ -166,7 +151,6 @@ pub fn create_enrollment(password: &str, collection_id: &str) -> Result<Ts<Enrol
         phrase_scheme: PHRASE_SCHEME,
         phrase_ciphersuite: PHRASE_CIPHERSUITE,
         xwing_ciphersuite: XWING_CIPHERSUITE,
-        recovery_ciphersuite: RECOVERY_CIPHERSUITE,
     }
     .into_ts()?)
 }
@@ -186,56 +170,45 @@ pub fn local_storage_key(password: &str, salt_b64: &str, suite: &str) -> Result<
     Ok(b64(&key))
 }
 
+/// A collection key opened from a device wrap, and whether the wrap was the
+/// unbound form, which the roster check refuses once an account has migrated.
+#[derive(Serialize, Tsify)]
+pub struct UnwrappedKey {
+    collection_key: String,
+    legacy_wrap: bool,
+}
+
 #[wasm_bindgen]
 pub fn unwrap_ck(
-    password: &str,
-    kdf_salt_b64: &str,
     hpke_sk_b64: &str,
     device_id: &str,
     collection_id: &str,
     key_epoch: u32,
     wraps_json: &str,
-) -> Result<String, JsError> {
+) -> Result<Ts<UnwrappedKey>, JsError> {
     let wraps: Vec<WrapIn> = serde_json::from_str(wraps_json).map_err(js_err)?;
-    if let Some(device) = wraps
+    let device = wraps
         .iter()
         .find(|w| w.recipient_kind == "device" && w.recipient_id == device_id)
-    {
-        let key = unwrap_for_device(
-            &DeviceHpkeSecret::from_bytes(unb64(hpke_sk_b64)?),
-            &DeviceHpkeWrap {
-                enc: unb64(&device.hpke_enc)?,
-                ciphertext: unb64(&device.wrapped_ck)?,
-                ciphersuite: XWING_CIPHERSUITE,
-            },
-            &WrapBinding {
-                collection_id: parse_uuid(collection_id)?,
-                key_epoch: u64::from(key_epoch),
-            },
-        )
-        .map_err(js_err)?;
-        return Ok(b64(key.as_bytes()));
+        .ok_or_else(|| JsError::new("no collection key wrap"))?;
+    let (key, form) = unwrap_for_device(
+        &DeviceHpkeSecret::from_bytes(unb64(hpke_sk_b64)?),
+        &DeviceHpkeWrap {
+            enc: unb64(&device.hpke_enc)?,
+            ciphertext: unb64(&device.wrapped_ck)?,
+            ciphersuite: XWING_CIPHERSUITE,
+        },
+        &WrapBinding {
+            collection_id: parse_uuid(collection_id)?,
+            key_epoch: u64::from(key_epoch),
+        },
+    )
+    .map_err(js_err)?;
+    Ok(UnwrappedKey {
+        collection_key: b64(key.as_bytes()),
+        legacy_wrap: form == WrapForm::Legacy,
     }
-    if let Some(recovery) = wraps.iter().find(|w| w.recipient_kind == "recovery") {
-        let nonce_bytes = unb64(&recovery.hpke_enc)?;
-        if nonce_bytes.len() != 24 {
-            return Err(JsError::new("recovery nonce length"));
-        }
-        let mut nonce = [0u8; 24];
-        nonce.copy_from_slice(&nonce_bytes);
-        let key = unwrap_collection_key(
-            password.as_bytes(),
-            &unb64(kdf_salt_b64)?,
-            &RecoveryWrap {
-                nonce,
-                ciphertext: unb64(&recovery.wrapped_ck)?,
-                ciphersuite: recovery.ciphersuite.clone(),
-            },
-        )
-        .map_err(js_err)?;
-        return Ok(b64(key.as_bytes()));
-    }
-    Err(JsError::new("no collection key wrap"))
+    .into_ts()?)
 }
 
 #[derive(Serialize, Tsify)]
@@ -499,11 +472,9 @@ struct RotationObjectIn {
     tombstone: bool,
 }
 
-/// The account-level recovery material a rotation installs, as the signature
-/// covers it.
+/// The phrase record a rotation installs, as the signature covers it.
 #[derive(Serialize, Deserialize)]
 struct RotationRecoveryIn {
-    kdf_salt: String,
     phrase_mldsa_pk: String,
     phrase_ed25519_pk: String,
     phrase_lookup_id: String,
@@ -523,16 +494,16 @@ pub fn rotation_sign(
     mldsa_seed_b64: &str,
     ed25519_sk_b64: &str,
     collection_id: &str,
-    // `revoked_device_id` may be an empty string, to rotate without revoking a
-    // device — which is how a phrase change and a completed recovery rotate.
-    revoked_device_id: &str,
+    // Empty to rotate without revoking a device, which is how a phrase change
+    // rotates. Ascending, as the transcript covers them in order.
+    revoked_device_ids: Vec<String>,
     key_epoch: u64,
     wraps_json: &str,
     objects_json: &str,
     manifest_digest_b64: &str,
-    // The KDF salt and phrase record this rotation installs, as
-    // `{"kdf_salt","phrase_mldsa_pk","phrase_ed25519_pk","phrase_lookup_id","phrase_scheme"}`
-    // — base64url for the four byte fields. Signed so that a modified request
+    // The phrase record this rotation installs, as
+    // `{"phrase_mldsa_pk","phrase_ed25519_pk","phrase_lookup_id","phrase_scheme"}`
+    // with base64url for the three byte fields. Signed so that a modified request
     // body cannot swap in recovery material the account holder never produced.
     recovery_json: &str,
 ) -> Result<String, JsError> {
@@ -580,20 +551,18 @@ pub fn rotation_sign(
         })
         .collect();
 
-    let revoked = if revoked_device_id.trim().is_empty() {
-        None
-    } else {
-        Some(parse_uuid(revoked_device_id)?)
-    };
+    let revoked = revoked_device_ids
+        .iter()
+        .map(|id| parse_uuid(id))
+        .collect::<Result<Vec<_>, JsError>>()?;
     let transcript = key_rotation_transcript(
         parse_uuid(collection_id)?,
-        revoked,
+        &revoked,
         key_epoch,
         &key_wraps_digest(&wrap_entries),
         &rotated_objects_digest(&object_entries),
         &digest32(manifest_digest_b64)?,
-        &rotation_recovery_payload(
-            &unb64(&recovery.kdf_salt)?,
+        &rotation_phrase_payload(
             &unb64(&recovery.phrase_mldsa_pk)?,
             &unb64(&recovery.phrase_ed25519_pk)?,
             &unb64(&recovery.phrase_lookup_id)?,
@@ -903,6 +872,7 @@ pub fn core_roster_accept_key(
     context: Ts<RosterContext>,
     ck_b64: &str,
     key_epoch: u64,
+    legacy_wrap: bool,
     status: u16,
     body: &str,
 ) -> Result<Ts<VerifiedRoster>, JsError> {
@@ -911,13 +881,13 @@ pub fn core_roster_accept_key(
         headers: Vec::new(),
         body: body.as_bytes().to_vec(),
     };
-    Ok(sealbook_core::roster_accept_key(
-        &context.to_rust()?,
-        &core_session(ck_b64, key_epoch)?,
-        &response,
+    let mut session = core_session(ck_b64, key_epoch)?;
+    session.legacy_wrap = legacy_wrap;
+    Ok(
+        sealbook_core::roster_accept_key(&context.to_rust()?, &session, &response)
+            .map_err(core_err)?
+            .into_ts()?,
     )
-    .map_err(core_err)?
-    .into_ts()?)
 }
 
 /// Verifies a roster this device sealed itself, once the server has accepted it.
@@ -1071,12 +1041,6 @@ pub fn core_manifest_verify(
     .into_ts()?)
 }
 
-/// The rule for a server that served objects with no manifest at all.
-#[wasm_bindgen]
-pub fn core_manifest_absence_ok(context: Ts<ManifestContext>) -> Result<(), JsError> {
-    sealbook_core::manifest_absence_ok(&context.to_rust()?).map_err(core_err)
-}
-
 /// The bucketed view of a collection whose every entry is in hand.
 #[wasm_bindgen]
 pub fn core_manifest_buckets_from_whole(
@@ -1199,6 +1163,7 @@ fn core_session(ck_b64: &str, key_epoch: u64) -> Result<CoreSession, JsError> {
         collection_key,
         key_epoch,
         verified_roster: None,
+        legacy_wrap: false,
     })
 }
 
@@ -1331,7 +1296,6 @@ pub fn core_rotation_wraps(
     new_key_epoch: u32,
     recipients: Ts<CoreDeviceList>,
     username: &str,
-    password: &str,
 ) -> Result<Ts<sealbook_core::CoreRotationWraps>, JsError> {
     Ok(sealbook_core::rotation_wraps(
         new_ck_b64,
@@ -1339,7 +1303,6 @@ pub fn core_rotation_wraps(
         u64::from(new_key_epoch),
         &recipients.to_rust()?.0,
         username,
-        password,
     )
     .map_err(core_err)?
     .into_ts()?)
@@ -1349,21 +1312,53 @@ pub fn core_rotation_wraps(
 #[wasm_bindgen]
 pub fn core_rotation_recipients(
     self_device_id: &str,
-    revoke_device_id: Option<String>,
+    revoke_device_ids: Vec<String>,
     devices: Ts<CoreDeviceList>,
 ) -> Result<Ts<CoreDeviceList>, JsError> {
-    let revoked = revoke_device_id
-        .as_deref()
-        .filter(|id| !id.is_empty())
-        .map(parse_uuid)
-        .transpose()?;
+    let revoked = revoke_device_ids
+        .iter()
+        .map(|id| parse_uuid(id))
+        .collect::<Result<Vec<_>, JsError>>()?;
     let remaining = sealbook_core::rotation_recipients(
         parse_uuid(self_device_id)?,
-        revoked,
+        &revoked,
         &devices.to_rust()?.0,
     )
     .map_err(core_err)?;
     Ok(CoreDeviceList(remaining).into_ts()?)
+}
+
+/// As `core_reseal_row`, moving a payload that declares the older schema to the
+/// current one on its way through, and saying whether it did.
+#[wasm_bindgen]
+pub fn core_reseal_row_upgrading(
+    old_ck_b64: &str,
+    new_ck_b64: &str,
+    collection_id: &str,
+    row: Ts<ResealRow>,
+) -> Result<Ts<sealbook_core::CoreResealed>, JsError> {
+    Ok(sealbook_core::reseal_row_upgrading(
+        old_ck_b64,
+        new_ck_b64,
+        parse_uuid(collection_id)?,
+        &row.to_rust()?,
+    )
+    .map_err(core_err)?
+    .into_ts()?)
+}
+
+/// A payload at the current schema, or `None` when it already is one or is not
+/// one this build knows how to move.
+#[wasm_bindgen]
+pub fn core_payload_upgrade(content_type: &str, raw: &str) -> Option<String> {
+    sealbook_core::payload_upgrade(content_type, raw)
+}
+
+/// The key that names an object's container in its payload, for a content type
+/// that has one.
+#[wasm_bindgen]
+pub fn core_container_key(content_type: &str) -> Option<String> {
+    sealbook_core::container_key(content_type).map(str::to_string)
 }
 
 /// One planned row re-sealed under the new key, at the revision the plan gave
@@ -1542,6 +1537,7 @@ pub fn core_pair_approve(
     verified: Ts<VerifiedRoster>,
     response: Ts<CorePairResponse>,
     preview: Ts<CorePairPreview>,
+    manifest_seq: u64,
 ) -> Result<Ts<PairApproval>, JsError> {
     Ok(sealbook_core::pair_approve(
         &core_secrets(mldsa_seed_b64, ed25519_sk_b64)?,
@@ -1550,6 +1546,7 @@ pub fn core_pair_approve(
         &verified.to_rust()?,
         &response.to_rust()?,
         &preview.to_rust()?,
+        manifest_seq,
     )
     .map_err(core_err)?
     .into_ts()?)
@@ -1660,19 +1657,13 @@ pub fn core_register_start_accept(body: &str) -> Result<String, JsError> {
 #[wasm_bindgen]
 pub fn core_register_finish_request(
     username: &str,
-    password: &str,
     upload_b64: &str,
     identity: Ts<RegisterIdentity>,
 ) -> Result<Ts<Registering>, JsError> {
     Ok(
-        sealbook_core::register_finish_request(
-            username,
-            password,
-            upload_b64,
-            &identity.to_rust()?,
-        )
-        .map_err(core_err)?
-        .into_ts()?,
+        sealbook_core::register_finish_request(username, upload_b64, &identity.to_rust()?)
+            .map_err(core_err)?
+            .into_ts()?,
     )
 }
 
@@ -1745,16 +1736,10 @@ pub fn core_login_finish_request(
 /// Opens the collection key and returns the state to persist. The caller must
 /// sync the roster before anything reads or writes the vault.
 #[wasm_bindgen]
-pub fn core_login_accept(
-    state: Ts<CoreDeviceState>,
-    password: &str,
-    body: &str,
-) -> Result<Ts<LoggedIn>, JsError> {
-    Ok(
-        sealbook_core::login_accept(&state.to_rust()?, password, body)
-            .map_err(core_err)?
-            .into_ts()?,
-    )
+pub fn core_login_accept(state: Ts<CoreDeviceState>, body: &str) -> Result<Ts<LoggedIn>, JsError> {
+    Ok(sealbook_core::login_accept(&state.to_rust()?, body)
+        .map_err(core_err)?
+        .into_ts()?)
 }
 
 #[wasm_bindgen]
@@ -1784,7 +1769,6 @@ pub fn core_recover_start_accept(phrase: &str, body: &str) -> Result<Ts<RecoverS
 pub fn core_recover_finish_request(
     username: &str,
     phrase: &str,
-    password: &str,
     started: Ts<RecoverStarted>,
     device: Ts<CoreDeviceSecrets>,
     upload_b64: &str,
@@ -1792,7 +1776,6 @@ pub fn core_recover_finish_request(
     Ok(sealbook_core::recover_finish_request(
         username,
         phrase,
-        password,
         &started.to_rust()?,
         &device.to_rust()?,
         upload_b64,
@@ -1863,25 +1846,18 @@ pub fn core_password_change_start_accept(body: &str) -> Result<Ts<PasswordChange
         .into_ts()?)
 }
 
-/// The new verifier and the collection key re-wrapped under the new password,
-/// with a signature covering both.
+/// The new verifier, signed. The password wraps nothing, so nothing is re-wrapped.
 #[wasm_bindgen]
 pub fn core_change_password_request(
     state: Ts<CoreDeviceState>,
-    ck_b64: &str,
-    new_password: &str,
     upload_b64: &str,
     started: Ts<PasswordChangeStarted>,
 ) -> Result<Ts<PasswordChange>, JsError> {
-    Ok(sealbook_core::change_password_request(
-        &state.to_rust()?,
-        &core_session(ck_b64, 0)?,
-        new_password,
-        upload_b64,
-        &started.to_rust()?,
+    Ok(
+        sealbook_core::change_password_request(&state.to_rust()?, upload_b64, &started.to_rust()?)
+            .map_err(core_err)?
+            .into_ts()?,
     )
-    .map_err(core_err)?
-    .into_ts()?)
 }
 
 #[wasm_bindgen]
@@ -1937,6 +1913,18 @@ pub fn core_attachment_plan(total_plaintext_size: u64) -> Result<Ts<AttachmentPl
 #[wasm_bindgen]
 pub fn core_attachment_ranges(plan: Ts<AttachmentPlan>) -> Result<Ts<ChunkRangeList>, JsError> {
     Ok(ChunkRangeList(sealbook_core::attachment_ranges(&plan.to_rust()?)).into_ts()?)
+}
+
+/// The length a download is cut to, once its padded copy has been checked
+/// against what the owning record says the file is.
+#[wasm_bindgen]
+pub fn core_attachment_read_len(
+    attachment_id: &str,
+    byte_size: u64,
+    decrypted_len: u64,
+) -> Result<u64, JsError> {
+    sealbook_core::attachment_read_len(parse_uuid(attachment_id)?, byte_size, decrypted_len)
+        .map_err(core_err)
 }
 
 #[wasm_bindgen]
@@ -2231,6 +2219,7 @@ pub fn core_notebook_write(
     archived: bool,
     hide_from_all: bool,
     previous_raw: Option<String>,
+    now: &str,
 ) -> Result<String, JsError> {
     sealbook_core::notebook_write(
         name,
@@ -2238,6 +2227,7 @@ pub fn core_notebook_write(
         archived,
         hide_from_all,
         previous_raw.as_deref(),
+        now,
     )
     .map_err(core_err)
 }
@@ -2417,8 +2407,9 @@ pub fn core_bookmark_collection_parse(
 #[wasm_bindgen]
 pub fn core_bookmark_collection_write(
     draft: Ts<CoreBookmarkCollectionDraft>,
+    now: &str,
 ) -> Result<String, JsError> {
-    sealbook_core::bookmark_collection_write(&draft.to_rust()?).map_err(core_err)
+    sealbook_core::bookmark_collection_write(&draft.to_rust()?, now).map_err(core_err)
 }
 
 /// The name to show for a bookmark's collection. One that is gone shows the
@@ -2505,8 +2496,8 @@ pub fn core_task_list_parse(id: &str, raw: &str) -> Result<Ts<CoreTaskList>, JsE
 }
 
 #[wasm_bindgen]
-pub fn core_task_list_write(draft: Ts<CoreTaskListDraft>) -> Result<String, JsError> {
-    sealbook_core::task_list_write(&draft.to_rust()?).map_err(core_err)
+pub fn core_task_list_write(draft: Ts<CoreTaskListDraft>, now: &str) -> Result<String, JsError> {
+    sealbook_core::task_list_write(&draft.to_rust()?, now).map_err(core_err)
 }
 
 /// The name to show for a task's list. One that is gone shows the default
@@ -2714,8 +2705,8 @@ pub fn core_calendar_parse(id: &str, raw: &str) -> Result<Ts<CoreCalendar>, JsEr
 /// did not change survive the write. Throws on a payload from a newer schema
 /// major, which this build may read but must not write over.
 #[wasm_bindgen]
-pub fn core_calendar_write(draft: Ts<CoreCalendarDraft>) -> Result<String, JsError> {
-    sealbook_core::calendar_write(&draft.to_rust()?).map_err(core_err)
+pub fn core_calendar_write(draft: Ts<CoreCalendarDraft>, now: &str) -> Result<String, JsError> {
+    sealbook_core::calendar_write(&draft.to_rust()?, now).map_err(core_err)
 }
 
 /// The days a repeat rule lands on between two dates, as `YYYY-MM-DD`. The
@@ -2870,8 +2861,8 @@ pub fn core_event_parse(id: &str, raw: &str) -> Result<Ts<CoreCalendarEvent>, Js
 /// Serialises an event onto `draft.raw`. A repeat rule core cannot name rides
 /// through in `unreadable_recurrence` rather than being dropped.
 #[wasm_bindgen]
-pub fn core_event_write(draft: Ts<CoreCalendarEventDraft>) -> Result<String, JsError> {
-    sealbook_core::event_write(&draft.to_rust()?).map_err(core_err)
+pub fn core_event_write(draft: Ts<CoreCalendarEventDraft>, now: &str) -> Result<String, JsError> {
+    sealbook_core::event_write(&draft.to_rust()?, now).map_err(core_err)
 }
 
 /// The reminders an event editor offers, in minutes before the start.
@@ -2961,8 +2952,11 @@ pub fn core_address_book_parse(id: &str, raw: &str) -> Result<Ts<CoreAddressBook
 }
 
 #[wasm_bindgen]
-pub fn core_address_book_write(draft: Ts<CoreAddressBookDraft>) -> Result<String, JsError> {
-    sealbook_core::address_book_write(&draft.to_rust()?).map_err(core_err)
+pub fn core_address_book_write(
+    draft: Ts<CoreAddressBookDraft>,
+    now: &str,
+) -> Result<String, JsError> {
+    sealbook_core::address_book_write(&draft.to_rust()?, now).map_err(core_err)
 }
 
 /// An address book's stored colour, or one derived from its id.
@@ -3354,12 +3348,6 @@ pub fn core_order_bookmarks(
         &items.to_rust()?.0,
         sort.to_rust()?,
     ))
-}
-
-/// The warning for an account whose roster predates key commitments.
-#[wasm_bindgen]
-pub fn core_legacy_roster_message() -> String {
-    sealbook_core::legacy_roster_message()
 }
 
 /// The sentence core words for an error, given the JSON it crossed in.
