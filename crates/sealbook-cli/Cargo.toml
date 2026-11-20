@@ -15,12 +15,15 @@ chacha20poly1305.workspace = true
 clap.workspace = true
 hex.workspace = true
 jiff.workspace = true
+# keyring 3 has no default backend: without one it falls back to an in-memory
+# store, and the state file's key is lost when the process exits.
 keyring.workspace = true
 # Draws the pairing code as a QR in the terminal, for an approving phone to scan.
 qrcode = { version = "0.14", default-features = false }
 rand.workspace = true
 rustls-pki-types.workspace = true
 sealbook-client = { path = "../sealbook-client" }
+sealbook-core = { path = "../sealbook-core", features = ["strength"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -28,3 +31,12 @@ time = { workspace = true, features = ["formatting"] }
 tokio.workspace = true
 uuid.workspace = true
 rpassword.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { workspace = true, features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { workspace = true, features = ["windows-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { workspace = true, features = ["linux-native-sync-persistent", "crypto-rust"] }

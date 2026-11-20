@@ -441,7 +441,7 @@ pub async fn apply_plan(client: &mut SealbookClient, plan: &CoreTaskPlan, now: &
         rest = tail;
     }
     for write in &plan.lists {
-        let body = sealbook_client::task_list_write(&write.draft)?;
+        let body = sealbook_client::task_list_write(&write.draft, now)?;
         client
             .put_task_list(write.id.parse()?, &body)
             .await
@@ -869,14 +869,17 @@ pub async fn run_lists(client: &mut SealbookClient, command: TasklistCommand) ->
                 .transpose()?
                 .map(|id| id.to_string());
             let id = Uuid::new_v4();
-            let body = task_list_write(&CoreTaskListDraft {
-                name: name.clone(),
-                parent_id,
-                color,
-                archived: false,
-                hide_from_all: false,
-                raw: None,
-            })?;
+            let body = task_list_write(
+                &CoreTaskListDraft {
+                    name: name.clone(),
+                    parent_id,
+                    color,
+                    archived: false,
+                    hide_from_all: false,
+                    raw: None,
+                },
+                &now,
+            )?;
             client
                 .put_task_list(id, &body)
                 .await
@@ -899,7 +902,7 @@ pub async fn run_lists(client: &mut SealbookClient, command: TasklistCommand) ->
             if color.is_some() {
                 draft.color = color;
             }
-            let body = task_list_write(&draft)?;
+            let body = task_list_write(&draft, &now)?;
             client
                 .put_task_list(id, &body)
                 .await
@@ -1152,7 +1155,7 @@ pub async fn run_tasks(client: &mut SealbookClient, command: TasksCommand) -> Re
             // the vault does not hold yet.
             let new_lists = std::mem::take(&mut plan.lists);
             for write in &new_lists {
-                let body = task_list_write(&write.draft)?;
+                let body = task_list_write(&write.draft, &now)?;
                 client
                     .put_task_list(write.id.parse()?, &body)
                     .await

@@ -218,7 +218,7 @@ fn entry(name: &str, mime: &str, uploaded: &UploadedAttachment) -> CoreNoteAttac
         id: uploaded.attachment_id.to_string(),
         filename: name.to_string(),
         mime_type: mime.to_string(),
-        byte_size: uploaded.total_plaintext_size,
+        byte_size: uploaded.byte_size,
         adk: uploaded.key_b64.clone(),
         content_hash: uploaded.content_hash_b64.clone(),
         chunk_size: uploaded.chunk_size,
@@ -235,7 +235,7 @@ fn reference_of(entry: &CoreNoteAttachment) -> Result<UploadedAttachment> {
         content_hash_b64: entry.content_hash.clone(),
         chunk_size: entry.chunk_size,
         chunk_count: entry.chunk_count,
-        total_plaintext_size: entry.byte_size,
+        byte_size: entry.byte_size,
     })
 }
 
@@ -594,7 +594,7 @@ mod tests {
             content_hash_b64: "h".into(),
             chunk_size: 4194304,
             chunk_count: 1,
-            total_plaintext_size: 3,
+            byte_size: 3,
         };
         let payload = with_attachments(
             &owner,

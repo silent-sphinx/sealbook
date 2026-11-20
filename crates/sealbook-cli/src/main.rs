@@ -274,8 +274,10 @@ enum DevicesCommand {
     /// collection key. This mints a new one, re-encrypts every object under it,
     /// and issues a new recovery phrase.
     Revoke {
-        #[arg(long)]
-        device_id: Uuid,
+        /// The device to revoke. Repeat the flag to revoke several in one
+        /// rotation.
+        #[arg(long = "device-id", required = true)]
+        device_ids: Vec<Uuid>,
     },
     /// Rename a device. Leave out --device-id to rename this one, and give an
     /// empty name to restore the generated one.
@@ -829,6 +831,7 @@ async fn main() -> Result<()> {
     match cli.command {
         Command::Register { username } => {
             let password = read_secret("Password: ", "SEALBOOK_PASSWORD")?;
+            require_strong(&password, &username)?;
             let mut client = SealbookClient::https(pinned.clone()).context("tls client")?;
             let phrase = client
                 .register(&cli.server, &username, &password)
@@ -922,7 +925,7 @@ async fn main() -> Result<()> {
         }
         Command::Recover { username } => {
             let phrase = read_secret("Recovery phrase: ", "SEALBOOK_PHRASE")?;
-            let password = read_new_password("SEALBOOK_PASSWORD")?;
+            let password = read_new_password("SEALBOOK_PASSWORD", &username)?;
             let mut client = SealbookClient::https(pinned.clone()).context("tls client")?;
             let new_phrase = client
                 .recover(&cli.server, &username, &phrase, &password)
@@ -942,15 +945,20 @@ async fn main() -> Result<()> {
             let password = read_secret("Password: ", "SEALBOOK_PASSWORD")?;
             let mut client =
                 SealbookClient::with_state_and_tls(state, pinned.clone()).context("tls client")?;
-            // Quietly: this rotation is what the legacy-roster warning asks for.
+            // Quietly: an owed rotation is run by the sign-in itself, and this
+            // one is the rotation the user asked for.
             sign_in_quietly(&mut client, &password).await?;
-            let new_phrase = client.change_phrase(&password).await.context("phrase")?;
+            let new_phrase = client
+                .rotate_confirmed(&[], &mut confirm_phrase)
+                .await
+                .context("phrase")?;
             save_state(&cli.state, client.state.as_ref().unwrap())?;
             println!(
                 "The vault key was rotated and your previous recovery phrase no longer \
                  works.\nWrite these words down. They are shown once:"
             );
             println!("{new_phrase}");
+            report_upgraded(&client);
         }
         Command::Export { out } => {
             let state = load_state(&cli.state)?;
@@ -1675,27 +1683,32 @@ async fn main() -> Result<()> {
                         .unwrap_or_default();
                     println!("device {target} is now named {renamed}");
                 }
-                DevicesCommand::Revoke { device_id } => {
-                    let name = client
-                        .device_entries()
-                        .await?
-                        .into_iter()
-                        .find(|device| device.device_id == device_id)
-                        .map(|device| format!("{} ({device_id})", device.name))
-                        .unwrap_or_else(|| device_id.to_string());
+                DevicesCommand::Revoke { device_ids } => {
+                    let entries = client.device_entries().await?;
+                    let name_of = |id: Uuid| {
+                        entries
+                            .iter()
+                            .find(|device| device.device_id == id)
+                            .map(|device| format!("{} ({id})", device.name))
+                            .unwrap_or_else(|| id.to_string())
+                    };
+                    let names: Vec<String> = device_ids.iter().map(|id| name_of(*id)).collect();
+                    let name = names.join(", ");
                     println!(
                         "Revoking {name} rotates the vault key and re-encrypts every \
                          object.\nYour current recovery phrase will stop working and a new \
                          one will be issued."
                     );
-                    let phrase = client.revoke_device(device_id, &password).await?;
+                    let phrase = client
+                        .revoke_devices(&device_ids, &mut confirm_phrase)
+                        .await?;
                     save_state(&cli.state, client.state.as_ref().unwrap())?;
                     println!("\ndevice {name} revoked and the vault key rotated");
                     println!(
-                        "\nYour previous recovery phrase no longer works. Write these words \
-                         down; they are shown once:"
+                        "\nYour previous recovery phrase no longer works. The new one was \
+                         shown above."
                     );
-                    println!("{phrase}");
+                    let _ = phrase;
                 }
                 DevicesCommand::Prune {} => {
                     let removed = client.remove_stale_device_labels().await?;
@@ -1711,7 +1724,7 @@ async fn main() -> Result<()> {
             AccountCommand::Password {} => {
                 let state = load_state(&cli.state)?;
                 let current = read_secret("Current password: ", "SEALBOOK_PASSWORD")?;
-                let new = read_new_password("SEALBOOK_NEW_PASSWORD")?;
+                let new = read_new_password("SEALBOOK_NEW_PASSWORD", &state.username)?;
                 let mut client =
                     SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
                 // `change_password` signs in with the current password itself,
@@ -1721,8 +1734,7 @@ async fn main() -> Result<()> {
                     .change_password(&current, &new)
                     .await
                     .context("change password")?;
-                // The state file's key lives in the keyring, not in the
-                // password, so only the new KDF salt needs saving.
+                // The state file's key lives in the keyring, not in the password.
                 save_state(&cli.state, client.state.as_ref().unwrap())?;
                 println!(
                     "password changed. Other devices are signed out and sign in with the new one."
@@ -1818,14 +1830,7 @@ async fn main() -> Result<()> {
                                 start,
                                 end,
                                 notes,
-                                // The other clients leave a missing calendar
-                                // absent, which their grids read as "in no
-                                // calendar". This command has no picker, so it
-                                // names the default one rather than writing an
-                                // event no calendar owns.
-                                calendar_id: Some(
-                                    calendar.unwrap_or(DEFAULT_CALENDAR_ID).to_string(),
-                                ),
+                                calendar_id: calendar.map(|id| id.to_string()),
                                 alerts,
                                 ..Default::default()
                             },
@@ -2409,46 +2414,121 @@ async fn connect(
 
 async fn sign_in(client: &mut SealbookClient, password: &str) -> Result<()> {
     sign_in_quietly(client, password).await?;
-    warn_if_roster_uncommitted(client);
     warn_if_feature_off(client).await;
     Ok(())
 }
 
-/// An account whose roster predates key commitments cannot tell its own vault
-/// key from one a malicious server sealed to this device. Rotating fixes it,
-/// but also replaces the recovery phrase, so it is the user's call.
-fn warn_if_roster_uncommitted(client: &SealbookClient) {
-    if client.roster_lacks_key_commitment() {
-        eprintln!(
-            "warning: this account's device roster predates key commitments, so this device \
-             cannot prove the vault key it was given is the account's own. Run `sealbook \
-             phrase` to rotate the key onto a roster that commits to it; that also issues a \
-             new recovery phrase."
-        );
+/// Shows the new recovery phrase and asks for three of its words, chosen at
+/// random, before the rotation that retires the old one is posted. Declining
+/// aborts with the account untouched.
+fn confirm_phrase(phrase: &str) -> Result<(), sealbook_client::ClientError> {
+    use rand::seq::index::sample;
+    let fail = |message: String| sealbook_client::ClientError::Server(message);
+    let words: Vec<&str> = phrase.split_whitespace().collect();
+    println!(
+        "\nThis is your new recovery phrase. The old one stops working once this is \
+         saved.\nWrite these words down; they are shown once:\n\n{phrase}\n"
+    );
+    let mut positions: Vec<usize> = sample(&mut rand::thread_rng(), words.len(), 3).into_vec();
+    positions.sort_unstable();
+    for position in positions {
+        let mut attempts = 0;
+        loop {
+            eprint!("Type word {} of your new phrase: ", position + 1);
+            std::io::stderr()
+                .flush()
+                .map_err(|err| fail(err.to_string()))?;
+            let mut typed = String::new();
+            std::io::stdin()
+                .read_line(&mut typed)
+                .map_err(|err| fail(err.to_string()))?;
+            if typed.trim().eq_ignore_ascii_case(words[position]) {
+                break;
+            }
+            attempts += 1;
+            if attempts == 3 {
+                return Err(fail(
+                    "that is not the word; nothing was changed, so the old phrase still \
+                     works"
+                        .into(),
+                ));
+            }
+            eprintln!("That is not the word. Check what you wrote down.");
+        }
     }
+    Ok(())
 }
 
 async fn sign_in_quietly(client: &mut SealbookClient, password: &str) -> Result<()> {
-    match client.login(password).await {
-        Ok(()) => Ok(()),
-        Err(sealbook_client::ClientError::RecoveryRotationPending) => {
+    use sealbook_client::ClientError;
+    let owed = match client.login(password).await {
+        Ok(()) => return Ok(()),
+        Err(ClientError::RecoveryRotationPending) => {
             eprintln!(
                 "An earlier recovery on this account never finished: the vault key was left \
                  unrotated, so the recovery phrase used then still opens it. Finishing that \
                  now, which re-encrypts the vault and issues a new phrase."
             );
-            let phrase = client
-                .complete_recovery_rotation(password)
-                .await
-                .context("finish the interrupted recovery")?;
-            println!(
-                "\nThe vault key has been rotated. Your previous recovery phrase no longer \
-                 works. Write these words down; they are shown once:"
-            );
-            println!("{phrase}");
-            Ok(())
+            false
         }
-        Err(error) => Err(anyhow::Error::new(error).context("login")),
+        Err(ClientError::UpgradeRotationPending) => {
+            eprintln!("{}", sealbook_client::upgrade_pending_message());
+            true
+        }
+        Err(error) => return Err(anyhow::Error::new(error).context("login")),
+    };
+    let revoke = if owed {
+        other_devices_to_revoke(client).await?
+    } else {
+        Vec::new()
+    };
+    client
+        .complete_rotation(password, &revoke, &mut confirm_phrase)
+        .await
+        .context("finish the owed rotation")?;
+    println!("\nThe vault key has been rotated. Your previous recovery phrase no longer works.");
+    report_upgraded(client);
+    Ok(())
+}
+
+/// Says so when a rotation moved objects to the current format, which is the
+/// one time a person sees the migration happen.
+fn report_upgraded(client: &SealbookClient) {
+    match client.last_rotation_upgraded() {
+        0 => {}
+        1 => println!("1 object was moved to the current format."),
+        count => println!("{count} objects were moved to the current format."),
+    }
+}
+
+/// Offers to revoke every other device in the rotation the upgrade owes, since
+/// the rotation is the one moment doing so costs nothing extra. The answer is
+/// yes only when typed.
+async fn other_devices_to_revoke(client: &mut SealbookClient) -> Result<Vec<Uuid>> {
+    let own = client.state.as_ref().map(|state| state.device_id);
+    let mut others: Vec<(Uuid, String)> = client
+        .device_entries()
+        .await?
+        .into_iter()
+        .filter(|device| Some(device.device_id) != own)
+        .map(|device| (device.device_id, device.name))
+        .collect();
+    if others.is_empty() {
+        return Ok(Vec::new());
+    }
+    others.sort_by_key(|(id, _)| *id);
+    eprintln!("Other devices on this account:");
+    for (id, name) in &others {
+        eprintln!("  {name} ({id})");
+    }
+    eprint!("Revoke all of them in this rotation? [y/N] ");
+    std::io::stderr().flush()?;
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer)?;
+    if matches!(answer.trim(), "y" | "Y" | "yes") {
+        Ok(others.into_iter().map(|(id, _)| id).collect())
+    } else {
+        Ok(Vec::new())
     }
 }
 
@@ -2966,6 +3046,8 @@ fn write_contacts(
                     archived: false,
                     hide_from_all: false,
                     color: None,
+                    created_at: None,
+                    updated_at: None,
                     trashed_at: None,
                     readable: true,
                     raw: String::new(),
@@ -3508,8 +3590,9 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
 ///
 /// A typo in a recovery would otherwise lock the account to a password nobody
 /// knows, with the phrase already spent.
-fn read_new_password(environment: &str) -> Result<String> {
+fn read_new_password(environment: &str, username: &str) -> Result<String> {
     if let Ok(value) = std::env::var(environment) {
+        require_strong(&value, username)?;
         return Ok(value);
     }
     let password = rpassword::prompt_password("New password: ")?;
@@ -3520,7 +3603,25 @@ fn read_new_password(environment: &str) -> Result<String> {
     if password.is_empty() {
         anyhow::bail!("the password cannot be empty");
     }
+    require_strong(&password, username)?;
     Ok(password)
+}
+
+/// Refuses a weak password before anything is sent. The server cannot make this
+/// check: under OPAQUE it never sees the password.
+fn require_strong(password: &str, username: &str) -> Result<()> {
+    let strength = sealbook_core::strength::password_strength(password, username);
+    if strength.acceptable {
+        return Ok(());
+    }
+    let mut message = String::from("that password is too easy to guess");
+    if let Some(warning) = &strength.warning {
+        message.push_str(&format!(". {warning}"));
+    }
+    for suggestion in &strength.suggestions {
+        message.push_str(&format!(" {suggestion}"));
+    }
+    anyhow::bail!(message)
 }
 
 /// The same check web makes: the stored name, typed back exactly. Surrounding
@@ -3675,6 +3776,13 @@ mod tests {
     }
 
     #[test]
+    fn a_weak_password_is_refused_with_the_reason() {
+        let error = require_strong("password123", "alice").unwrap_err().to_string();
+        assert!(error.starts_with("that password is too easy to guess"), "{error}");
+        assert!(require_strong("correct vivid harbour lantern", "alice").is_ok());
+    }
+
+    #[test]
     fn a_reminder_reads_in_every_spelling_the_help_names() {
         assert_eq!(parse_alert("15m"), Some(15));
         assert_eq!(parse_alert("15"), Some(15));
@@ -3694,8 +3802,10 @@ mod tests {
         let mut draft = event_draft(event_parse("e1", stored));
         draft.title = "Retro".to_string();
         draft.end = None;
-        let written: serde_json::Value =
-            serde_json::from_str(&sealbook_client::event_write(&draft).unwrap()).unwrap();
+        let written: serde_json::Value = serde_json::from_str(
+            &sealbook_client::event_write(&draft, "2026-11-20T09:00:00Z").unwrap(),
+        )
+        .unwrap();
         assert_eq!(written["title"], "Retro");
         assert_eq!(written["location"], "Room 3");
         assert_eq!(written["x"]["y"], 1);
@@ -3709,8 +3819,10 @@ mod tests {
             Some("Job".to_string()),
             None,
         );
-        let written: serde_json::Value =
-            serde_json::from_str(&sealbook_client::calendar_write(&draft).unwrap()).unwrap();
+        let written: serde_json::Value = serde_json::from_str(
+            &sealbook_client::calendar_write(&draft, "2026-11-20T09:00:00Z").unwrap(),
+        )
+        .unwrap();
         assert_eq!(written["name"], "Job");
         assert_eq!(written["color"], "#112233");
         assert_eq!(written["favorite"], true);
@@ -3755,8 +3867,10 @@ mod tests {
                 extra: None,
             }],
         );
-        let written: serde_json::Value =
-            serde_json::from_str(&sealbook_client::event_write(&draft).unwrap()).unwrap();
+        let written: serde_json::Value = serde_json::from_str(
+            &sealbook_client::event_write(&draft, "2026-11-20T09:00:00Z").unwrap(),
+        )
+        .unwrap();
         assert_eq!(written["location"], "Room 3");
         assert_eq!(written["recurrence"]["frequency"], "daily");
         assert_eq!(written["x"], 1);
@@ -4028,7 +4142,8 @@ mod tests {
             collection_change(Some(&stored), id, Some("Read".into()), None, None).unwrap();
         assert_eq!(renamed.parent_id, Some(Uuid::from_u128(3).to_string()));
         assert!(renamed.hide_from_all);
-        let json = sealbook_client::bookmark_collection_write(&renamed).unwrap();
+        let json =
+            sealbook_client::bookmark_collection_write(&renamed, "2026-11-20T09:00:00Z").unwrap();
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(value["name"], "Read");
         assert_eq!(value["x"], 1);
@@ -4511,7 +4626,6 @@ mod tests {
             collection_id: Uuid::from_u128(11),
             device_id: Uuid::from_u128(12),
             session_token: None,
-            kdf_salt: Vec::new(),
             hpke_sk: Vec::new(),
             mldsa_seed: Vec::new(),
             ed25519_sk: Vec::new(),
@@ -4537,18 +4651,22 @@ mod tests {
     #[test]
     fn an_export_carries_every_object_including_a_type_this_build_cannot_read() {
         let objects = vec![
-            exported(1, "application/jscontact+json", r#"{"@type":"Card"}"#),
+            exported(
+                1,
+                "application/jscontact+json",
+                r#"{"@type":"Card","version":"1.0","sealbook:version":"1.1"}"#,
+            ),
             exported(
                 2,
                 "application/sealbook.note+json",
-                r#"{"@type":"Note","title":"Plan","pinned":true}"#,
+                r#"{"@type":"Note","version":"1.1","title":"Plan","pinned":true}"#,
             ),
             exported(3, "application/sealbook.future+json", r#"{"keep":"me"}"#),
         ];
         let document = export_value(objects, "2026-10-10T00:00:00Z");
 
         assert_eq!(document["@type"], "SealbookAccountExport");
-        assert_eq!(document["version"], "1.0");
+        assert_eq!(document["version"], "1.1");
         assert_eq!(document["exportedAt"], "2026-10-10T00:00:00Z");
         assert_eq!(document["account"]["username"], "alice");
         assert_eq!(document["account"]["server"], "https://vault.example");
@@ -4585,8 +4703,8 @@ mod tests {
 
     #[test]
     fn a_task_object_survives_an_export_and_import_untouched() {
-        let task = r#"{"@type":"Task","version":"1.0","title":"Water plants","taskListId":"00000000-0000-0000-0000-000000000006","dueDate":"2026-10-23T08:30:00.000Z","priority":7,"parentId":"p1","recurrence":{"frequency":"weekly","weekdays":[1,4],"interval":2},"recurrenceAnchor":"2026-10-22","completions":["2026-10-15T09:00:00.000Z"],"dueTimezone":"Europe/London"}"#;
-        let list = r##"{"@type":"TaskList","version":"1.0","name":"Work","color":"#7aa2f7"}"##;
+        let task = r#"{"@type":"Task","version":"1.1","title":"Water plants","taskListId":"00000000-0000-0000-0000-000000000006","dueDate":"2026-10-23T08:30:00.000Z","priority":7,"parentId":"p1","recurrence":{"frequency":"weekly","weekdays":[1,4],"interval":2},"recurrenceAnchor":"2026-10-22","completions":["2026-10-15T09:00:00.000Z"],"dueTimezone":"Europe/London"}"#;
+        let list = r##"{"@type":"TaskList","version":"1.1","name":"Work","color":"#7aa2f7"}"##;
         let objects = vec![
             exported(1, sealbook_client::TASK_CONTENT_TYPE, task),
             exported(2, sealbook_client::TASK_LIST_CONTENT_TYPE, list),
@@ -4624,7 +4742,11 @@ mod tests {
     #[test]
     fn an_export_reads_back_as_the_objects_it_was_written_from() {
         let objects = vec![
-            exported(1, "application/jscontact+json", r#"{"@type":"Card"}"#),
+            exported(
+                1,
+                "application/jscontact+json",
+                r#"{"@type":"Card","version":"1.0","sealbook:version":"1.1"}"#,
+            ),
             exported(2, "application/sealbook.future+json", r#"{"keep":"me"}"#),
             exported(3, "application/octet-stream", "not json at all"),
         ];
@@ -4643,7 +4765,7 @@ mod tests {
                 (
                     Uuid::from_u128(1),
                     "application/jscontact+json".to_string(),
-                    r#"{"@type":"Card"}"#.to_string()
+                    r#"{"@type":"Card","sealbook:version":"1.1","version":"1.0"}"#.to_string()
                 ),
                 // The `text` escape hatch comes back as those bytes, not as JSON.
                 (
@@ -4707,7 +4829,11 @@ mod tests {
     #[test]
     fn an_import_leaves_a_live_object_alone_unless_overwriting() {
         let objects = vec![
-            exported(1, "application/jscontact+json", r#"{"@type":"Card"}"#),
+            exported(
+                1,
+                "application/jscontact+json",
+                r#"{"@type":"Card","version":"1.0","sealbook:version":"1.1"}"#,
+            ),
             exported(2, "application/jscontact+json", r#"{"@type":"Card"}"#),
         ];
         // Object 1 is live on the instance: signing in before importing creates
