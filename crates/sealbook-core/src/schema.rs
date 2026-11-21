@@ -290,6 +290,7 @@ fn notebook() -> Value {
         "Notebook",
         json!({
             "name": string(),
+            "parentId": id("The notebook this one sits under. Absent at the top level."),
             "color": text("An accent key or a CSS colour."),
             "archived": { "type": "boolean", "description": "Written only when true." },
             "hideFromAll": { "type": "boolean", "description": "Written only when true." },

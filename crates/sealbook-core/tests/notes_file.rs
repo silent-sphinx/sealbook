@@ -15,6 +15,7 @@ fn notebooks() -> Vec<CoreNotebook> {
     vec![CoreNotebook {
         id: default_notebook_id(),
         name: "Journal".into(),
+        parent_id: None,
         color: None,
         created_at: None,
         updated_at: None,

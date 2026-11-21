@@ -1014,6 +1014,11 @@
         "name": {
           "type": "string"
         },
+        "parentId": {
+          "description": "The notebook this one sits under. Absent at the top level.",
+          "format": "uuid",
+          "type": "string"
+        },
         "trashedAt": {
           "description": "When it went into the trash. Set and cleared only by the trash writes.",
           "format": "date-time",

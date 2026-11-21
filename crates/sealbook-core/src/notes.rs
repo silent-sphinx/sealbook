@@ -75,6 +75,7 @@ pub const NOTEBOOK_KEYS: &[&str] = &[
     "@type",
     "version",
     "name",
+    "parentId",
     "color",
     "archived",
     "hideFromAll",
@@ -212,6 +213,9 @@ pub struct CoreNote {
 pub struct CoreNotebook {
     pub id: String,
     pub name: String,
+    /// The notebook this one sits under. `None` is a top-level notebook.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
     /// Put away: out of the notebook list, its notes left as they are.
@@ -340,6 +344,9 @@ pub fn notebook_parse(id: &str, raw: &str) -> CoreNotebook {
     CoreNotebook {
         id: id.to_string(),
         name: stored.unwrap_or_else(|| fallback_notebook_name(id)),
+        parent_id: object
+            .as_ref()
+            .and_then(|object| trimmed(object, "parentId")),
         color: object.as_ref().and_then(|object| trimmed(object, "color")),
         archived: object
             .as_ref()
@@ -365,11 +372,12 @@ pub fn notebook_parse(id: &str, raw: &str) -> CoreNotebook {
     }
 }
 
-/// `color`, `archived` and `hide_from_all` are owned: a caller renaming a
-/// notebook passes the stored ones back, and `None` / `false` clears them. The
-/// flags are written only when true.
+/// `parent_id`, `color`, `archived` and `hide_from_all` are owned: a caller
+/// renaming a notebook passes the stored ones back, and `None` / `false` clears
+/// them. The flags are written only when true.
 pub fn notebook_write(
     name: &str,
+    parent_id: Option<&str>,
     color: Option<&str>,
     archived: bool,
     hide_from_all: bool,
@@ -382,6 +390,9 @@ pub fn notebook_write(
         "version": PAYLOAD_SCHEMA_VERSION,
         "name": name.trim(),
     });
+    if let Some(parent) = parent_id.map(str::trim).filter(|parent| !parent.is_empty()) {
+        fields["parentId"] = json!(parent);
+    }
     if let Some(color) = color.map(str::trim).filter(|color| !color.is_empty()) {
         fields["color"] = json!(color);
     }
@@ -568,6 +579,7 @@ pub mod ffi {
     #[uniffi::export(name = "notebook_write")]
     pub fn notebook_write(
         name: String,
+        parent_id: Option<String>,
         color: Option<String>,
         archived: bool,
         hide_from_all: bool,
@@ -576,6 +588,7 @@ pub mod ffi {
     ) -> Result<String, CoreError> {
         super::notebook_write(
             &name,
+            parent_id.as_deref(),
             color.as_deref(),
             archived,
             hide_from_all,
@@ -814,23 +827,38 @@ mod tests {
     #[test]
     fn a_notebook_rename_carries_what_it_does_not_own() {
         let stored = r#"{"@type":"Notebook","version":"1.0","name":"old","colour":"blue"}"#;
-        let renamed =
-            as_object(&notebook_write("  new  ", None, false, false, Some(stored), NOW).unwrap())
-                .unwrap();
+        let renamed = as_object(
+            &notebook_write("  new  ", None, None, false, false, Some(stored), NOW).unwrap(),
+        )
+        .unwrap();
         assert_eq!(renamed["name"], "new");
         assert_eq!(renamed["colour"], "blue");
     }
 
     #[test]
     fn a_notebook_colour_is_written_and_cleared() {
-        let coloured = notebook_write("Work", Some(" #123456 "), false, false, None, NOW).unwrap();
+        let coloured =
+            notebook_write("Work", None, Some(" #123456 "), false, false, None, NOW).unwrap();
         assert_eq!(
             notebook_parse("n", &coloured).color.as_deref(),
             Some("#123456")
         );
-        let cleared = notebook_write("Work", None, false, false, Some(&coloured), NOW).unwrap();
+        let cleared =
+            notebook_write("Work", None, None, false, false, Some(&coloured), NOW).unwrap();
         assert_eq!(notebook_parse("n", &cleared).color, None);
         assert!(!cleared.contains("color"));
+    }
+
+    #[test]
+    fn a_notebook_parent_is_written_trimmed_and_cleared() {
+        let nested = notebook_write("Work", Some(" p1 "), None, false, false, None, NOW).unwrap();
+        assert_eq!(
+            notebook_parse("n", &nested).parent_id.as_deref(),
+            Some("p1")
+        );
+        let lifted = notebook_write("Work", None, None, false, false, Some(&nested), NOW).unwrap();
+        assert_eq!(notebook_parse("n", &lifted).parent_id, None);
+        assert!(!lifted.contains("parentId"));
     }
 
     #[test]

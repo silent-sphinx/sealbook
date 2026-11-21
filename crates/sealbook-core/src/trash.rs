@@ -166,7 +166,10 @@ pub fn trash_node(id: &str, kind: CorePayloadKind, raw: &str) -> Option<TrashNod
             let event = crate::event_parse(id, raw);
             (None, event.calendar_id, event.trashed_at)
         }
-        Notebook => (None, None, crate::notebook_parse(id, raw).trashed_at),
+        Notebook => {
+            let notebook = crate::notebook_parse(id, raw);
+            (notebook.parent_id, None, notebook.trashed_at)
+        }
         Note => {
             let note = crate::note_parse(id, raw);
             (note.parent_id, Some(note.notebook_id), note.trashed_at)

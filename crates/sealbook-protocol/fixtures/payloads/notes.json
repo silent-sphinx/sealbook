@@ -18,6 +18,7 @@
       "@type",
       "version",
       "name",
+      "parentId",
       "color",
       "archived",
       "hideFromAll",
@@ -372,6 +373,31 @@
       "archived": true,
       "hide_from_all": true,
       "payload": "{\"@type\":\"Notebook\",\"archived\":true,\"createdAt\":\"2026-10-28T12:00:00Z\",\"hideFromAll\":true,\"name\":\"Work\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
+    },
+    {
+      "case": "a notebook nested in another",
+      "name": "Work",
+      "parent_id": "  cccccccc-cccc-4ccc-8ccc-cccccccccccc  ",
+      "archived": false,
+      "hide_from_all": false,
+      "payload": "{\"@type\":\"Notebook\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"name\":\"Work\",\"parentId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
+    },
+    {
+      "case": "a rename that passes the stored parent back",
+      "name": "Renamed",
+      "parent_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "archived": false,
+      "hide_from_all": false,
+      "previous": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"Work\",\"parentId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\"}",
+      "payload": "{\"@type\":\"Notebook\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"name\":\"Renamed\",\"parentId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
+    },
+    {
+      "case": "a write without a parent moves it to the top level",
+      "name": "Work",
+      "archived": false,
+      "hide_from_all": false,
+      "previous": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"Work\",\"parentId\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\"}",
+      "payload": "{\"@type\":\"Notebook\",\"createdAt\":\"2026-10-28T12:00:00Z\",\"name\":\"Work\",\"updatedAt\":\"2026-10-28T12:00:00Z\",\"version\":\"1.1\"}"
     }
   ],
   "notebook_parses": [
@@ -386,6 +412,20 @@
         "hide_from_all": true,
         "readable": true,
         "raw": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"Work\",\"hideFromAll\":true}"
+      }
+    },
+    {
+      "case": "a notebook nested in another",
+      "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "raw": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"Work\",\"parentId\":\" cccccccc-cccc-4ccc-8ccc-cccccccccccc \"}",
+      "notebook": {
+        "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "name": "Work",
+        "parent_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "archived": false,
+        "hide_from_all": false,
+        "readable": true,
+        "raw": "{\"@type\":\"Notebook\",\"version\":\"1.0\",\"name\":\"Work\",\"parentId\":\" cccccccc-cccc-4ccc-8ccc-cccccccccccc \"}"
       }
     },
     {

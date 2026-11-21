@@ -508,9 +508,18 @@ fn every_write_stamps_both_dates_and_keeps_the_first() {
     assert_eq!(again["createdAt"], earlier);
     assert_eq!(again["updatedAt"], now);
 
-    let notebook = parsed(&notebook_write("W", None, false, false, None, earlier).unwrap());
+    let notebook = parsed(&notebook_write("W", None, None, false, false, None, earlier).unwrap());
     let renamed = parsed(
-        &notebook_write("W2", None, false, false, Some(&notebook.to_string()), now).unwrap(),
+        &notebook_write(
+            "W2",
+            None,
+            None,
+            false,
+            false,
+            Some(&notebook.to_string()),
+            now,
+        )
+        .unwrap(),
     );
     assert_eq!(renamed["createdAt"], earlier);
     assert_eq!(renamed["updatedAt"], now);

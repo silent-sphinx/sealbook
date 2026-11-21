@@ -328,8 +328,14 @@ impl SealbookClient {
         name: &str,
         previous: Option<&str>,
     ) -> Result<u64, ClientError> {
-        let color = previous.and_then(|raw| sealbook_core::notebook_parse("", raw).color);
-        self.put_notebook_colored(object_id, name, color.as_deref(), previous)
+        let stored = previous.map(|raw| sealbook_core::notebook_parse("", raw));
+        let color = stored
+            .as_ref()
+            .and_then(|notebook| notebook.color.as_deref());
+        let parent_id = stored
+            .as_ref()
+            .and_then(|notebook| notebook.parent_id.as_deref());
+        self.put_notebook_nested(object_id, name, parent_id, color, previous)
             .await
     }
 
@@ -341,6 +347,23 @@ impl SealbookClient {
         color: Option<&str>,
         previous: Option<&str>,
     ) -> Result<u64, ClientError> {
+        let parent_id = previous
+            .map(|raw| sealbook_core::notebook_parse("", raw))
+            .and_then(|notebook| notebook.parent_id);
+        self.put_notebook_nested(object_id, name, parent_id.as_deref(), color, previous)
+            .await
+    }
+
+    /// As [`Self::put_notebook`], with the parent and colour given rather than
+    /// carried over. `None` for the parent is the top level.
+    pub async fn put_notebook_nested(
+        &mut self,
+        object_id: Uuid,
+        name: &str,
+        parent_id: Option<&str>,
+        color: Option<&str>,
+        previous: Option<&str>,
+    ) -> Result<u64, ClientError> {
         let stored = previous.map(|raw| sealbook_core::notebook_parse("", raw));
         let archived = stored.as_ref().is_some_and(|notebook| notebook.archived);
         let hide_from_all = stored
@@ -348,6 +371,7 @@ impl SealbookClient {
             .is_some_and(|notebook| notebook.hide_from_all);
         let plaintext = sealbook_core::notebook_write(
             name,
+            parent_id,
             color,
             archived,
             hide_from_all,

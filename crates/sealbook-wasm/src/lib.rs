@@ -2215,6 +2215,7 @@ pub fn core_notebook_parse(id: &str, raw: &str) -> Result<Ts<CoreNotebook>, JsEr
 #[wasm_bindgen]
 pub fn core_notebook_write(
     name: &str,
+    parent_id: Option<String>,
     color: Option<String>,
     archived: bool,
     hide_from_all: bool,
@@ -2223,6 +2224,7 @@ pub fn core_notebook_write(
 ) -> Result<String, JsError> {
     sealbook_core::notebook_write(
         name,
+        parent_id.as_deref(),
         color.as_deref(),
         archived,
         hide_from_all,

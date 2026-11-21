@@ -135,6 +135,7 @@
           "op": "notebook.write",
           "args": [
             "name",
+            "parent_id",
             "color",
             "archived",
             "hide_from_all",
