@@ -119,11 +119,11 @@ pub use bookmark_file::{
 pub use bookmarks::{
     bookmark_collection_name_by_id, bookmark_collection_parse, bookmark_collection_tone,
     bookmark_collection_write, bookmark_parse, bookmark_write, default_bookmark_collection_id,
-    normalize_tags, normalize_url, resolve_collection_id, CoreBookmark, CoreBookmarkCollection,
-    CoreBookmarkCollectionDraft, CoreBookmarkDraft, BOOKMARK_COLLECTION_CONTENT_TYPE,
-    BOOKMARK_COLLECTION_KEYS, BOOKMARK_CONTENT_TYPE, BOOKMARK_KEYS,
-    DEFAULT_BOOKMARK_COLLECTION_NAME, MAX_BOOKMARK_TAGS, UNREADABLE_BOOKMARK_TITLE,
-    UNTITLED_BOOKMARK_TITLE, UNTITLED_COLLECTION_NAME,
+    is_web_url, normalize_tags, normalize_url, resolve_collection_id, CoreBookmark,
+    CoreBookmarkCollection, CoreBookmarkCollectionDraft, CoreBookmarkDraft,
+    BOOKMARK_COLLECTION_CONTENT_TYPE, BOOKMARK_COLLECTION_KEYS, BOOKMARK_CONTENT_TYPE,
+    BOOKMARK_KEYS, BOOKMARK_URL_SCHEME, DEFAULT_BOOKMARK_COLLECTION_NAME, MAX_BOOKMARK_TAGS,
+    UNREADABLE_BOOKMARK_TITLE, UNTITLED_BOOKMARK_TITLE, UNTITLED_COLLECTION_NAME,
 };
 pub use calendars::{
     alert_label, alert_presets, alert_retimed, calendar_name_by_id, calendar_parse, calendar_write,
@@ -241,9 +241,6 @@ pub use contact_json::{contacts_import, json_import, CoreContactFile};
 pub use contact_search::{ContactIndex, CoreBookName, CoreContactSource};
 pub use csv::{csv_import, csv_parse, csv_rows, csv_write};
 pub use markdown::repair_pipe_tables;
-pub use phrase_check::{
-    phrase_check_positions, phrase_word_matches, PHRASE_CHECK_ATTEMPTS, PHRASE_CHECK_WORDS,
-};
 pub use merge::{conflict_copy, conflict_copy_id, merge_payload, MergeOutcome};
 pub use messages::{
     attachment_message, auth_message, collection_busy_message, conflict_copy_title, error_message,
@@ -264,6 +261,9 @@ pub use offline::{
 pub use order::{
     name_key, order_bookmarks, order_by_name, order_by_recency, order_containers,
     CoreBookmarkOrderItem, CoreBookmarkSort, CoreOrderItem,
+};
+pub use phrase_check::{
+    phrase_check_positions, phrase_word_matches, PHRASE_CHECK_ATTEMPTS, PHRASE_CHECK_WORDS,
 };
 pub use sealbook_protocol::{PAYLOAD_SCHEMA_VERSION, PROTOCOL_VERSION};
 pub use vault_search::{
