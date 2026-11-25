@@ -2420,16 +2420,13 @@ async fn sign_in(client: &mut SealbookClient, password: &str) -> Result<()> {
 /// random, before the rotation that retires the old one is posted. Declining
 /// aborts with the account untouched.
 fn confirm_phrase(phrase: &str) -> Result<(), sealbook_client::ClientError> {
-    use rand::seq::index::sample;
     let fail = |message: String| sealbook_client::ClientError::Server(message);
     let words: Vec<&str> = phrase.split_whitespace().collect();
     println!(
         "\nThis is your new recovery phrase. The old one stops working once this is \
          saved.\nWrite these words down; they are shown once:\n\n{phrase}\n"
     );
-    let mut positions: Vec<usize> = sample(&mut rand::thread_rng(), words.len(), 3).into_vec();
-    positions.sort_unstable();
-    for position in positions {
+    for position in sealbook_core::phrase_check_positions(words.len()) {
         let mut attempts = 0;
         loop {
             eprint!("Type word {} of your new phrase: ", position + 1);
@@ -2440,11 +2437,11 @@ fn confirm_phrase(phrase: &str) -> Result<(), sealbook_client::ClientError> {
             std::io::stdin()
                 .read_line(&mut typed)
                 .map_err(|err| fail(err.to_string()))?;
-            if typed.trim().eq_ignore_ascii_case(words[position]) {
+            if sealbook_core::phrase_word_matches(phrase, position, &typed) {
                 break;
             }
             attempts += 1;
-            if attempts == 3 {
+            if attempts == sealbook_core::PHRASE_CHECK_ATTEMPTS {
                 return Err(fail(
                     "that is not the word; nothing was changed, so the old phrase still \
                      works"

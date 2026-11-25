@@ -45,6 +45,7 @@ mod offline;
 mod order;
 mod pairing;
 mod payload;
+mod phrase_check;
 mod recurrence;
 mod roster;
 mod rotation;
@@ -240,6 +241,9 @@ pub use contact_json::{contacts_import, json_import, CoreContactFile};
 pub use contact_search::{ContactIndex, CoreBookName, CoreContactSource};
 pub use csv::{csv_import, csv_parse, csv_rows, csv_write};
 pub use markdown::repair_pipe_tables;
+pub use phrase_check::{
+    phrase_check_positions, phrase_word_matches, PHRASE_CHECK_ATTEMPTS, PHRASE_CHECK_WORDS,
+};
 pub use merge::{conflict_copy, conflict_copy_id, merge_payload, MergeOutcome};
 pub use messages::{
     attachment_message, auth_message, collection_busy_message, conflict_copy_title, error_message,
