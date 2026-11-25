@@ -1251,6 +1251,20 @@ pub fn core_unreadable_rows(outcomes: Ts<RowOutcomeList>) -> Result<u64, JsError
     sealbook_core::unreadable_rows(&outcomes.to_rust()?.0).map_err(core_err)
 }
 
+/// Sets an incremental read's rows against the signed entries for them: `Moved`
+/// means read again, and a mismatch raises as a manifest error.
+#[wasm_bindgen]
+pub fn core_check_rows_against_entries(
+    rows: Ts<CoreSealedRowList>,
+    entries: Ts<CoreManifestEntryList>,
+) -> Result<Ts<sealbook_core::RowsCheck>, JsError> {
+    Ok(
+        sealbook_core::check_rows_against_entries(&rows.to_rust()?.0, &entries.to_rust()?.0)
+            .map_err(core_err)?
+            .into_ts()?,
+    )
+}
+
 /// The rule for a collection key that moved while a read was in flight.
 #[wasm_bindgen]
 pub fn core_require_key_epoch(expected: u64, held: u64) -> Result<(), JsError> {
@@ -3517,6 +3531,24 @@ pub fn core_outbox_fail(
     Ok(sealbook_core::outbox_fail(&outbox.to_rust()?, &ids.to_rust()?.0, reason).into_ts()?)
 }
 
+/// Takes sent writes out of the queue, keeping any that was edited again while
+/// it was in flight, rebased on what the server now holds.
+#[wasm_bindgen]
+pub fn core_outbox_settle_sent(
+    current: Ts<sealbook_core::Outbox>,
+    planned: Ts<sealbook_core::Outbox>,
+    vault: Ts<sealbook_core::LocalVault>,
+    ids: Ts<StringList>,
+) -> Result<Ts<sealbook_core::Outbox>, JsError> {
+    Ok(sealbook_core::outbox_settle_sent(
+        &current.to_rust()?,
+        &planned.to_rust()?,
+        &vault.to_rust()?,
+        &ids.to_rust()?.0,
+    )
+    .into_ts()?)
+}
+
 /// The live objects to list: the vault with the queued writes laid over it.
 #[wasm_bindgen]
 pub fn core_local_view(
@@ -3569,6 +3601,13 @@ pub fn core_write_guard(
             .map_err(core_err)?
             .into_ts()?,
     )
+}
+
+/// How many of the leading writes go in the next batch, never splitting the
+/// writes that settle one outbox entry.
+#[wasm_bindgen]
+pub fn core_flush_batch_len(writes: Ts<FlushWriteList>) -> Result<u32, JsError> {
+    Ok(sealbook_core::flush_batch_len(&writes.to_rust()?.0))
 }
 
 #[wasm_bindgen]

@@ -160,8 +160,8 @@ pub use devices::{
 };
 pub use error::CoreError;
 pub use flush::{
-    flush_failure, flush_plan, write_guard, FlushDrop, FlushFailure, FlushGuard, FlushPlan,
-    FlushWrite,
+    flush_batch_len, flush_failure, flush_plan, write_guard, FlushDrop, FlushFailure, FlushGuard,
+    FlushPlan, FlushWrite,
 };
 pub use http::{Header, HttpRequest, HttpResponse, Method, Step};
 pub use ics::{
@@ -214,10 +214,10 @@ pub use settings::{
 };
 pub use state::{CoreDeviceState, CoreSession};
 pub use sync::{
-    changes_page_read, changes_request, latest_revisions, open_row, open_stored, require_key_epoch,
-    unreadable_rows, walk_page, walk_start, ChangesPage, CoreSealedRow, RowOutcome, RowRef,
-    StoredRow, UnreadableReason, WalkCursor, WalkOutcome, WalkStep, CHANGES_PAGE_LIMIT,
-    SYNC_RESTART_LIMIT,
+    changes_page_read, changes_request, check_rows_against_entries, latest_revisions, open_row,
+    open_stored, require_key_epoch, unreadable_rows, walk_page, walk_start, ChangesPage,
+    CoreSealedRow, RowOutcome, RowRef, RowsCheck, StoredRow, UnreadableReason, WalkCursor,
+    WalkOutcome, WalkStep, CHANGES_PAGE_LIMIT, SYNC_RESTART_LIMIT,
 };
 pub use task_rules::{
     order_tasks, task_agenda, task_can_move, task_complete, task_export, task_import,
@@ -254,8 +254,8 @@ pub use notes_file::{
 };
 pub use offline::{
     local_vault_apply, local_vault_read, local_vault_write, local_view, outbox_fail, outbox_push,
-    outbox_read, outbox_settle, outbox_write, FailedWrite, LocalObject, LocalVault, Outbox,
-    PendingWrite, LOCAL_VAULT_VERSION, OUTBOX_VERSION,
+    outbox_read, outbox_settle, outbox_settle_sent, outbox_write, FailedWrite, LocalObject,
+    LocalVault, Outbox, PendingWrite, LOCAL_VAULT_VERSION, OUTBOX_VERSION,
 };
 pub use order::{
     name_key, order_bookmarks, order_by_name, order_by_recency, order_containers,

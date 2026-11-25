@@ -17,6 +17,8 @@ pub enum ClientError {
     Crypto(#[from] sealbook_crypto::CryptoError),
     #[error(transparent)]
     Http(#[from] reqwest::Error),
+    #[error("server error: {message}")]
+    Status { status: u16, message: String },
     #[error("server error: {0}")]
     Server(String),
     #[error("missing local state; register or login first")]
@@ -100,6 +102,31 @@ pub enum ClientError {
     Tls(String),
 }
 
+impl ClientError {
+    /// The HTTP status this error carries, with 0 for a request that got no
+    /// response at all (a connection, timeout or interrupted transfer), and
+    /// `None` for an error that is not about the request: the host sorts those
+    /// into a retry or a refusal with core's `flush_failure`, and must not
+    /// treat a verification failure as one it can retry.
+    pub fn http_status(&self) -> Option<u16> {
+        match self {
+            ClientError::Status { status, .. } => Some(*status),
+            ClientError::Http(err) => match err.status() {
+                Some(status) => Some(status.as_u16()),
+                None if err.is_connect()
+                    || err.is_timeout()
+                    || err.is_request()
+                    || err.is_body() =>
+                {
+                    Some(0)
+                }
+                None => None,
+            },
+            _ => None,
+        }
+    }
+}
+
 impl From<sealbook_core::CoreError> for ClientError {
     fn from(e: sealbook_core::CoreError) -> Self {
         use sealbook_core::CoreError;
@@ -154,5 +181,30 @@ impl From<sealbook_core::CoreError> for ClientError {
             // error states which schema it declared and what this build reads.
             ref schema @ CoreError::PayloadSchema { .. } => ClientError::Server(schema.to_string()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_status_error_reports_its_status_and_prints_the_servers_message() {
+        let error = ClientError::Status {
+            status: 413,
+            message: "object too large".into(),
+        };
+        assert_eq!(error.http_status(), Some(413));
+        assert_eq!(error.to_string(), "server error: object too large");
+    }
+
+    #[test]
+    fn errors_that_are_not_about_the_request_have_no_status() {
+        assert_eq!(ClientError::Server("x".into()).http_status(), None);
+        assert_eq!(ClientError::CollectionBusy.http_status(), None);
+        assert_eq!(
+            ClientError::Manifest(ManifestError("forged".into())).http_status(),
+            None
+        );
     }
 }

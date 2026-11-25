@@ -220,10 +220,7 @@ impl SealbookClient {
         let status = resp.status();
         let bytes = resp.bytes().await?;
         if !status.is_success() {
-            let msg = serde_json::from_slice::<sealbook_protocol::ErrorBody>(&bytes)
-                .map(|e| e.error)
-                .unwrap_or_else(|_| String::from_utf8_lossy(&bytes).into_owned());
-            return Err(ClientError::Server(msg));
+            return Err(status_error(status, &bytes));
         }
         Ok(String::from_utf8_lossy(&bytes).into_owned())
     }
@@ -287,10 +284,7 @@ impl SealbookClient {
             .collect();
         let bytes = resp.bytes().await?;
         if !status.is_success() {
-            let msg = serde_json::from_slice::<sealbook_protocol::ErrorBody>(&bytes)
-                .map(|e| e.error)
-                .unwrap_or_else(|_| String::from_utf8_lossy(&bytes).into_owned());
-            return Err(ClientError::Server(msg));
+            return Err(status_error(status, &bytes));
         }
         Ok(sealbook_core::HttpResponse {
             status: status.as_u16(),
@@ -322,10 +316,7 @@ impl SealbookClient {
         let status = resp.status();
         if !status.is_success() {
             let bytes = resp.bytes().await?;
-            let msg = serde_json::from_slice::<sealbook_protocol::ErrorBody>(&bytes)
-                .map(|e| e.error)
-                .unwrap_or_else(|_| String::from_utf8_lossy(&bytes).into_owned());
-            return Err(ClientError::Server(msg));
+            return Err(status_error(status, &bytes));
         }
         Ok(())
     }
@@ -346,10 +337,7 @@ impl SealbookClient {
             .map(str::to_owned);
         let bytes = resp.bytes().await?;
         if !status.is_success() {
-            let msg = serde_json::from_slice::<sealbook_protocol::ErrorBody>(&bytes)
-                .map(|e| e.error)
-                .unwrap_or_else(|_| String::from_utf8_lossy(&bytes).into_owned());
-            return Err(ClientError::Server(msg));
+            return Err(status_error(status, &bytes));
         }
         let nonce = nonce.ok_or_else(|| ClientError::Server("missing nonce header".into()))?;
         Ok((nonce, bytes.to_vec()))
@@ -362,14 +350,21 @@ impl Default for SealbookClient {
     }
 }
 
+fn status_error(status: reqwest::StatusCode, body: &[u8]) -> ClientError {
+    let message = serde_json::from_slice::<sealbook_protocol::ErrorBody>(body)
+        .map(|body| body.error)
+        .unwrap_or_else(|_| String::from_utf8_lossy(body).into_owned());
+    ClientError::Status {
+        status: status.as_u16(),
+        message,
+    }
+}
+
 async fn parse<R: serde::de::DeserializeOwned>(resp: reqwest::Response) -> Result<R, ClientError> {
     let status = resp.status();
     let bytes = resp.bytes().await?;
     if !status.is_success() {
-        let msg = serde_json::from_slice::<sealbook_protocol::ErrorBody>(&bytes)
-            .map(|e| e.error)
-            .unwrap_or_else(|_| String::from_utf8_lossy(&bytes).into_owned());
-        return Err(ClientError::Server(msg));
+        return Err(status_error(status, &bytes));
     }
     serde_json::from_slice(&bytes).map_err(|err| ClientError::Server(err.to_string()))
 }

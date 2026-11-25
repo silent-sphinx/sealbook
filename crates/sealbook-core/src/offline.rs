@@ -185,6 +185,47 @@ pub fn outbox_settle(outbox: &Outbox, ids: &[String]) -> Outbox {
     next
 }
 
+/// Takes the writes for `ids` out of `current` once they have been sent, unless
+/// one was edited again while it was in flight.
+///
+/// `planned` is the outbox the sent writes were planned from and `vault` the copy
+/// after they were applied. An entry whose payload or delete flag still matches
+/// what was planned is done. One that differs is a newer edit: it stays queued,
+/// rebased on what the server now holds, so the next flush merges it onto the
+/// write just sent rather than overwriting it.
+pub fn outbox_settle_sent(
+    current: &Outbox,
+    planned: &Outbox,
+    vault: &LocalVault,
+    ids: &[String],
+) -> Outbox {
+    let sent: HashMap<&str, &PendingWrite> = planned
+        .writes
+        .iter()
+        .map(|write| (write.id.as_str(), write))
+        .collect();
+    let mut next = current.clone();
+    let mut done = Vec::new();
+    for write in &mut next.writes {
+        let Some(was) = sent.get(write.id.as_str()) else {
+            continue;
+        };
+        if !ids.contains(&write.id) {
+            continue;
+        }
+        if was.payload == write.payload && was.tombstone == write.tombstone {
+            done.push(write.id.clone());
+        } else {
+            write.base = vault
+                .objects
+                .iter()
+                .find(|object| object.id == write.id && !object.tombstone)
+                .cloned();
+        }
+    }
+    outbox_settle(&next, &done)
+}
+
 /// Moves the writes for `ids` to the failed list, where they wait for the
 /// person rather than being retried.
 pub fn outbox_fail(outbox: &Outbox, ids: &[String], reason: &str) -> Outbox {
@@ -276,6 +317,16 @@ pub mod ffi {
     #[uniffi::export(name = "outbox_settle")]
     pub fn outbox_settle(outbox: Outbox, ids: Vec<String>) -> Outbox {
         super::outbox_settle(&outbox, &ids)
+    }
+
+    #[uniffi::export(name = "outbox_settle_sent")]
+    pub fn outbox_settle_sent(
+        current: Outbox,
+        planned: Outbox,
+        vault: LocalVault,
+        ids: Vec<String>,
+    ) -> Outbox {
+        super::outbox_settle_sent(&current, &planned, &vault, &ids)
     }
 
     #[uniffi::export(name = "outbox_fail")]

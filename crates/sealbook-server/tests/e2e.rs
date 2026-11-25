@@ -9015,3 +9015,513 @@ async fn a_rotation_moves_the_vault_to_the_current_payload_schema() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// -- The flush path a long-running host drives: catch up, plan, send one batch, settle. --
+
+const FLUSH_DATE: &str = "2026-11-25";
+
+fn note_at(title: &str, body: &str, notebook: Uuid, at: &str) -> String {
+    sealbook_client::note_write(
+        &sealbook_client::CoreNoteDraft {
+            title: title.to_string(),
+            body: body.to_string(),
+            notebook_id: notebook.to_string(),
+            ..Default::default()
+        },
+        at,
+    )
+    .expect("writes")
+}
+
+/// Queues an edit the way a host does: on top of the object as the device holds it.
+fn queue_note(
+    outbox: &sealbook_core::Outbox,
+    vault: &sealbook_core::LocalVault,
+    id: Uuid,
+    payload: String,
+    tombstone: bool,
+) -> sealbook_core::Outbox {
+    let base = vault
+        .objects
+        .iter()
+        .find(|object| object.id == id.to_string() && !object.tombstone)
+        .cloned();
+    sealbook_core::outbox_push(
+        outbox,
+        sealbook_core::PendingWrite {
+            id: id.to_string(),
+            content_type: sealbook_protocol::NOTE_CONTENT_TYPE.into(),
+            tombstone,
+            payload: if tombstone { String::new() } else { payload },
+            base,
+            queued_at: "2026-11-25T10:00:00.000Z".into(),
+        },
+    )
+}
+
+fn note_title(vault: &sealbook_core::LocalVault, id: Uuid) -> Option<String> {
+    let object = vault
+        .objects
+        .iter()
+        .find(|object| object.id == id.to_string() && !object.tombstone)?;
+    let json: serde_json::Value = serde_json::from_str(&object.payload).ok()?;
+    json["title"].as_str().map(str::to_string)
+}
+
+/// One flush as the vault crate will run it: catch up, plan, send a batch, settle,
+/// and again until the queue is empty. Returns the notices the flush raised.
+async fn flush_queue(
+    client: &mut SealbookClient,
+    vault: &mut sealbook_core::LocalVault,
+    outbox: &mut sealbook_core::Outbox,
+) -> Vec<String> {
+    let mut notices = Vec::new();
+    let mut attempt = 0;
+    for _ in 0..16 {
+        let caught = client
+            .catch_up(vault.latest_revision)
+            .await
+            .expect("catch up");
+        *vault = caught.apply(vault);
+        if outbox.writes.is_empty() {
+            return notices;
+        }
+        let plan = sealbook_core::flush_plan(
+            outbox,
+            vault,
+            FLUSH_DATE,
+            client.collection_key().expect("a key"),
+        );
+        if !plan.dropped.is_empty() {
+            let ids: Vec<String> = plan.dropped.iter().map(|drop| drop.id.clone()).collect();
+            *outbox = sealbook_core::outbox_settle(outbox, &ids);
+            notices.extend(plan.dropped.iter().filter_map(|drop| drop.notice.clone()));
+            continue;
+        }
+        let len = sealbook_core::flush_batch_len(&plan.writes) as usize;
+        match client
+            .send_flush_batch(&plan.writes[..len], attempt)
+            .await
+            .expect("send a batch")
+        {
+            sealbook_client::FlushSend::Moved { .. } => attempt += 1,
+            sealbook_client::FlushSend::Sent(sent) => {
+                *vault = sent.apply(vault);
+                *outbox = sealbook_core::outbox_settle_sent(
+                    outbox,
+                    &outbox.clone(),
+                    vault,
+                    &sent.settles,
+                );
+                notices.extend(sent.notices);
+            }
+        }
+    }
+    panic!("the queue did not empty in 16 rounds");
+}
+
+async fn two_devices(name: &str) -> (String, SealbookClient, SealbookClient) {
+    let dir = std::env::temp_dir().join(format!("sealbook-{name}-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let base = spawn_http(dir.join("sealbook.db").to_str().unwrap()).await;
+    let password = "correct horse battery";
+    let mut first = SealbookClient::plaintext_http();
+    first
+        .register(&base, name, password)
+        .await
+        .expect("register");
+    let mut second = SealbookClient::plaintext_http();
+    pair_device(&mut second, &mut first, &base, name)
+        .await
+        .expect("pair");
+    second.login(password).await.expect("login");
+    (base, first, second)
+}
+
+#[tokio::test]
+async fn a_flushed_edit_reaches_another_device_through_an_incremental_catch_up() {
+    let (_base, mut a, mut b) = two_devices("flushab").await;
+    let notebook = Uuid::new_v4();
+    let (plan_id, other_id) = (Uuid::new_v4(), Uuid::new_v4());
+    let (mut vault_a, mut outbox_a) = Default::default();
+    let mut vault_b = sealbook_core::LocalVault::default();
+
+    let before = a.state.as_ref().unwrap().fingerprint();
+    for (id, title) in [(plan_id, "Plan"), (other_id, "Other")] {
+        let payload = note_at(title, "one\ntwo", notebook, "2026-11-25T09:00:00.000Z");
+        outbox_a = queue_note(&outbox_a, &vault_a, id, payload, false);
+    }
+    flush_queue(&mut a, &mut vault_a, &mut outbox_a).await;
+    assert!(outbox_a.writes.is_empty());
+    assert_eq!(note_title(&vault_a, plan_id).as_deref(), Some("Plan"));
+    assert_ne!(
+        a.state.as_ref().unwrap().fingerprint(),
+        before,
+        "a write moves the manifest sequence the device must save"
+    );
+
+    // The second device has seen nothing, so its first read is the whole collection.
+    let first_read = b.catch_up(0).await.expect("first catch up");
+    assert!(first_read.full);
+    assert_eq!(first_read.unreadable, 0);
+    vault_b = first_read.apply(&vault_b);
+    assert_eq!(note_title(&vault_b, plan_id).as_deref(), Some("Plan"));
+    assert_eq!(note_title(&vault_b, other_id).as_deref(), Some("Other"));
+
+    let edited = note_at("Plan v2", "one\ntwo", notebook, "2026-11-25T09:30:00.000Z");
+    outbox_a = queue_note(&outbox_a, &vault_a, plan_id, edited, false);
+    flush_queue(&mut a, &mut vault_a, &mut outbox_a).await;
+
+    let read = b.catch_up(vault_b.latest_revision).await.expect("catch up");
+    assert!(!read.full, "only what changed since the mark is read");
+    assert_eq!(read.rows.len(), 1);
+    vault_b = read.apply(&vault_b);
+    assert_eq!(note_title(&vault_b, plan_id).as_deref(), Some("Plan v2"));
+    assert_eq!(note_title(&vault_b, other_id).as_deref(), Some("Other"));
+
+    outbox_a = queue_note(&outbox_a, &vault_a, other_id, String::new(), true);
+    flush_queue(&mut a, &mut vault_a, &mut outbox_a).await;
+    let read = b.catch_up(vault_b.latest_revision).await.expect("catch up");
+    assert_eq!(read.rows.len(), 1);
+    assert!(read.rows[0].tombstone && read.rows[0].payload.is_empty());
+    vault_b = read.apply(&vault_b);
+    assert_eq!(note_title(&vault_b, other_id), None);
+}
+
+#[tokio::test]
+async fn a_batch_planned_before_another_device_wrote_is_not_sent_and_the_edits_merge() {
+    let (_base, mut a, mut b) = two_devices("flushmoved").await;
+    let notebook = Uuid::new_v4();
+    let id = Uuid::new_v4();
+    let (mut vault_a, mut outbox_a) = Default::default();
+    let (mut vault_b, mut outbox_b) = (
+        sealbook_core::LocalVault::default(),
+        sealbook_core::Outbox::default(),
+    );
+
+    let created = note_at(
+        "Plan",
+        "one\ntwo\nthree\nfour",
+        notebook,
+        "2026-11-25T09:00:00.000Z",
+    );
+    outbox_a = queue_note(&outbox_a, &vault_a, id, created, false);
+    flush_queue(&mut a, &mut vault_a, &mut outbox_a).await;
+    vault_b = b.catch_up(0).await.expect("read").apply(&vault_b);
+
+    // B edits the body and plans its write; A then renames the note first.
+    let body_edit = note_at(
+        "Plan",
+        "one\ntwo\nthree\nFOUR",
+        notebook,
+        "2026-11-25T10:00:00.000Z",
+    );
+    outbox_b = queue_note(&outbox_b, &vault_b, id, body_edit, false);
+    let stale_plan =
+        sealbook_core::flush_plan(&outbox_b, &vault_b, FLUSH_DATE, b.collection_key().unwrap());
+    let rename = note_at(
+        "Plan (renamed)",
+        "one\ntwo\nthree\nfour",
+        notebook,
+        "2026-11-25T10:05:00.000Z",
+    );
+    outbox_a = queue_note(&outbox_a, &vault_a, id, rename, false);
+    flush_queue(&mut a, &mut vault_a, &mut outbox_a).await;
+
+    let held = b.state.as_ref().unwrap().manifest_seq;
+    match b
+        .send_flush_batch(&stale_plan.writes, 0)
+        .await
+        .expect("send")
+    {
+        sealbook_client::FlushSend::Moved { moved } => assert_eq!(moved, vec![id.to_string()]),
+        other => panic!("a write planned on a stale copy must not be sent: {other:?}"),
+    }
+    assert!(
+        b.state.as_ref().unwrap().manifest_seq >= held,
+        "reading the buckets only ever moves the pinned sequence forward"
+    );
+    // Past the restart limit a collection that keeps moving is busy, not an error to retry blindly.
+    let busy = b
+        .send_flush_batch(&stale_plan.writes, sealbook_core::SYNC_RESTART_LIMIT)
+        .await
+        .expect_err("a plan made too many times is refused");
+    assert!(
+        matches!(busy, sealbook_client::ClientError::CollectionBusy),
+        "{busy}"
+    );
+
+    flush_queue(&mut b, &mut vault_b, &mut outbox_b).await;
+    assert!(outbox_b.writes.is_empty());
+    let merged: serde_json::Value = serde_json::from_str(
+        &vault_b
+            .objects
+            .iter()
+            .find(|object| object.id == id.to_string())
+            .unwrap()
+            .payload,
+    )
+    .unwrap();
+    assert_eq!(
+        merged["title"], "Plan (renamed)",
+        "the other device's rename landed"
+    );
+    assert_eq!(
+        merged["body"], "one\ntwo\nthree\nFOUR",
+        "and so did this device's body edit"
+    );
+}
+
+#[tokio::test]
+async fn edits_to_the_same_line_on_two_devices_keep_both_as_a_conflicted_copy() {
+    let (_base, mut a, mut b) = two_devices("flushcopy").await;
+    let notebook = Uuid::new_v4();
+    let id = Uuid::new_v4();
+    let (mut vault_a, mut outbox_a) = Default::default();
+    let (mut vault_b, mut outbox_b) = (
+        sealbook_core::LocalVault::default(),
+        sealbook_core::Outbox::default(),
+    );
+
+    let created = note_at("Plan", "one\ntwo", notebook, "2026-11-25T09:00:00.000Z");
+    outbox_a = queue_note(&outbox_a, &vault_a, id, created, false);
+    flush_queue(&mut a, &mut vault_a, &mut outbox_a).await;
+    vault_b = b.catch_up(0).await.expect("read").apply(&vault_b);
+
+    let theirs = note_at("Plan", "one\nTWO", notebook, "2026-11-25T10:00:00.000Z");
+    let ours = note_at("Plan", "one\n2", notebook, "2026-11-25T10:01:00.000Z");
+    outbox_a = queue_note(&outbox_a, &vault_a, id, theirs, false);
+    outbox_b = queue_note(&outbox_b, &vault_b, id, ours, false);
+    flush_queue(&mut a, &mut vault_a, &mut outbox_a).await;
+    let notices = flush_queue(&mut b, &mut vault_b, &mut outbox_b).await;
+
+    assert!(
+        outbox_b.writes.is_empty(),
+        "the pair settles the one queued write"
+    );
+    assert_eq!(
+        notices.len(),
+        1,
+        "the conflicted copy is announced once: {notices:?}"
+    );
+    let live: Vec<&sealbook_core::LocalObject> = vault_b
+        .objects
+        .iter()
+        .filter(|object| !object.tombstone)
+        .collect();
+    assert_eq!(live.len(), 2, "the note and its conflicted copy");
+    let bodies: Vec<String> = live
+        .iter()
+        .map(|object| {
+            serde_json::from_str::<serde_json::Value>(&object.payload).unwrap()["body"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
+        .collect();
+    assert!(bodies.contains(&"one\nTWO".to_string()) && bodies.contains(&"one\n2".to_string()));
+}
+
+#[tokio::test]
+async fn an_edit_made_while_a_write_was_in_flight_is_sent_on_top_of_it() {
+    let (_base, mut a, _b) = two_devices("flushinflight").await;
+    let notebook = Uuid::new_v4();
+    let id = Uuid::new_v4();
+    let (mut vault, mut outbox) = Default::default();
+
+    let created = note_at("Plan", "one", notebook, "2026-11-25T09:00:00.000Z");
+    outbox = queue_note(&outbox, &vault, id, created, false);
+    flush_queue(&mut a, &mut vault, &mut outbox).await;
+
+    let second = note_at("Plan v2", "one", notebook, "2026-11-25T09:10:00.000Z");
+    outbox = queue_note(&outbox, &vault, id, second, false);
+    let planned = outbox.clone();
+    let plan = sealbook_core::flush_plan(&outbox, &vault, FLUSH_DATE, a.collection_key().unwrap());
+    let len = sealbook_core::flush_batch_len(&plan.writes) as usize;
+    let sealbook_client::FlushSend::Sent(sent) = a
+        .send_flush_batch(&plan.writes[..len], 0)
+        .await
+        .expect("send")
+    else {
+        panic!("nothing moved, so the batch is sent");
+    };
+
+    // The person edits again before the send is taken out of the queue.
+    let third = note_at("Plan v3", "one", notebook, "2026-11-25T09:11:00.000Z");
+    outbox = queue_note(&outbox, &vault, id, third, false);
+    vault = sent.apply(&vault);
+    outbox = sealbook_core::outbox_settle_sent(&outbox, &planned, &vault, &sent.settles);
+    assert_eq!(outbox.writes.len(), 1, "the newer edit is still queued");
+    assert_eq!(
+        outbox.writes[0].base.as_ref().map(|base| base.revision),
+        vault
+            .objects
+            .iter()
+            .find(|object| object.id == id.to_string())
+            .map(|object| object.revision),
+        "rebased on what was just written"
+    );
+
+    let notices = flush_queue(&mut a, &mut vault, &mut outbox).await;
+    assert!(
+        notices.is_empty(),
+        "no conflict with its own earlier write: {notices:?}"
+    );
+    assert_eq!(
+        vault
+            .objects
+            .iter()
+            .filter(|object| !object.tombstone)
+            .count(),
+        1
+    );
+    assert_eq!(note_title(&vault, id).as_deref(), Some("Plan v3"));
+}
+
+/// One account with two notes written and then one edited, and the revision a
+/// reader had reached before that edit, so the edit is what an incremental
+/// catch-up has to read.
+async fn account_with_an_unread_edit(
+    name: &str,
+) -> (std::path::PathBuf, SealbookClient, u64, Uuid) {
+    let dir = std::env::temp_dir().join(format!("sealbook-{name}-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("sealbook.db");
+    let base = spawn_http(db.to_str().unwrap()).await;
+    let mut client = SealbookClient::plaintext_http();
+    client
+        .register(&base, name, "correct horse battery")
+        .await
+        .expect("register");
+    let notebook = Uuid::new_v4();
+    let (edited, other) = (Uuid::new_v4(), Uuid::new_v4());
+    let (mut vault, mut outbox) = Default::default();
+    for (id, title) in [(edited, "Plan"), (other, "Other")] {
+        let payload = note_at(title, "one", notebook, "2026-11-25T09:00:00.000Z");
+        outbox = queue_note(&outbox, &vault, id, payload, false);
+    }
+    flush_queue(&mut client, &mut vault, &mut outbox).await;
+    let mark = vault.latest_revision;
+    let payload = note_at("Plan v2", "one", notebook, "2026-11-25T09:30:00.000Z");
+    outbox = queue_note(&outbox, &vault, edited, payload, false);
+    flush_queue(&mut client, &mut vault, &mut outbox).await;
+    (db, client, mark, edited)
+}
+
+/// The incremental feed reads the revision log, not the live table the manifest
+/// buckets are built from, so the manifest is honest while the rows are not. The
+/// whole-collection check cannot see this: it only covers a full read.
+async fn forge_the_logged_row(db: &std::path::Path, edited: Uuid, change: &str) {
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    sqlx::query(&format!(
+        "UPDATE object_revisions SET {change} WHERE object_id = ?1 AND revision =
+             (SELECT MAX(revision) FROM object_revisions WHERE object_id = ?1)"
+    ))
+    .bind(edited.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn an_incremental_catch_up_refuses_a_row_whose_ciphertext_the_manifest_does_not_commit_to() {
+    let (db, mut client, mark, edited) = account_with_an_unread_edit("tamperrow").await;
+    // The first revision of the same object: the older ciphertext under the current revision.
+    forge_the_logged_row(
+        &db,
+        edited,
+        "ciphertext = (SELECT ciphertext FROM object_revisions o
+                       WHERE o.object_id = object_revisions.object_id ORDER BY o.revision LIMIT 1),
+         nonce = (SELECT nonce FROM object_revisions o
+                  WHERE o.object_id = object_revisions.object_id ORDER BY o.revision LIMIT 1)",
+    )
+    .await;
+
+    let error = client
+        .catch_up(mark)
+        .await
+        .expect_err("a relabelled older ciphertext must not be accepted");
+    assert!(
+        matches!(&error, sealbook_client::ClientError::Manifest(detail) if detail.0.contains("differs from the vault manifest")),
+        "{error}"
+    );
+}
+
+#[tokio::test]
+async fn an_incremental_catch_up_refuses_a_forged_tombstone() {
+    let (db, mut client, mark, edited) = account_with_an_unread_edit("tombstone").await;
+    forge_the_logged_row(&db, edited, "tombstone = 1").await;
+
+    let error = client
+        .catch_up(mark)
+        .await
+        .expect_err("a forged delete must not be accepted");
+    assert!(
+        matches!(&error, sealbook_client::ClientError::Manifest(detail) if detail.0.contains("differs from the vault manifest")),
+        "{error}"
+    );
+}
+
+#[tokio::test]
+async fn a_failed_request_reports_the_status_core_sorts_it_by() {
+    let (_base, mut client, _b) = two_devices("statuses").await;
+    let notebook = Uuid::new_v4();
+    let write = |payload: String| sealbook_core::FlushWrite {
+        id: Uuid::new_v4().to_string(),
+        content_type: sealbook_protocol::NOTE_CONTENT_TYPE.into(),
+        tombstone: false,
+        payload,
+        expect_revision: None,
+        settles: "w".into(),
+        copy: false,
+        notice: None,
+    };
+
+    // Past the object ceiling: refused for good. The server would drop the connection while
+    // the body was still being sent, so the client refuses it itself.
+    let huge = format!(
+        "{}{}",
+        "x".repeat(9 * 1024 * 1024),
+        note_at("t", "b", notebook, "2026-11-25T09:00:00.000Z")
+    );
+    let error = client
+        .send_flush_batch(&[write(huge)], 0)
+        .await
+        .expect_err("too large");
+    let status = error.http_status().expect("a refusal has a status");
+    assert_eq!(status, 413, "{error}");
+    assert_eq!(
+        sealbook_core::flush_failure(status),
+        sealbook_core::FlushFailure::Refused
+    );
+
+    // An expired session: sign in again, keep the writes.
+    let token = client.state.as_ref().unwrap().session_token.clone();
+    client.state.as_mut().unwrap().session_token = Some("not a session".into());
+    let error = client.catch_up(0).await.expect_err("signed out");
+    assert_eq!(error.http_status(), Some(401), "{error}");
+    assert_eq!(
+        sealbook_core::flush_failure(401),
+        sealbook_core::FlushFailure::SignIn
+    );
+    client.state.as_mut().unwrap().session_token = token;
+
+    // No server at all: a status of 0, which is retried.
+    let server = client.state.as_ref().unwrap().server.clone();
+    client.state.as_mut().unwrap().server = "http://127.0.0.1:1".into();
+    let error = client.catch_up(0).await.expect_err("unreachable");
+    assert_eq!(error.http_status(), Some(0), "{error}");
+    assert_eq!(
+        sealbook_core::flush_failure(0),
+        sealbook_core::FlushFailure::Retry
+    );
+    client.state.as_mut().unwrap().server = server;
+
+    // A verification failure is not a request failure and must not read as one.
+    let manifest =
+        sealbook_client::ClientError::Manifest(sealbook_client::ManifestError("forged".into()));
+    assert_eq!(manifest.http_status(), None);
+}

@@ -227,6 +227,30 @@ pub fn write_guard(
     Ok(guard)
 }
 
+/// How many of the leading `writes` go in the next batch.
+///
+/// The batch size core gives every client, extended so it never splits the
+/// writes that settle one outbox entry: a conflict's merged write and its copy
+/// go together, or a failure between the two requests would leave one sent and
+/// the entry still queued.
+pub fn flush_batch_len(writes: &[FlushWrite]) -> u32 {
+    if writes.is_empty() {
+        return 0;
+    }
+    let lengths: Vec<u64> = writes
+        .iter()
+        .map(|write| write.payload.len() as u64)
+        .collect();
+    let first = crate::write_batches(&lengths)
+        .first()
+        .map_or(1, |count| (*count as usize).max(1));
+    let mut end = first.min(writes.len());
+    while end < writes.len() && writes[end].settles == writes[end - 1].settles {
+        end += 1;
+    }
+    end as u32
+}
+
 /// What a write request's HTTP status means, with 0 for no response at all.
 pub fn flush_failure(status: u16) -> FlushFailure {
     match status {
@@ -263,6 +287,11 @@ pub mod ffi {
         super::write_guard(&writes, &entries, attempt)
     }
 
+    #[uniffi::export(name = "flush_batch_len")]
+    pub fn flush_batch_len(writes: Vec<FlushWrite>) -> u32 {
+        super::flush_batch_len(&writes)
+    }
+
     #[uniffi::export(name = "flush_failure")]
     pub fn flush_failure(status: u16) -> FlushFailure {
         super::flush_failure(status)
@@ -281,6 +310,53 @@ mod tests {
         assert_eq!(flush_failure(401), FlushFailure::SignIn);
         assert_eq!(flush_failure(413), FlushFailure::Refused);
         assert_eq!(flush_failure(403), FlushFailure::Refused);
+    }
+
+    fn write(settles: &str, id: u128, payload: &str) -> FlushWrite {
+        FlushWrite {
+            id: Uuid::from_u128(id).to_string(),
+            content_type: String::new(),
+            tombstone: false,
+            payload: payload.into(),
+            expect_revision: None,
+            settles: settles.into(),
+            copy: false,
+            notice: None,
+        }
+    }
+
+    #[test]
+    fn a_batch_never_splits_the_writes_that_settle_one_entry() {
+        let limit = sealbook_protocol::MAX_BATCH_OBJECTS;
+        let mut writes: Vec<FlushWrite> = (0..limit - 1)
+            .map(|at| write(&format!("w{at}"), at as u128, "x"))
+            .collect();
+        writes.push(write("pair", limit as u128, "merged"));
+        writes.push(write("pair", limit as u128 + 1, "copy"));
+        writes.push(write("after", limit as u128 + 2, "x"));
+        assert_eq!(flush_batch_len(&writes), limit as u32 + 1);
+        assert_eq!(flush_batch_len(&writes[..limit]), limit as u32);
+    }
+
+    #[test]
+    fn an_oversized_write_goes_alone_and_nothing_queued_is_no_batch() {
+        let over = "x".repeat(sealbook_protocol::MAX_BATCH_BYTES + 1);
+        let writes = vec![write("a", 1, &over), write("b", 2, "x")];
+        assert_eq!(flush_batch_len(&writes), 1);
+        assert_eq!(flush_batch_len(&[]), 0);
+    }
+
+    #[test]
+    fn a_batch_counts_bytes_not_characters() {
+        // Each payload is a quarter of the byte budget in bytes, so four fill a batch. Counted
+        // in characters, which are two bytes each here, all five would look small enough.
+        let quarter_bytes = sealbook_protocol::MAX_BATCH_BYTES / 4 - 4;
+        let payload = "é".repeat(quarter_bytes / 2);
+        assert_eq!(payload.len(), quarter_bytes);
+        let writes: Vec<FlushWrite> = (0..5)
+            .map(|at| write(&format!("w{at}"), at, &payload))
+            .collect();
+        assert_eq!(flush_batch_len(&writes), 4);
     }
 
     #[test]

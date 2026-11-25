@@ -25,9 +25,10 @@ mod trash;
 pub use attachments::UploadedAttachment;
 pub use client::SealbookClient;
 pub use error::{ClientError, ManifestError};
-pub use objects::{ExportedObject, ExportedVault};
+pub use objects::{ExportedObject, ExportedVault, FlushSend, FlushSent};
 pub use pairing::JoinPairing;
 pub use state::LocalState;
+pub use sync::CatchUp;
 pub use tls::{certificate_from_pem, pq_tls_config, TrustAnchors};
 pub use trash::{trash_nodes, TrashObject};
 

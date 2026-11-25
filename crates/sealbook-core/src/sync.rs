@@ -16,9 +16,11 @@ use sealbook_crypto::{decrypt_object, object_aad, CollectionKey, EncryptedObject
 use sealbook_protocol::envelope::{open_envelope, Unsealed};
 use sealbook_protocol::{ManifestBody, DEFAULT_CHANGES_LIMIT};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::{CoreError, Header, HttpRequest, Method};
+use crate::manifest::manifest_entry_for;
+use crate::{CoreError, CoreManifestEntry, Header, HttpRequest, Method};
 
 /// Rows a walk asks for per page. The server clamps above its own maximum.
 pub const CHANGES_PAGE_LIMIT: usize = DEFAULT_CHANGES_LIMIT;
@@ -480,6 +482,67 @@ pub fn require_key_epoch(expected: u64, held: u64) -> Result<(), CoreError> {
     Ok(())
 }
 
+/// What an incremental read's rows came to, set against the signed entries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
+pub enum RowsCheck {
+    Verified,
+    /// The manifest is already past a row, so the read and the manifest describe
+    /// different states: read again.
+    Moved,
+}
+
+/// Sets the rows an incremental read returned against the entries the signed
+/// manifest holds for them.
+///
+/// Opening a row proves nothing here: a tombstone needs no ciphertext, and an
+/// older ciphertext relabelled with the current revision opens like the real
+/// one. So the check is on what the manifest commits to. [`RowsCheck::Moved`] is
+/// a race, to be read again; anything else that differs is a server serving what
+/// no device signed, which is [`CoreError::Manifest`] and never retried away.
+pub fn check_rows_against_entries(
+    rows: &[CoreSealedRow],
+    entries: &[CoreManifestEntry],
+) -> Result<RowsCheck, CoreError> {
+    let signed: HashMap<Uuid, &CoreManifestEntry> =
+        entries.iter().map(|entry| (entry.id, entry)).collect();
+    let mut moved = false;
+    for row in rows {
+        let Some(entry) = signed.get(&row.id) else {
+            return Err(CoreError::Manifest {
+                detail: "The server returned an object that the vault manifest does not list."
+                    .into(),
+            });
+        };
+        if entry.revision > row.revision {
+            moved = true;
+            continue;
+        }
+        let served = manifest_entry_for(
+            row.id,
+            row.revision,
+            row.tombstone,
+            &row.nonce,
+            &row.ciphertext,
+        )?;
+        if entry.revision < row.revision
+            || entry.tombstone != served.tombstone
+            || entry.content_digest != served.content_digest
+        {
+            return Err(CoreError::Manifest {
+                detail: "The server returned an object that differs from the vault manifest."
+                    .into(),
+            });
+        }
+    }
+    Ok(if moved {
+        RowsCheck::Moved
+    } else {
+        RowsCheck::Verified
+    })
+}
+
 fn unreadable(reason: UnreadableReason) -> RowOutcome {
     RowOutcome::Unreadable { reason }
 }
@@ -904,8 +967,8 @@ mod tests {
 #[cfg(feature = "uniffi")]
 pub mod ffi {
     use super::{
-        ChangesPage, CoreError, CoreSealedRow, HttpRequest, RowOutcome, RowRef, WalkCursor,
-        WalkStep,
+        ChangesPage, CoreError, CoreManifestEntry, CoreSealedRow, HttpRequest, RowOutcome, RowRef,
+        RowsCheck, WalkCursor, WalkStep,
     };
     use uuid::Uuid;
 
@@ -952,5 +1015,13 @@ pub mod ffi {
     #[uniffi::export]
     pub fn unreadable_rows(outcomes: Vec<RowOutcome>) -> Result<u64, CoreError> {
         super::unreadable_rows(&outcomes)
+    }
+
+    #[uniffi::export]
+    pub fn check_rows_against_entries(
+        rows: Vec<CoreSealedRow>,
+        entries: Vec<CoreManifestEntry>,
+    ) -> Result<RowsCheck, CoreError> {
+        super::check_rows_against_entries(&rows, &entries)
     }
 }

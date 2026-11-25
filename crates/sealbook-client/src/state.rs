@@ -35,6 +35,30 @@ pub struct LocalState {
 }
 
 impl LocalState {
+    /// A value that changes whenever anything persisted in this state does: the
+    /// session token, the manifest sequence, the pinned roster.
+    ///
+    /// A host compares it before and after a round of work to know when to save
+    /// the state again. It is a 64-bit non-cryptographic hash, for comparing within
+    /// one process; it is not stable across builds and is never to be stored.
+    pub fn fingerprint(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.server.hash(&mut hasher);
+        self.username.hash(&mut hasher);
+        self.account_id.hash(&mut hasher);
+        self.collection_id.hash(&mut hasher);
+        self.device_id.hash(&mut hasher);
+        self.session_token.hash(&mut hasher);
+        self.hpke_sk.hash(&mut hasher);
+        self.mldsa_seed.hash(&mut hasher);
+        self.ed25519_sk.hash(&mut hasher);
+        self.manifest_seq.hash(&mut hasher);
+        self.roster_seq.hash(&mut hasher);
+        self.roster_transcript.hash(&mut hasher);
+        hasher.finish()
+    }
+
     /// The same fields core names, for the decisions core makes.
     pub fn to_core(&self) -> sealbook_core::CoreDeviceState {
         sealbook_core::CoreDeviceState {
@@ -81,5 +105,45 @@ impl Drop for LocalState {
         if let Some(token) = &mut self.session_token {
             token.zeroize();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state() -> LocalState {
+        LocalState {
+            server: "https://sealbook.example".into(),
+            username: "ada".into(),
+            account_id: Uuid::from_u128(1),
+            collection_id: Uuid::from_u128(2),
+            device_id: Uuid::from_u128(3),
+            session_token: Some("token".into()),
+            hpke_sk: vec![1],
+            mldsa_seed: vec![2],
+            ed25519_sk: vec![3],
+            manifest_seq: 4,
+            roster_seq: 5,
+            roster_transcript: vec![6],
+        }
+    }
+
+    #[test]
+    fn the_fingerprint_follows_what_is_persisted() {
+        let before = state();
+        assert_eq!(before.fingerprint(), before.clone().fingerprint());
+
+        let mut changed = before.clone();
+        changed.manifest_seq += 1;
+        assert_ne!(changed.fingerprint(), before.fingerprint());
+
+        let mut changed = before.clone();
+        changed.roster_transcript = vec![7];
+        assert_ne!(changed.fingerprint(), before.fingerprint());
+
+        let mut changed = before.clone();
+        changed.session_token = None;
+        assert_ne!(changed.fingerprint(), before.fingerprint());
     }
 }

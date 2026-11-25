@@ -31,6 +31,8 @@ struct Fixture {
     outbox: Vec<OutboxCase>,
     merge: Vec<MergeCase>,
     flush: Vec<FlushCase>,
+    settle: Vec<SettleCase>,
+    batch: Vec<BatchCase>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -58,6 +60,25 @@ struct FlushCase {
     vault: LocalVault,
     outbox: Outbox,
     plan: FlushPlan,
+}
+
+/// A flush that planned `planned`, sent the writes for `ids`, and found the outbox
+/// as `current` by the time they were taken.
+#[derive(Serialize, Deserialize)]
+struct SettleCase {
+    case: String,
+    current: Outbox,
+    planned: Outbox,
+    vault: LocalVault,
+    ids: Vec<String>,
+    outbox: Outbox,
+}
+
+#[derive(Serialize, Deserialize)]
+struct BatchCase {
+    case: String,
+    writes: Vec<FlushWrite>,
+    len: u32,
 }
 
 fn object(id: &str, content_type: &str, revision: u64, payload: &Value) -> LocalObject {
@@ -369,6 +390,146 @@ fn flush_inputs() -> Vec<(String, LocalVault, Vec<PendingWrite>)> {
     ]
 }
 
+fn outbox_of(writes: Vec<PendingWrite>) -> Outbox {
+    Outbox {
+        version: OUTBOX_VERSION,
+        writes,
+        failed: Vec::new(),
+    }
+}
+
+fn settle_inputs() -> Vec<(String, Outbox, Outbox, LocalVault, Vec<String>)> {
+    let base = object(NOTE_A, NOTE_CONTENT_TYPE, 4, &note("Plan", "a"));
+    let sent = object(NOTE_A, NOTE_CONTENT_TYPE, 9, &note("Plan v2", "a"));
+    let planned = outbox_of(vec![
+        edit(
+            Some(base.clone()),
+            NOTE_A,
+            NOTE_CONTENT_TYPE,
+            &note("Plan v2", "a"),
+        ),
+        edit(None, NOTE_C, NOTE_CONTENT_TYPE, &note("New", "")),
+    ]);
+    let after_send = vault(9, vec![sent.clone()]);
+    let ids = |ids: &[&str]| ids.iter().map(|id| id.to_string()).collect::<Vec<_>>();
+    // A refused version of a note that was edited and queued again, then sent.
+    let mut with_failed = planned.clone();
+    with_failed.failed.push(FailedWrite {
+        write: edit(None, NOTE_A, NOTE_CONTENT_TYPE, &note("Refused", "")),
+        reason: "too large".into(),
+    });
+    vec![
+        (
+            "writes that were not edited again are taken out".into(),
+            planned.clone(),
+            planned.clone(),
+            after_send.clone(),
+            ids(&[NOTE_A, NOTE_C]),
+        ),
+        (
+            "a write edited again in flight stays, rebased on what the server now holds".into(),
+            outbox_of(vec![
+                edit(
+                    Some(base.clone()),
+                    NOTE_A,
+                    NOTE_CONTENT_TYPE,
+                    &note("Plan v3", "a"),
+                ),
+                planned.writes[1].clone(),
+            ]),
+            planned.clone(),
+            after_send.clone(),
+            ids(&[NOTE_A, NOTE_C]),
+        ),
+        (
+            "a write edited again in flight has no base when the server holds none".into(),
+            outbox_of(vec![
+                planned.writes[0].clone(),
+                edit(None, NOTE_C, NOTE_CONTENT_TYPE, &note("New, renamed", "")),
+            ]),
+            planned.clone(),
+            vault(9, vec![deleted(NOTE_C, NOTE_CONTENT_TYPE, 9), sent.clone()]),
+            ids(&[NOTE_A, NOTE_C]),
+        ),
+        (
+            "a delete queued over a sent edit stays".into(),
+            outbox_of(vec![delete(Some(base.clone()), NOTE_A, NOTE_CONTENT_TYPE)]),
+            outbox_of(vec![planned.writes[0].clone()]),
+            after_send.clone(),
+            ids(&[NOTE_A]),
+        ),
+        (
+            "a write outside the settled ids stays, edited or not".into(),
+            planned.clone(),
+            planned.clone(),
+            after_send.clone(),
+            ids(&[NOTE_A]),
+        ),
+        (
+            "a write queued after the plan is left alone".into(),
+            outbox_of(vec![
+                planned.writes[0].clone(),
+                edit(None, NOTE_B, NOTE_CONTENT_TYPE, &note("Later", "")),
+            ]),
+            outbox_of(vec![planned.writes[0].clone()]),
+            after_send.clone(),
+            ids(&[NOTE_A, NOTE_B]),
+        ),
+        (
+            "a failed entry for a settled id goes with it, one for another id stays".into(),
+            {
+                let mut other = with_failed.clone();
+                other.failed.push(FailedWrite {
+                    write: edit(None, NOTE_B, NOTE_CONTENT_TYPE, &note("Refused too", "")),
+                    reason: "too large".into(),
+                });
+                other
+            },
+            planned,
+            after_send,
+            ids(&[NOTE_A, NOTE_C]),
+        ),
+    ]
+}
+
+fn flush_write(settles: &str, id: &str, payload: &str) -> FlushWrite {
+    FlushWrite {
+        id: id.into(),
+        content_type: NOTE_CONTENT_TYPE.into(),
+        tombstone: false,
+        payload: payload.into(),
+        expect_revision: None,
+        settles: settles.into(),
+        copy: false,
+        notice: None,
+    }
+}
+
+fn batch_inputs() -> Vec<(String, Vec<FlushWrite>)> {
+    let pair = vec![
+        flush_write(NOTE_A, NOTE_A, "merged"),
+        FlushWrite {
+            copy: true,
+            ..flush_write(NOTE_A, NOTE_B, "copy")
+        },
+    ];
+    vec![
+        ("nothing queued is an empty batch".into(), vec![]),
+        (
+            "small writes go together".into(),
+            vec![
+                flush_write(NOTE_A, NOTE_A, "a"),
+                flush_write(NOTE_B, NOTE_B, "b"),
+                flush_write(NOTE_C, NOTE_C, "c"),
+            ],
+        ),
+        (
+            "a conflict's merged write and copy stay together".into(),
+            pair,
+        ),
+    ]
+}
+
 fn key() -> CollectionKey {
     CollectionKey::from_bytes([9; 32])
 }
@@ -426,6 +587,27 @@ fn build() -> Fixture {
                 }
             })
             .collect(),
+        settle: settle_inputs()
+            .into_iter()
+            .map(|(case, current, planned, vault, ids)| {
+                let outbox = outbox_settle_sent(&current, &planned, &vault, &ids);
+                SettleCase {
+                    case,
+                    current,
+                    planned,
+                    vault,
+                    ids,
+                    outbox,
+                }
+            })
+            .collect(),
+        batch: batch_inputs()
+            .into_iter()
+            .map(|(case, writes)| {
+                let len = flush_batch_len(&writes);
+                BatchCase { case, writes, len }
+            })
+            .collect(),
     }
 }
 
@@ -472,6 +654,54 @@ fn every_flush_plans_what_the_fixture_holds() {
         let plan = flush_plan(&case.outbox, &case.vault, &fixture.date, &key());
         assert_eq!(plan, case.plan, "{}", case.case);
     }
+}
+
+#[test]
+fn every_settle_leaves_what_the_fixture_holds() {
+    for case in fixture().settle {
+        let outbox = outbox_settle_sent(&case.current, &case.planned, &case.vault, &case.ids);
+        assert_eq!(outbox, case.outbox, "{}", case.case);
+    }
+}
+
+#[test]
+fn every_batch_takes_what_the_fixture_holds() {
+    for case in fixture().batch {
+        assert_eq!(flush_batch_len(&case.writes), case.len, "{}", case.case);
+    }
+}
+
+/// Spelled out rather than read from the fixture, so a wrong fixture cannot
+/// make a wrong rule pass.
+#[test]
+fn the_settle_rules_hold_independent_of_the_fixture() {
+    let cases = settle_inputs();
+    let result = |at: usize| {
+        let (_, current, planned, vault, ids) = &cases[at];
+        outbox_settle_sent(current, planned, vault, ids)
+    };
+    assert!(result(0).writes.is_empty());
+
+    let rebased = result(1);
+    assert_eq!(rebased.writes.len(), 1);
+    assert_eq!(rebased.writes[0].id, NOTE_A);
+    assert_eq!(rebased.writes[0].base.as_ref().unwrap().revision, 9);
+
+    let none_held = result(2);
+    assert_eq!(none_held.writes.len(), 1);
+    assert_eq!(none_held.writes[0].id, NOTE_C);
+    assert_eq!(none_held.writes[0].base, None);
+
+    assert_eq!(result(3).writes.len(), 1);
+    assert!(result(3).writes[0].tombstone);
+    assert_eq!(result(4).writes.len(), 1);
+    assert_eq!(result(4).writes[0].id, NOTE_C);
+    assert_eq!(result(5).writes.len(), 1);
+    assert_eq!(result(5).writes[0].id, NOTE_B);
+    let last = result(6);
+    assert!(last.writes.is_empty());
+    assert_eq!(last.failed.len(), 1);
+    assert_eq!(last.failed[0].write.id, NOTE_B);
 }
 
 #[test]

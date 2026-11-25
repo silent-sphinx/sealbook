@@ -1,0 +1,199 @@
+{
+  "cases": [
+    {
+      "case": "rows that are what the manifest commits to",
+      "rows": [
+        {
+          "id": "00000000-0000-0000-0000-00000000000a",
+          "revision": 5,
+          "tombstone": false,
+          "nonce": "AAAAAAAAAAAAAAAA",
+          "ciphertext": "Y2lwaGVydGV4dA",
+          "padded_size": 16
+        },
+        {
+          "id": "00000000-0000-0000-0000-00000000000b",
+          "revision": 6,
+          "tombstone": true,
+          "nonce": "AAAAAAAAAAAAAAAA",
+          "ciphertext": "Y2lwaGVydGV4dA",
+          "padded_size": 16
+        }
+      ],
+      "entries": [
+        {
+          "id": "00000000-0000-0000-0000-00000000000a",
+          "revision": 5,
+          "tombstone": false,
+          "content_digest": "n7XQDCoGSN33PcJ8IxylhE-oLUxKo2WzqVSGYDrJXSE"
+        },
+        {
+          "id": "00000000-0000-0000-0000-00000000000b",
+          "revision": 6,
+          "tombstone": true,
+          "content_digest": "n7XQDCoGSN33PcJ8IxylhE-oLUxKo2WzqVSGYDrJXSE"
+        }
+      ],
+      "answer": "Verified"
+    },
+    {
+      "case": "no rows need nothing",
+      "rows": [],
+      "entries": [
+        {
+          "id": "00000000-0000-0000-0000-00000000000a",
+          "revision": 5,
+          "tombstone": false,
+          "content_digest": "n7XQDCoGSN33PcJ8IxylhE-oLUxKo2WzqVSGYDrJXSE"
+        }
+      ],
+      "answer": "Verified"
+    },
+    {
+      "case": "a forged tombstone for an object the manifest holds live",
+      "rows": [
+        {
+          "id": "00000000-0000-0000-0000-00000000000a",
+          "revision": 6,
+          "tombstone": true,
+          "nonce": "AAAAAAAAAAAAAAAA",
+          "ciphertext": "Y2lwaGVydGV4dA",
+          "padded_size": 16
+        }
+      ],
+      "entries": [
+        {
+          "id": "00000000-0000-0000-0000-00000000000a",
+          "revision": 6,
+          "tombstone": false,
+          "content_digest": "n7XQDCoGSN33PcJ8IxylhE-oLUxKo2WzqVSGYDrJXSE"
+        }
+      ],
+      "answer": "ManifestError"
+    },
+    {
+      "case": "an older ciphertext relabelled with the current revision",
+      "rows": [
+        {
+          "id": "00000000-0000-0000-0000-00000000000a",
+          "revision": 5,
+          "tombstone": false,
+          "nonce": "AAAAAAAAAAAAAAAA",
+          "ciphertext": "b2xkZXIgdmVyc2lvbg",
+          "padded_size": 16
+        }
+      ],
+      "entries": [
+        {
+          "id": "00000000-0000-0000-0000-00000000000a",
+          "revision": 5,
+          "tombstone": false,
+          "content_digest": "n7XQDCoGSN33PcJ8IxylhE-oLUxKo2WzqVSGYDrJXSE"
+        }
+      ],
+      "answer": "ManifestError"
+    },
+    {
+      "case": "an object the manifest does not list",
+      "rows": [
+        {
+          "id": "00000000-0000-0000-0000-00000000000c",
+          "revision": 5,
+          "tombstone": false,
+          "nonce": "AAAAAAAAAAAAAAAA",
+          "ciphertext": "Y2lwaGVydGV4dA",
+          "padded_size": 16
+        }
+      ],
+      "entries": [
+        {
+          "id": "00000000-0000-0000-0000-00000000000a",
+          "revision": 5,
+          "tombstone": false,
+          "content_digest": "n7XQDCoGSN33PcJ8IxylhE-oLUxKo2WzqVSGYDrJXSE"
+        }
+      ],
+      "answer": "ManifestError"
+    },
+    {
+      "case": "an object newer than the manifest knows",
+      "rows": [
+        {
+          "id": "00000000-0000-0000-0000-00000000000a",
+          "revision": 9,
+          "tombstone": false,
+          "nonce": "AAAAAAAAAAAAAAAA",
+          "ciphertext": "Y2lwaGVydGV4dA",
+          "padded_size": 16
+        }
+      ],
+      "entries": [
+        {
+          "id": "00000000-0000-0000-0000-00000000000a",
+          "revision": 5,
+          "tombstone": false,
+          "content_digest": "n7XQDCoGSN33PcJ8IxylhE-oLUxKo2WzqVSGYDrJXSE"
+        }
+      ],
+      "answer": "ManifestError"
+    },
+    {
+      "case": "a manifest already past the row asks for another read",
+      "rows": [
+        {
+          "id": "00000000-0000-0000-0000-00000000000a",
+          "revision": 5,
+          "tombstone": false,
+          "nonce": "AAAAAAAAAAAAAAAA",
+          "ciphertext": "Y2lwaGVydGV4dA",
+          "padded_size": 16
+        }
+      ],
+      "entries": [
+        {
+          "id": "00000000-0000-0000-0000-00000000000a",
+          "revision": 8,
+          "tombstone": false,
+          "content_digest": "n7XQDCoGSN33PcJ8IxylhE-oLUxKo2WzqVSGYDrJXSE"
+        }
+      ],
+      "answer": "Moved"
+    },
+    {
+      "case": "a moved row does not excuse a forged one beside it",
+      "rows": [
+        {
+          "id": "00000000-0000-0000-0000-00000000000a",
+          "revision": 5,
+          "tombstone": false,
+          "nonce": "AAAAAAAAAAAAAAAA",
+          "ciphertext": "Y2lwaGVydGV4dA",
+          "padded_size": 16
+        },
+        {
+          "id": "00000000-0000-0000-0000-00000000000b",
+          "revision": 6,
+          "tombstone": true,
+          "nonce": "AAAAAAAAAAAAAAAA",
+          "ciphertext": "b2xkZXIgdmVyc2lvbg",
+          "padded_size": 16
+        }
+      ],
+      "entries": [
+        {
+          "id": "00000000-0000-0000-0000-00000000000a",
+          "revision": 8,
+          "tombstone": false,
+          "content_digest": "n7XQDCoGSN33PcJ8IxylhE-oLUxKo2WzqVSGYDrJXSE"
+        },
+        {
+          "id": "00000000-0000-0000-0000-00000000000b",
+          "revision": 6,
+          "tombstone": true,
+          "content_digest": "n7XQDCoGSN33PcJ8IxylhE-oLUxKo2WzqVSGYDrJXSE"
+        }
+      ],
+      "answer": "ManifestError"
+    }
+  ]
+}

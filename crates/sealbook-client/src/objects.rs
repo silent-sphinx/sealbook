@@ -7,7 +7,7 @@ use sealbook_crypto::{content_digest, encrypt_object, object_aad};
 use sealbook_protocol::envelope::seal_envelope;
 use sealbook_protocol::{
     BatchObject, ManifestEntry, PutObjectRequest, PutObjectsRequest, PutObjectsResponse,
-    MAX_BATCH_OBJECTS,
+    MAX_BATCH_OBJECTS, MAX_PADDED_OBJECT_SIZE,
 };
 use sealbook_protocol::{
     ACCOUNT_SETTINGS_ID, ADDRESS_BOOK_CONTENT_TYPE, BOOKMARK_COLLECTION_CONTENT_TYPE,
@@ -22,10 +22,11 @@ use sealbook_protocol::{
 
 use crate::{ClientError, SealbookClient};
 use sealbook_core::{
-    device_entries, device_label_ensure, device_label_rename, manifest_apply, open_stored,
-    stale_device_labels, unreadable_rows, BucketedManifest, CoreAddressBookDraft,
-    CoreCalendarDraft, CoreCalendarEventDraft, CoreDeviceEntry, CoreDeviceKind,
-    CoreDeviceLabelObject, ManifestPlan, RowOutcome, StoredRow,
+    device_entries, device_label_ensure, device_label_rename, local_vault_apply, manifest_apply,
+    open_stored, stale_device_labels, unreadable_rows, write_guard, BucketedManifest,
+    CoreAddressBookDraft, CoreCalendarDraft, CoreCalendarEventDraft, CoreDeviceEntry,
+    CoreDeviceKind, CoreDeviceLabelObject, FlushWrite, LocalObject, LocalVault, ManifestPlan,
+    RowOutcome, StoredRow,
 };
 
 /// One object's encrypted bytes, waiting to be written.
@@ -81,6 +82,51 @@ fn import_chunks(objects: &[ExportedObject]) -> Vec<&[ExportedObject]> {
         rest = tail;
     }
     chunks
+}
+
+/// What [`SealbookClient::send_flush_batch`] did with a batch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FlushSend {
+    /// The server's copy of these outbox writes (by id) changed since the plan,
+    /// so nothing was sent: catch up, plan again, and pass the next `attempt`.
+    Moved {
+        moved: Vec<String>,
+    },
+    Sent(FlushSent),
+}
+
+/// A batch that reached the server.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FlushSent {
+    /// The vault row each id was written as, in batch order. Empty when every
+    /// write was a copy an earlier attempt had already stored.
+    pub rows: Vec<LocalObject>,
+    /// The outbox writes this batch settles, to take out with core's
+    /// `outbox_settle_sent`: the copies already on the server are among them.
+    pub settles: Vec<String>,
+    /// What to tell the person, for the writes sent now.
+    pub notices: Vec<String>,
+    /// The collection's latest revision before the batch, and the key epoch it
+    /// was sealed under.
+    pub revision_before: u64,
+    pub key_epoch: u64,
+}
+
+impl FlushSent {
+    /// The device's copy with the batch folded in.
+    ///
+    /// Revisions between the one this batch started from and its own belong to
+    /// other devices and are still to be walked, so the copy's mark only moves
+    /// when there are none.
+    pub fn apply(&self, vault: &LocalVault) -> LocalVault {
+        let newest = self.revision_before + self.rows.len() as u64;
+        let mark = if vault.latest_revision == self.revision_before {
+            newest
+        } else {
+            vault.latest_revision
+        };
+        local_vault_apply(vault, &self.rows, mark, self.key_epoch)
+    }
 }
 
 /// The distinct, sorted ids of a batch, refusing one the manifest could not
@@ -849,6 +895,110 @@ impl SealbookClient {
             });
         }
         Ok(())
+    }
+
+    /// Sends the leading writes of a flush plan as one batch, after checking
+    /// each still holds what the plan expected.
+    ///
+    /// `batch` is core's `flush_batch_len` of the plan's writes, and `attempt`
+    /// counts the plans already made for this flush: past the restart limit a
+    /// collection that keeps moving is [`ClientError::CollectionBusy`]. The
+    /// outbox and the device's copy are the caller's, so this takes neither and
+    /// settles nothing; an error says how to sort it through
+    /// [`ClientError::http_status`] and core's `flush_failure`.
+    pub async fn send_flush_batch(
+        &mut self,
+        batch: &[FlushWrite],
+        attempt: u32,
+    ) -> Result<FlushSend, ClientError> {
+        let ids = batch
+            .iter()
+            .map(|write| {
+                Uuid::parse_str(&write.id)
+                    .map_err(|err| ClientError::Server(format!("write id {}: {err}", write.id)))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let held = self.manifest_bucket_state(&ids).await?;
+        let guard = write_guard(batch, &held.entries, attempt)?;
+        if !guard.moved.is_empty() {
+            return Ok(FlushSend::Moved { moved: guard.moved });
+        }
+
+        let mut settles: Vec<String> = Vec::new();
+        for write in batch {
+            if !settles.contains(&write.settles) {
+                settles.push(write.settles.clone());
+            }
+        }
+        let sending: Vec<&FlushWrite> = batch
+            .iter()
+            .filter(|write| !guard.present.contains(&write.id))
+            .collect();
+        let notices = sending
+            .iter()
+            .filter_map(|write| write.notice.clone())
+            .collect();
+        let revision_before = held.plan.latest_revision;
+        let key_epoch = held.plan.key_epoch;
+        if sending.is_empty() {
+            return Ok(FlushSend::Sent(FlushSent {
+                rows: Vec::new(),
+                settles,
+                notices,
+                revision_before,
+                key_epoch,
+            }));
+        }
+
+        self.align_key_epoch(key_epoch).await?;
+        let mut sealed = Vec::with_capacity(sending.len());
+        for write in &sending {
+            let id = Uuid::parse_str(&write.id)
+                .map_err(|err| ClientError::Server(format!("write id {}: {err}", write.id)))?;
+            let mut pending = self.seal_write(id, write.payload.as_bytes(), &write.content_type)?;
+            // The server drops the connection on an over-size body before it answers, so the
+            // refusal is made here: it must reach the host as a 413 it will not retry, not as
+            // a network failure it would retry for ever.
+            if pending.padded_size > MAX_PADDED_OBJECT_SIZE {
+                return Err(ClientError::Status {
+                    status: 413,
+                    message: format!(
+                        "object {id} is {} bytes sealed, over the {MAX_PADDED_OBJECT_SIZE} byte limit",
+                        pending.padded_size
+                    ),
+                });
+            }
+            pending.tombstone = write.tombstone;
+            sealed.push(pending);
+        }
+        if sealed.len() == 1 {
+            let only = sealed.remove(0);
+            self.write_prepared(held, only).await?;
+        } else {
+            self.write_batch_prepared(held, sealed).await?;
+        }
+        let rows = sending
+            .iter()
+            .enumerate()
+            .map(|(index, write)| LocalObject {
+                id: write.id.clone(),
+                content_type: write.content_type.clone(),
+                revision: revision_before + index as u64 + 1,
+                tombstone: write.tombstone,
+                payload: if write.tombstone {
+                    String::new()
+                } else {
+                    write.payload.clone()
+                },
+            })
+            .collect();
+        Ok(FlushSend::Sent(FlushSent {
+            rows,
+            settles,
+            notices,
+            revision_before,
+            key_epoch,
+        }))
     }
 
     /// Seals one object for a write, without sending it.
