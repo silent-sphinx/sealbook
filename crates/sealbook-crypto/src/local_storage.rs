@@ -1,5 +1,10 @@
 use argon2::{Algorithm, Argon2, Params, Version};
+use chacha20poly1305::{
+    aead::{Aead, KeyInit, Payload},
+    Key, XChaCha20Poly1305, XNonce,
+};
 use hkdf::Hkdf;
+use rand::RngCore;
 use sha2::Sha256;
 use zeroize::Zeroize;
 
@@ -67,6 +72,100 @@ pub fn local_storage_key(
     Ok(key)
 }
 
+const RECORD_VERSION: u8 = 1;
+const RECORD_SALT_LEN: usize = 16;
+const RECORD_NONCE_LEN: usize = 24;
+const RECORD_HEADER_LEN: usize = 1 + RECORD_SALT_LEN + RECORD_NONCE_LEN;
+const RECORD_INFO: &[u8] = b"sealbook-local-record-v1";
+
+fn record_cipher(
+    key: &[u8; LOCAL_STORAGE_KEY_LEN],
+    salt: &[u8],
+    name: &str,
+) -> Result<XChaCha20Poly1305, CryptoError> {
+    let mut info = RECORD_INFO.to_vec();
+    info.extend_from_slice(name.as_bytes());
+    let mut subkey = [0u8; LOCAL_STORAGE_KEY_LEN];
+    Hkdf::<Sha256>::new(Some(salt), key)
+        .expand(&info, &mut subkey)
+        .map_err(|_| CryptoError::Hkdf)?;
+    let cipher = XChaCha20Poly1305::new(Key::from_slice(&subkey));
+    subkey.zeroize();
+    Ok(cipher)
+}
+
+/// The additional data a record is bound to: its name, then what the caller says
+/// places it, so one file cannot be swapped for another or moved to another
+/// account.
+fn record_aad(name: &str, context: &[u8]) -> Vec<u8> {
+    let mut aad = Vec::with_capacity(name.len() + context.len() + 8);
+    aad.extend_from_slice(&(name.len() as u32).to_be_bytes());
+    aad.extend_from_slice(name.as_bytes());
+    aad.extend_from_slice(&(context.len() as u32).to_be_bytes());
+    aad.extend_from_slice(context);
+    aad
+}
+
+/// Seals one at-rest record under `key` (from [`local_storage_key`]).
+///
+/// Each record draws its own salt, from which an HKDF subkey is made together
+/// with `name`, so no two records share a key or a nonce space. `context` is
+/// authenticated but not stored: pass the same bytes to [`local_open`].
+pub fn local_seal(
+    key: &[u8; LOCAL_STORAGE_KEY_LEN],
+    name: &str,
+    context: &[u8],
+    plaintext: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    let mut salt = [0u8; RECORD_SALT_LEN];
+    let mut nonce = [0u8; RECORD_NONCE_LEN];
+    rand::thread_rng().fill_bytes(&mut salt);
+    rand::thread_rng().fill_bytes(&mut nonce);
+    let cipher = record_cipher(key, &salt, name)?;
+    let aad = record_aad(name, context);
+    let sealed = cipher
+        .encrypt(
+            XNonce::from_slice(&nonce),
+            Payload {
+                msg: plaintext,
+                aad: &aad,
+            },
+        )
+        .map_err(|_| CryptoError::AeadEncrypt)?;
+    let mut out = Vec::with_capacity(RECORD_HEADER_LEN + sealed.len());
+    out.push(RECORD_VERSION);
+    out.extend_from_slice(&salt);
+    out.extend_from_slice(&nonce);
+    out.extend_from_slice(&sealed);
+    Ok(out)
+}
+
+/// Opens what [`local_seal`] wrote. A wrong key, a different `name` or
+/// `context`, or any change to the bytes is [`CryptoError::AeadDecrypt`].
+pub fn local_open(
+    key: &[u8; LOCAL_STORAGE_KEY_LEN],
+    name: &str,
+    context: &[u8],
+    record: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    if record.len() < RECORD_HEADER_LEN + 16 || record[0] != RECORD_VERSION {
+        return Err(CryptoError::AeadDecrypt);
+    }
+    let salt = &record[1..1 + RECORD_SALT_LEN];
+    let nonce = &record[1 + RECORD_SALT_LEN..RECORD_HEADER_LEN];
+    let cipher = record_cipher(key, salt, name)?;
+    let aad = record_aad(name, context);
+    cipher
+        .decrypt(
+            XNonce::from_slice(nonce),
+            Payload {
+                msg: &record[RECORD_HEADER_LEN..],
+                aad: &aad,
+            },
+        )
+        .map_err(|_| CryptoError::AeadDecrypt)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -121,5 +220,37 @@ mod tests {
         ] {
             assert!(local_storage_key(b"pw", &SALT, suite).is_err(), "{suite}");
         }
+    }
+
+    #[test]
+    fn a_sealed_record_opens_with_the_same_key_name_and_context() {
+        let key = [3u8; LOCAL_STORAGE_KEY_LEN];
+        let sealed = local_seal(&key, "vault", b"acct", b"hello").unwrap();
+        assert_eq!(
+            local_open(&key, "vault", b"acct", &sealed).unwrap(),
+            b"hello"
+        );
+        let again = local_seal(&key, "vault", b"acct", b"hello").unwrap();
+        assert_ne!(sealed, again, "each record draws its own salt and nonce");
+    }
+
+    #[test]
+    fn a_record_is_refused_under_another_key_name_context_or_after_a_change() {
+        let key = [3u8; LOCAL_STORAGE_KEY_LEN];
+        let sealed = local_seal(&key, "vault", b"acct", b"hello").unwrap();
+        assert!(local_open(&[4u8; LOCAL_STORAGE_KEY_LEN], "vault", b"acct", &sealed).is_err());
+        assert!(local_open(&key, "outbox", b"acct", &sealed).is_err());
+        assert!(local_open(&key, "vault", b"other", &sealed).is_err());
+        let mut flipped = sealed.clone();
+        *flipped.last_mut().unwrap() ^= 1;
+        assert!(local_open(&key, "vault", b"acct", &flipped).is_err());
+        assert!(local_open(&key, "vault", b"acct", &sealed[..10]).is_err());
+    }
+
+    #[test]
+    fn an_empty_record_round_trips() {
+        let key = [3u8; LOCAL_STORAGE_KEY_LEN];
+        let sealed = local_seal(&key, "n", b"", b"").unwrap();
+        assert!(local_open(&key, "n", b"", &sealed).unwrap().is_empty());
     }
 }

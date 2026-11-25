@@ -28,7 +28,8 @@ pub use hpke_wrap::{
     XWING_CIPHERSUITE, XWING_ENCAPSULATED_KEY_LEN, XWING_PUBLIC_KEY_LEN,
 };
 pub use local_storage::{
-    local_storage_key, LOCAL_STORAGE_KDF, LOCAL_STORAGE_KEY_LEN, SUPPORTED_LOCAL_STORAGE_KDFS,
+    local_open, local_seal, local_storage_key, LOCAL_STORAGE_KDF, LOCAL_STORAGE_KEY_LEN,
+    SUPPORTED_LOCAL_STORAGE_KDFS,
 };
 pub use pairing::{
     pair_respond, PairCode, PairInitiator, PairKeys, PAIR_CODE_WORDS, PAIR_NAMEPLATE_WORDS,

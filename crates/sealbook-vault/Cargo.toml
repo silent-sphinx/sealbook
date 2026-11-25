@@ -1,0 +1,30 @@
+[package]
+name = "sealbook-vault"
+description = "The on-device vault for desktop hosts: an encrypted local store, an outbox, and a background sync worker over sealbook-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+directories = "6"
+fd-lock = "4"
+jiff.workspace = true
+sealbook-client = { path = "../sealbook-client" }
+sealbook-core = { path = "../sealbook-core" }
+sealbook-crypto = { path = "../sealbook-crypto" }
+sealbook-protocol = { path = "../sealbook-protocol" }
+rustls-pki-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "sync", "time", "macros"] }
+uuid.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+sqlx.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "net"] }
+sealbook-server = { path = "../sealbook-server" }
+tempfile = "3"
