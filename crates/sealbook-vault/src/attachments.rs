@@ -141,6 +141,10 @@ pub(crate) enum AttachmentCommand {
         data: Vec<u8>,
         reply: oneshot::Sender<Result<UploadedAttachment, VaultError>>,
     },
+    Delete {
+        id: Uuid,
+        reply: oneshot::Sender<Result<(), VaultError>>,
+    },
 }
 
 struct Live {
@@ -203,6 +207,13 @@ pub(crate) async fn run(mut commands: mpsc::UnboundedReceiver<AttachmentCommand>
                 };
                 let _ = reply.send(result);
             }
+            AttachmentCommand::Delete { id, reply } => {
+                let result = match live.as_mut() {
+                    Some(live) => delete(live, id).await,
+                    None => Err(VaultError::NotUnlocked),
+                };
+                let _ = reply.send(result);
+            }
         }
     }
 }
@@ -220,6 +231,12 @@ async fn upload(live: &mut Live, data: &[u8]) -> Result<UploadedAttachment, Vaul
     let uploaded = live.client().await?.upload_attachment(data).await?;
     live.cache.put(uploaded.attachment_id, data);
     Ok(uploaded)
+}
+
+async fn delete(live: &mut Live, id: Uuid) -> Result<(), VaultError> {
+    live.cache.remove(id);
+    live.client().await?.delete_attachment(id).await?;
+    Ok(())
 }
 
 #[cfg(test)]

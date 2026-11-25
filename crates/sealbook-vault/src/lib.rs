@@ -358,6 +358,17 @@ impl VaultHandle {
         receiver
     }
 
+    /// Deletes a stored attachment at the server and from the local cache.
+    /// Write the record that stops referring to it first, so a failure here
+    /// leaves an orphan for a sweep rather than a record pointing at nothing.
+    pub fn delete_attachment(&self, id: uuid::Uuid) -> Reply<Result<(), VaultError>> {
+        let (reply, receiver) = oneshot::channel();
+        let _ = self.commands.send(Command::Attachment(
+            attachments::AttachmentCommand::Delete { id, reply },
+        ));
+        receiver
+    }
+
     /// The current model, or `None` when locked.
     pub fn model(&self) -> Reply<Option<Arc<VaultModel>>> {
         self.ask(|reply| Command::Model { reply })
