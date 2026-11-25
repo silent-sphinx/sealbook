@@ -16,7 +16,9 @@ both builds already require for the wasm module and the JNI library.
 ## Contents
 
 - `design/tokens.json` — the colour tokens every client paints with: the
-  dark surfaces, text, danger, and the six accent pairs. Web's `index.css` and
+  dark surfaces, text, danger, and the six accent pairs, plus the light
+  surfaces and the darker accent pairs that keep contrast on them (`colors_light`,
+  `accents_light`; only the desktop app paints with those so far). Web's `index.css` and
   `ACCENT_COLORS`, Android's `Color.kt` and `AccentKey`, and Firefox's popup
   stylesheet are each held to it by a test, so a colour changes here first.
 
