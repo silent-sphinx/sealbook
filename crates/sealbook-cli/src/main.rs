@@ -210,8 +210,6 @@ enum Command {
     },
     /// Search notes, tasks, bookmarks, events and contacts at once.
     ///
-    /// Finished tasks, archived items, bookmarks kept out of "All" and any
-    /// feature switched off are left out, as in the web's search.
     Search {
         query: String,
         /// Only these kinds; repeat for more than one.
@@ -1062,7 +1060,7 @@ async fn main() -> Result<()> {
             } => {
                 let state = load_state(&cli.state)?;
                 let password = std::env::var("SEALBOOK_PASSWORD")
-                    .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+                    .context("set SEALBOOK_PASSWORD to sign in")?;
                 let mut client = SealbookClient::with_state_and_tls(state, pinned.clone())
                     .context("tls client")?;
                 sign_in(&mut client, &password).await?;
@@ -1097,7 +1095,7 @@ async fn main() -> Result<()> {
             } => {
                 let state = load_state(&cli.state)?;
                 let password = std::env::var("SEALBOOK_PASSWORD")
-                    .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+                    .context("set SEALBOOK_PASSWORD to sign in")?;
                 let mut client = SealbookClient::with_state_and_tls(state, pinned.clone())
                     .context("tls client")?;
                 sign_in(&mut client, &password).await?;
@@ -1130,7 +1128,7 @@ async fn main() -> Result<()> {
             ContactsCommand::Show { id } => {
                 let state = load_state(&cli.state)?;
                 let password = std::env::var("SEALBOOK_PASSWORD")
-                    .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+                    .context("set SEALBOOK_PASSWORD to sign in")?;
                 let mut client =
                     SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
                 sign_in(&mut client, &password).await?;
@@ -1142,7 +1140,7 @@ async fn main() -> Result<()> {
             ContactsCommand::Profile { command } => {
                 let state = load_state(&cli.state)?;
                 let password = std::env::var("SEALBOOK_PASSWORD")
-                    .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+                    .context("set SEALBOOK_PASSWORD to sign in")?;
                 let mut client =
                     SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
                 sign_in(&mut client, &password).await?;
@@ -1167,7 +1165,7 @@ async fn main() -> Result<()> {
             ContactsCommand::Search { query, book } => {
                 let state = load_state(&cli.state)?;
                 let password = std::env::var("SEALBOOK_PASSWORD")
-                    .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+                    .context("set SEALBOOK_PASSWORD to sign in")?;
                 let mut client =
                     SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
                 sign_in(&mut client, &password).await?;
@@ -1201,7 +1199,7 @@ async fn main() -> Result<()> {
             ContactsCommand::Delete { id, forever } => {
                 let state = load_state(&cli.state)?;
                 let password = std::env::var("SEALBOOK_PASSWORD")
-                    .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+                    .context("set SEALBOOK_PASSWORD to sign in")?;
                 let mut client =
                     SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
                 sign_in(&mut client, &password).await?;
@@ -1211,7 +1209,7 @@ async fn main() -> Result<()> {
             ContactsCommand::List { book } => {
                 let state = load_state(&cli.state)?;
                 let password = std::env::var("SEALBOOK_PASSWORD")
-                    .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+                    .context("set SEALBOOK_PASSWORD to sign in")?;
                 let mut client =
                     SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
                 sign_in(&mut client, &password).await?;
@@ -1311,8 +1309,8 @@ async fn main() -> Result<()> {
         },
         Command::Book { command } => {
             let state = load_state(&cli.state)?;
-            let password = std::env::var("SEALBOOK_PASSWORD")
-                .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+            let password =
+                std::env::var("SEALBOOK_PASSWORD").context("set SEALBOOK_PASSWORD to sign in")?;
             let mut client =
                 SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
             sign_in(&mut client, &password).await?;
@@ -1407,8 +1405,8 @@ async fn main() -> Result<()> {
         }
         Command::Collection { command } => {
             let state = load_state(&cli.state)?;
-            let password = std::env::var("SEALBOOK_PASSWORD")
-                .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+            let password =
+                std::env::var("SEALBOOK_PASSWORD").context("set SEALBOOK_PASSWORD to sign in")?;
             let mut client =
                 SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
             sign_in(&mut client, &password).await?;
@@ -1472,8 +1470,8 @@ async fn main() -> Result<()> {
         }
         Command::Bookmarks { command } => {
             let state = load_state(&cli.state)?;
-            let password = std::env::var("SEALBOOK_PASSWORD")
-                .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+            let password =
+                std::env::var("SEALBOOK_PASSWORD").context("set SEALBOOK_PASSWORD to sign in")?;
             let mut client =
                 SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
             sign_in(&mut client, &password).await?;
@@ -1599,8 +1597,8 @@ async fn main() -> Result<()> {
         }
         Command::Tasks { command } => {
             let state = load_state(&cli.state)?;
-            let password = std::env::var("SEALBOOK_PASSWORD")
-                .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+            let password =
+                std::env::var("SEALBOOK_PASSWORD").context("set SEALBOOK_PASSWORD to sign in")?;
             let mut client =
                 SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
             sign_in(&mut client, &password).await?;
@@ -1613,8 +1611,8 @@ async fn main() -> Result<()> {
         }
         Command::Tasklist { command } => {
             let state = load_state(&cli.state)?;
-            let password = std::env::var("SEALBOOK_PASSWORD")
-                .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+            let password =
+                std::env::var("SEALBOOK_PASSWORD").context("set SEALBOOK_PASSWORD to sign in")?;
             let mut client =
                 SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
             sign_in(&mut client, &password).await?;
@@ -1783,8 +1781,8 @@ async fn main() -> Result<()> {
         },
         Command::Calendar { command } => {
             let state = load_state(&cli.state)?;
-            let password = std::env::var("SEALBOOK_PASSWORD")
-                .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+            let password =
+                std::env::var("SEALBOOK_PASSWORD").context("set SEALBOOK_PASSWORD to sign in")?;
             let mut client =
                 SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
             sign_in(&mut client, &password).await?;
@@ -2049,8 +2047,8 @@ async fn main() -> Result<()> {
         }
         Command::Notebook { command } => {
             let state = load_state(&cli.state)?;
-            let password = std::env::var("SEALBOOK_PASSWORD")
-                .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+            let password =
+                std::env::var("SEALBOOK_PASSWORD").context("set SEALBOOK_PASSWORD to sign in")?;
             let mut client =
                 SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
             sign_in(&mut client, &password).await?;
@@ -2100,8 +2098,8 @@ async fn main() -> Result<()> {
         }
         Command::Notes { command } => {
             let state = load_state(&cli.state)?;
-            let password = std::env::var("SEALBOOK_PASSWORD")
-                .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+            let password =
+                std::env::var("SEALBOOK_PASSWORD").context("set SEALBOOK_PASSWORD to sign in")?;
             let mut client =
                 SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
             sign_in(&mut client, &password).await?;
@@ -2405,8 +2403,8 @@ async fn connect(
     pinned: Option<CertificateDer<'static>>,
 ) -> Result<SealbookClient> {
     let state = load_state(state_path)?;
-    let password = std::env::var("SEALBOOK_PASSWORD")
-        .context("set SEALBOOK_PASSWORD to unwrap the collection key")?;
+    let password =
+        std::env::var("SEALBOOK_PASSWORD").context("set SEALBOOK_PASSWORD to sign in")?;
     let mut client = SealbookClient::with_state_and_tls(state, pinned).context("tls client")?;
     sign_in(&mut client, &password).await?;
     Ok(client)
