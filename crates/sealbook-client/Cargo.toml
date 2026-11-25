@@ -14,6 +14,7 @@ sealbook-core = { path = "../sealbook-core" }
 sealbook-crypto = { path = "../sealbook-crypto" }
 sealbook-protocol = { path = "../sealbook-protocol" }
 serde.workspace = true
+sha2.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 time.workspace = true

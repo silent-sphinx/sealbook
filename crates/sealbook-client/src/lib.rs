@@ -29,7 +29,10 @@ pub use objects::{ExportedObject, ExportedVault, FlushSend, FlushSent};
 pub use pairing::JoinPairing;
 pub use state::LocalState;
 pub use sync::CatchUp;
-pub use tls::{certificate_from_pem, pq_tls_config, TrustAnchors};
+pub use tls::{
+    certificate_fingerprint, certificate_from_pem, fetch_server_certificate, pq_tls_config,
+    TrustAnchors,
+};
 pub use trash::{trash_nodes, TrashObject};
 
 /// The content-payload decisions, straight from core: every client writes a

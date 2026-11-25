@@ -139,7 +139,7 @@ fn spawn_vault(root: &Path, events: &Events) -> VaultHandle {
     VaultHandle::spawn(
         VaultConfig {
             data_root: root.to_path_buf(),
-            pinned_certificate: None,
+            pinned_certificate: sealbook_vault::ServerTrust::default(),
             device_kind: CoreDeviceKind::Unknown,
             device_platform: "test".into(),
             timing: quick(),

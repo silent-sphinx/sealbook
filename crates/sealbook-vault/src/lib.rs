@@ -62,11 +62,33 @@ impl Default for Timing {
     }
 }
 
+/// The server certificate to trust instead of the web roots, for a pinned or
+/// self-hosted server. Shared, so the host can change it after the vault is
+/// running, for example once a person has chosen to trust a server.
+#[derive(Clone, Default)]
+pub struct ServerTrust(
+    std::sync::Arc<std::sync::RwLock<Option<rustls_pki_types::CertificateDer<'static>>>>,
+);
+
+impl ServerTrust {
+    pub fn new(pinned: Option<rustls_pki_types::CertificateDer<'static>>) -> Self {
+        Self(std::sync::Arc::new(std::sync::RwLock::new(pinned)))
+    }
+
+    pub fn get(&self) -> Option<rustls_pki_types::CertificateDer<'static>> {
+        self.0.read().ok().and_then(|pinned| pinned.clone())
+    }
+
+    pub fn set(&self, pinned: Option<rustls_pki_types::CertificateDer<'static>>) {
+        if let Ok(mut slot) = self.0.write() {
+            *slot = pinned;
+        }
+    }
+}
+
 pub struct VaultConfig {
     pub data_root: PathBuf,
-    /// A server certificate to trust instead of the web roots, for a pinned or
-    /// self-hosted server.
-    pub pinned_certificate: Option<rustls_pki_types::CertificateDer<'static>>,
+    pub pinned_certificate: ServerTrust,
     pub device_kind: CoreDeviceKind,
     /// The platform line stored in this device's label ("macOS", ...).
     pub device_platform: String,

@@ -173,8 +173,7 @@ impl NetWorker {
         self.reset();
         self.last_print = state.fingerprint();
         let mut client =
-            match SealbookClient::with_state_and_tls(state, self.config.pinned_certificate.clone())
-            {
+            match SealbookClient::with_state_and_tls(state, self.config.pinned_certificate.get()) {
                 Ok(client) => client,
                 Err(error) => {
                     self.status(SyncStatus::Halted(error.to_string()));

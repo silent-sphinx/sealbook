@@ -103,6 +103,24 @@ pub enum ClientError {
 }
 
 impl ClientError {
+    /// The server's certificate was refused: not issued by anyone this device
+    /// trusts, or not the one it has pinned.
+    pub fn is_untrusted_certificate(&self) -> bool {
+        let ClientError::Http(error) = self else {
+            return false;
+        };
+        let mut source: Option<&dyn std::error::Error> = Some(error);
+        while let Some(current) = source {
+            if current.to_string().contains("invalid peer certificate") {
+                return true;
+            }
+            source = current.source();
+        }
+        false
+    }
+}
+
+impl ClientError {
     /// The HTTP status this error carries, with 0 for a request that got no
     /// response at all (a connection, timeout or interrupted transfer), and
     /// `None` for an error that is not about the request: the host sorts those

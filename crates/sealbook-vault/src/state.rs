@@ -394,7 +394,7 @@ impl Actor {
                 session.store.blob_sealer(),
                 DEFAULT_BUDGET,
             ),
-            pinned: self.config.pinned_certificate.clone(),
+            pinned: self.config.pinned_certificate.get(),
         });
     }
 
