@@ -1,10 +1,17 @@
 //! The TLS stack the client insists on: TLS 1.3 with a hybrid post-quantum
 //! key exchange and nothing else.
 
-use rustls::pki_types::CertificateDer;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
+
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::client::WebPkiServerVerifier;
+use rustls::crypto::CryptoProvider;
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::version::TLS13;
 use rustls::ClientConfig;
-use rustls::RootCertStore;
+use rustls::{DigitallySignedStruct, RootCertStore, SignatureScheme};
+use sha2::{Digest, Sha256};
 
 use crate::ClientError;
 
@@ -21,12 +28,14 @@ pub enum TrustAnchors {
     WebPki,
     /// Exactly this certificate. The public roots are not trusted.
     Pinned(CertificateDer<'static>),
-    /// The public roots, plus `extra` and the device's own trust store. `extra`
-    /// must be a usable anchor; `platform` entries that are not are skipped,
-    /// since a device store can hold certificates webpki rejects.
+    /// The public roots, plus `extra`, the device's own trust store, and
+    /// `chosen`, the certificates a person picked for this server. `extra` must
+    /// be a usable anchor; `platform` and `chosen` entries that are not are
+    /// skipped, since a device store can hold certificates webpki rejects.
     WebPkiPlus {
         extra: Option<CertificateDer<'static>>,
         platform: Vec<CertificateDer<'static>>,
+        chosen: Vec<CertificateDer<'static>>,
     },
 }
 
@@ -38,7 +47,11 @@ impl TrustAnchors {
             Self::Pinned(cert) => roots
                 .add(cert)
                 .map_err(|e| ClientError::Tls(e.to_string()))?,
-            Self::WebPkiPlus { extra, platform } => {
+            Self::WebPkiPlus {
+                extra,
+                platform,
+                chosen,
+            } => {
                 roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
                 if let Some(cert) = extra {
                     roots
@@ -46,10 +59,152 @@ impl TrustAnchors {
                         .map_err(|e| ClientError::Tls(e.to_string()))?;
                 }
                 roots.add_parsable_certificates(platform);
+                roots.add_parsable_certificates(chosen);
             }
         }
         Ok(roots)
     }
+
+    /// The anchors under which a certificate counts as publicly trusted: the web
+    /// roots and the device store. A pinned, chosen or development certificate
+    /// is trusted but is not public, so a server presenting one is still the
+    /// server a person vouched for, and a leaf pin on top of it would be
+    /// redundant rather than wrong.
+    fn public_store(&self) -> RootCertStore {
+        let mut roots = RootCertStore::empty();
+        match self {
+            Self::Pinned(_) => {}
+            Self::WebPki => roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned()),
+            Self::WebPkiPlus { platform, .. } => {
+                roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+                roots.add_parsable_certificates(platform.iter().cloned());
+            }
+        }
+        roots
+    }
+}
+
+/// A verifier for `roots`, or `None` when there are none to verify against.
+fn verifier_for(
+    roots: RootCertStore,
+    provider: &Arc<CryptoProvider>,
+) -> Result<Option<Arc<WebPkiServerVerifier>>, ClientError> {
+    if roots.is_empty() {
+        return Ok(None);
+    }
+    WebPkiServerVerifier::builder_with_provider(Arc::new(roots), provider.clone())
+        .build()
+        .map(Some)
+        .map_err(|e| ClientError::Tls(e.to_string()))
+}
+
+/// The leaf certificates a client from [`pq_tls_config_noting_public`]
+/// accepted because they chain to a public or device root.
+///
+/// Kept by fingerprint and read back with the leaf a response carries, so the
+/// answer is about that response's connection and not whichever handshake
+/// happened to finish last.
+#[derive(Debug, Default)]
+pub struct PublicCertificates(Mutex<HashSet<[u8; 32]>>);
+
+impl PublicCertificates {
+    fn note(&self, cert: &CertificateDer<'_>) {
+        if let Ok(mut seen) = self.0.lock() {
+            seen.insert(Sha256::digest(cert.as_ref()).into());
+        }
+    }
+
+    /// Whether `cert` (DER) was accepted on a public or device root.
+    pub fn contains(&self, cert: &[u8]) -> bool {
+        let print: [u8; 32] = Sha256::digest(cert).into();
+        self.0.lock().is_ok_and(|seen| seen.contains(&print))
+    }
+}
+
+/// Accepts what `all` accepts, and notes which of those `public` accepts too.
+#[derive(Debug)]
+struct NotingVerifier {
+    public: Option<Arc<WebPkiServerVerifier>>,
+    all: Arc<WebPkiServerVerifier>,
+    noted: Arc<PublicCertificates>,
+}
+
+impl ServerCertVerifier for NotingVerifier {
+    fn verify_server_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        intermediates: &[CertificateDer<'_>],
+        server_name: &ServerName<'_>,
+        ocsp_response: &[u8],
+        now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        let public = self.public.as_ref().is_some_and(|public| {
+            public
+                .verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
+                .is_ok()
+        });
+        if public {
+            self.noted.note(end_entity);
+            return Ok(ServerCertVerified::assertion());
+        }
+        self.all
+            .verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        self.all.verify_tls12_signature(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        self.all.verify_tls13_signature(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.all.supported_verify_schemes()
+    }
+}
+
+/// As [`pq_tls_config`], and also reports which accepted certificates were
+/// publicly trusted, so a client can leave those to the CA system rather than
+/// pin a leaf that is replaced at every renewal.
+pub fn pq_tls_config_noting_public(
+    trust: TrustAnchors,
+) -> Result<(ClientConfig, Arc<PublicCertificates>), ClientError> {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let provider = Arc::new(pq_only_provider()?);
+    let verifier = noting_verifier(trust, &provider)?;
+    let noted = verifier.noted.clone();
+    let config = ClientConfig::builder_with_provider(provider)
+        .with_protocol_versions(&[&TLS13])
+        .map_err(|e| ClientError::Tls(e.to_string()))?
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(verifier))
+        .with_no_client_auth();
+    Ok((config, noted))
+}
+
+fn noting_verifier(
+    trust: TrustAnchors,
+    provider: &Arc<CryptoProvider>,
+) -> Result<NotingVerifier, ClientError> {
+    let public = verifier_for(trust.public_store(), provider)?;
+    let all = verifier_for(trust.into_store()?, provider)?
+        .ok_or_else(|| ClientError::Tls("no certificates to trust".into()))?;
+    Ok(NotingVerifier {
+        public,
+        all,
+        noted: Arc::new(PublicCertificates::default()),
+    })
 }
 
 /// Reads the first certificate out of a PEM document.
@@ -116,23 +271,33 @@ fn pq_only_provider() -> Result<rustls::crypto::CryptoProvider, ClientError> {
 /// uses this carries no secrets: it is only ever asked for a health check.
 #[derive(Debug)]
 struct RecordingVerifier {
-    seen: std::sync::Mutex<Option<CertificateDer<'static>>>,
+    seen: Mutex<Option<PresentedCertificate>>,
+    /// Checks the chain against the public roots, only to report the answer.
+    public: Option<Arc<WebPkiServerVerifier>>,
     algorithms: rustls::crypto::WebPkiSupportedAlgorithms,
 }
 
-impl rustls::client::danger::ServerCertVerifier for RecordingVerifier {
+impl ServerCertVerifier for RecordingVerifier {
     fn verify_server_cert(
         &self,
         end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        intermediates: &[CertificateDer<'_>],
+        server_name: &ServerName<'_>,
+        ocsp_response: &[u8],
+        now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        let publicly_trusted = self.public.as_ref().is_some_and(|public| {
+            public
+                .verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
+                .is_ok()
+        });
         if let Ok(mut seen) = self.seen.lock() {
-            *seen = Some(end_entity.clone().into_owned());
+            *seen = Some(PresentedCertificate {
+                certificate: end_entity.clone().into_owned(),
+                publicly_trusted,
+            });
         }
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
+        Ok(ServerCertVerified::assertion())
     }
 
     fn verify_tls12_signature(
@@ -160,18 +325,27 @@ impl rustls::client::danger::ServerCertVerifier for RecordingVerifier {
     }
 }
 
+/// The certificate a server presented to [`fetch_server_certificate`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PresentedCertificate {
+    pub certificate: CertificateDer<'static>,
+    /// Whether it chains to a public root for the name asked for. Such a
+    /// server needs no pin: the public roots already vouch for it, and a pin on
+    /// its leaf would be refused at every renewal.
+    pub publicly_trusted: bool,
+}
+
 /// The certificate `server` (an `https://` address) presents, whether or not it
 /// would be trusted. Only for showing to a person who then decides; nothing
 /// private is sent over the connection.
-pub async fn fetch_server_certificate(
-    server: &str,
-) -> Result<CertificateDer<'static>, ClientError> {
-    let provider = pq_only_provider()?;
-    let verifier = std::sync::Arc::new(RecordingVerifier {
-        seen: std::sync::Mutex::new(None),
+pub async fn fetch_server_certificate(server: &str) -> Result<PresentedCertificate, ClientError> {
+    let provider = Arc::new(pq_only_provider()?);
+    let verifier = Arc::new(RecordingVerifier {
+        seen: Mutex::new(None),
+        public: verifier_for(TrustAnchors::WebPki.public_store(), &provider)?,
         algorithms: provider.signature_verification_algorithms,
     });
-    let config = ClientConfig::builder_with_provider(provider.into())
+    let config = ClientConfig::builder_with_provider(provider)
         .with_protocol_versions(&[&TLS13])
         .map_err(|e| ClientError::Tls(e.to_string()))?
         .dangerous()
@@ -200,7 +374,6 @@ pub async fn fetch_server_certificate(
 
 /// The SHA-256 of a certificate in the form people compare: `AB:CD:...`.
 pub fn certificate_fingerprint(cert: &CertificateDer<'_>) -> String {
-    use sha2::{Digest, Sha256};
     Sha256::digest(cert.as_ref())
         .iter()
         .map(|byte| format!("{byte:02X}"))
@@ -246,6 +419,7 @@ mod tests {
         let plus = TrustAnchors::WebPkiPlus {
             extra: Some(cert),
             platform: Vec::new(),
+            chosen: Vec::new(),
         }
         .into_store()
         .expect("store");
@@ -260,9 +434,111 @@ mod tests {
         let store = TrustAnchors::WebPkiPlus {
             extra: None,
             platform: vec![cert, CertificateDer::from(vec![0u8; 8])],
+            chosen: Vec::new(),
         }
         .into_store()
         .expect("store");
         assert_eq!(store.len(), public + 1);
+    }
+
+    /// A CA and a leaf it issued for `sealbook.test`, standing in for a public
+    /// authority, a device store entry, or a certificate a person chose.
+    fn issued_leaf() -> (CertificateDer<'static>, CertificateDer<'static>) {
+        use rcgen::{BasicConstraints, CertificateParams, IsCa, KeyPair, PKCS_ECDSA_P256_SHA256};
+
+        let ca_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("ca key");
+        let mut ca_params = CertificateParams::new(Vec::<String>::new()).expect("ca params");
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        let ca = ca_params.self_signed(&ca_key).expect("ca");
+        let leaf_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("leaf key");
+        let leaf = CertificateParams::new(vec!["sealbook.test".to_string()])
+            .expect("leaf params")
+            .signed_by(&leaf_key, &ca, &ca_key)
+            .expect("leaf");
+        (ca.der().clone(), leaf.der().clone())
+    }
+
+    /// Runs `trust`'s verifier over `leaf`, returning whether it was accepted
+    /// and whether it was noted as public.
+    fn verify(trust: TrustAnchors, leaf: &CertificateDer<'_>) -> (bool, bool) {
+        let provider = Arc::new(pq_only_provider().expect("provider"));
+        let verifier = noting_verifier(trust, &provider).expect("verifier");
+        let name = ServerName::try_from("sealbook.test").expect("name");
+        let accepted = verifier
+            .verify_server_cert(leaf, &[], &name, &[], UnixTime::now())
+            .is_ok();
+        (accepted, verifier.noted.contains(leaf.as_ref()))
+    }
+
+    #[test]
+    fn a_certificate_from_the_device_store_counts_as_public() {
+        let (ca, leaf) = issued_leaf();
+        let trust = TrustAnchors::WebPkiPlus {
+            extra: None,
+            platform: vec![ca],
+            chosen: Vec::new(),
+        };
+        assert_eq!(verify(trust, &leaf), (true, true));
+    }
+
+    /// The case that matters: a self-hosted server a person vouched for is
+    /// trusted, but must not read as one the public roots vouch for.
+    #[test]
+    fn a_chosen_certificate_is_trusted_but_not_public() {
+        let (ca, leaf) = issued_leaf();
+        let trust = TrustAnchors::WebPkiPlus {
+            extra: None,
+            platform: Vec::new(),
+            chosen: vec![ca],
+        };
+        assert_eq!(verify(trust, &leaf), (true, false));
+    }
+
+    #[test]
+    fn a_development_certificate_is_trusted_but_not_public() {
+        let (ca, leaf) = issued_leaf();
+        let trust = TrustAnchors::WebPkiPlus {
+            extra: Some(ca),
+            platform: Vec::new(),
+            chosen: Vec::new(),
+        };
+        assert_eq!(verify(trust, &leaf), (true, false));
+    }
+
+    #[test]
+    fn a_pinned_certificate_is_never_public() {
+        let (ca, leaf) = issued_leaf();
+        assert_eq!(verify(TrustAnchors::Pinned(ca), &leaf), (true, false));
+    }
+
+    #[test]
+    fn an_unknown_issuer_is_refused_and_not_noted() {
+        let (_, leaf) = issued_leaf();
+        assert_eq!(verify(TrustAnchors::WebPki, &leaf), (false, false));
+    }
+
+    #[test]
+    fn the_probe_reports_whether_the_chain_is_public() {
+        let (ca, leaf) = issued_leaf();
+        let provider = Arc::new(pq_only_provider().expect("provider"));
+        let mut roots = RootCertStore::empty();
+        roots.add(ca).expect("root");
+        let name = ServerName::try_from("sealbook.test").expect("name");
+        for (public, expected) in [
+            (verifier_for(roots, &provider).expect("verifier"), true),
+            (None, false),
+        ] {
+            let probe = RecordingVerifier {
+                seen: Mutex::new(None),
+                public,
+                algorithms: provider.signature_verification_algorithms,
+            };
+            assert!(probe
+                .verify_server_cert(&leaf, &[], &name, &[], UnixTime::now())
+                .is_ok());
+            let seen = probe.seen.lock().expect("seen").clone().expect("recorded");
+            assert_eq!(seen.certificate, leaf);
+            assert_eq!(seen.publicly_trusted, expected);
+        }
     }
 }

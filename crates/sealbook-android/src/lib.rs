@@ -579,7 +579,9 @@ pub fn roster_seal_device(
 
 use std::sync::Arc;
 
-use sealbook_client::{certificate_from_pem, pq_tls_config, TrustAnchors};
+use sealbook_client::{
+    certificate_from_pem, pq_tls_config_noting_public, PublicCertificates, TrustAnchors,
+};
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum HttpError {
@@ -618,23 +620,39 @@ pub struct HttpBytesResponse {
     pub header: Option<String>,
 }
 
+/// The certificate a response arrived over.
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+pub struct ServerCertificate {
+    /// SHA-256, formatted as the server logs it.
+    pub fingerprint: String,
+    /// Whether it chains to a public root or the device's system store, as
+    /// opposed to a certificate the user chose or the debug build's own. A
+    /// publicly trusted certificate is left to the CA system: pinning its leaf
+    /// would refuse the server at every renewal.
+    pub publicly_trusted: bool,
+}
+
 #[derive(uniffi::Object)]
 pub struct HttpClient {
     inner: reqwest::blocking::Client,
-    /// The SHA-256 fingerprint of the certificate on the last completed handshake.
-    last_fingerprint: std::sync::Mutex<Option<String>>,
+    /// The certificate on the last completed request.
+    last_certificate: std::sync::Mutex<Option<ServerCertificate>>,
+    public: Arc<PublicCertificates>,
 }
 
 impl HttpClient {
     fn note_certificate(&self, response: &reqwest::blocking::Response) {
-        let fingerprint = response
+        let seen = response
             .extensions()
             .get::<reqwest::tls::TlsInfo>()
             .and_then(|info| info.peer_certificate())
-            .map(certificate_fingerprint);
-        if let Some(fingerprint) = fingerprint {
-            if let Ok(mut slot) = self.last_fingerprint.lock() {
-                *slot = Some(fingerprint);
+            .map(|der| ServerCertificate {
+                fingerprint: certificate_fingerprint(der),
+                publicly_trusted: self.public.contains(der),
+            });
+        if let Some(seen) = seen {
+            if let Ok(mut slot) = self.last_certificate.lock() {
+                *slot = Some(seen);
             }
         }
     }
@@ -653,26 +671,28 @@ fn certificate_fingerprint(der: &[u8]) -> String {
 
 #[uniffi::export]
 impl HttpClient {
-    /// The SHA-256 fingerprint of the certificate seen on the last handshake,
-    /// formatted as the server logs it, or `None` before any request.
+    /// The certificate seen on the last request, or `None` before any.
     ///
-    /// Read right after the pre-auth profile fetch: the app compares it to the
-    /// certificate it pinned for this server and refuses a change before sending
-    /// a credential, as the native client does over its own transport.
-    pub fn server_fingerprint(&self) -> Option<String> {
-        self.last_fingerprint
+    /// Read right after the pre-auth profile fetch: the app compares it to what
+    /// it trusts for this server and stops before sending a credential, as the
+    /// native client does over its own transport.
+    pub fn server_certificate(&self) -> Option<ServerCertificate> {
+        self.last_certificate
             .lock()
             .ok()
             .and_then(|slot| slot.clone())
     }
 
     /// Trusts the public roots, plus `extra_trust_pem` (a development server's
-    /// certificate, debug builds only) and `platform_roots`, the DER
-    /// certificates of the device's own trust store.
+    /// certificate, debug builds only), `platform_roots`, the DER certificates
+    /// of the device's own trust store, and `chosen_roots`, the DER of a
+    /// certificate the user chose for the server. Only the public and platform
+    /// roots make a certificate count as publicly trusted.
     #[uniffi::constructor]
     pub fn new(
         extra_trust_pem: Option<String>,
         platform_roots: Vec<Vec<u8>>,
+        chosen_roots: Vec<Vec<u8>>,
         timeout_seconds: u32,
     ) -> Result<Arc<Self>, HttpError> {
         let extra = extra_trust_pem
@@ -682,8 +702,10 @@ impl HttpClient {
         let trust = TrustAnchors::WebPkiPlus {
             extra,
             platform: platform_roots.into_iter().map(Into::into).collect(),
+            chosen: chosen_roots.into_iter().map(Into::into).collect(),
         };
-        let config = pq_tls_config(trust).map_err(|e| HttpError::Tls { msg: e.to_string() })?;
+        let (config, public) = pq_tls_config_noting_public(trust)
+            .map_err(|e| HttpError::Tls { msg: e.to_string() })?;
         let timeout = std::time::Duration::from_secs(timeout_seconds as u64);
         let inner = reqwest::blocking::Client::builder()
             .use_preconfigured_tls(config)
@@ -697,7 +719,8 @@ impl HttpClient {
             .map_err(|e| HttpError::Tls { msg: e.to_string() })?;
         Ok(Arc::new(Self {
             inner,
-            last_fingerprint: std::sync::Mutex::new(None),
+            last_certificate: std::sync::Mutex::new(None),
+            public,
         }))
     }
 

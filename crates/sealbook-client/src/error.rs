@@ -118,6 +118,22 @@ impl ClientError {
         }
         false
     }
+
+    /// The typed password is not the account's: this device's own OPAQUE step
+    /// could not open the server's credential response with it. That step fails
+    /// locally, so it has no HTTP status; a revoked device is a 401 instead, and a
+    /// response that does not parse is a different OPAQUE failure, so neither
+    /// reads as this.
+    pub fn is_wrong_password(&self) -> bool {
+        // Through core the crypto error arrives as text in a roster error, so
+        // both shapes are read as the crypto error's own message.
+        let message = match self {
+            ClientError::Crypto(sealbook_crypto::CryptoError::Roster(detail)) => detail.clone(),
+            ClientError::Crypto(error) => error.to_string(),
+            _ => return false,
+        };
+        message.starts_with("opaque error:") && message.contains("validating credentials")
+    }
 }
 
 impl ClientError {
@@ -224,5 +240,48 @@ mod tests {
             ClientError::Manifest(ManifestError("forged".into())).http_status(),
             None
         );
+    }
+
+    /// Runs OPAQUE against a record made with `registered`, signing in with
+    /// `typed`, and returns the client's failure as core hands it on.
+    fn login_failure(registered: &str, typed: &str, response: Option<&[u8]>) -> ClientError {
+        use sealbook_crypto::opaque;
+        let setup = opaque::new_server_setup();
+        let (request, state) = opaque::client_register_start(registered.as_bytes()).unwrap();
+        let reply = opaque::server_register_start(&setup, &request, b"alice").unwrap();
+        let upload = opaque::client_register_finish(state, registered.as_bytes(), &reply).unwrap();
+        let record = opaque::server_register_finish(&upload).unwrap();
+        let (request, state) = opaque::client_login_start(typed.as_bytes()).unwrap();
+        let (served, _) = opaque::server_login_start(&setup, &record, &request, b"alice").unwrap();
+        let error =
+            opaque::client_login_finish(state, typed.as_bytes(), response.unwrap_or(&served))
+                .err()
+                .expect("the login fails");
+        ClientError::from(sealbook_core::CoreError::from(error))
+    }
+
+    #[test]
+    fn a_password_that_does_not_open_the_credential_response_is_wrong() {
+        let error = login_failure("right horse battery", "wrong horse battery", None);
+        assert!(error.is_wrong_password(), "{error}");
+    }
+
+    #[test]
+    fn a_credential_response_that_does_not_parse_is_not_a_wrong_password() {
+        let error = login_failure("right horse battery", "right horse battery", Some(b"junk"));
+        assert!(!error.is_wrong_password(), "{error}");
+    }
+
+    #[test]
+    fn a_refused_device_or_a_roster_failure_is_not_a_wrong_password() {
+        let revoked = ClientError::Status {
+            status: 401,
+            message: "unauthorized".into(),
+        };
+        assert!(!revoked.is_wrong_password());
+        let roster = ClientError::Crypto(sealbook_crypto::CryptoError::Roster(
+            "the roster is not signed by a known device".into(),
+        ));
+        assert!(!roster.is_wrong_password());
     }
 }

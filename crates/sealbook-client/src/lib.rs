@@ -31,7 +31,7 @@ pub use state::LocalState;
 pub use sync::CatchUp;
 pub use tls::{
     certificate_fingerprint, certificate_from_pem, fetch_server_certificate, pq_tls_config,
-    TrustAnchors,
+    pq_tls_config_noting_public, PresentedCertificate, PublicCertificates, TrustAnchors,
 };
 pub use trash::{trash_nodes, TrashObject};
 
