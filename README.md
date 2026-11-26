@@ -42,13 +42,17 @@ Registration is open by default. After the required accounts have signed up, set
 
 ## Clients
 
+This repository is just a server, with a built-in CLI, day-to-day users will prefer the use of a client, choose one of the following below.
+
+Sealbook-Web will soon be decomissioned, this is because web browsers are inherently insecure compared to dedicated OS application.
+
 | Platform | Status | Repository |
 | --- | --- | --- |
 | CLI | Active development | This repository |
-| Web | Active development | [sealbook-web](https://github.com/silent-sphinx/sealbook-web) |
+| Desktop (Windows/Mac OS/Linux) | Active Development | [sealbook-desktop](https://github.com/silent-sphinx/sealbook-desktop) |
+| Web | To be decomissioned | [sealbook-web](https://github.com/silent-sphinx/sealbook-web) |
 | Android | Active development | [sealbook-android](https://github.com/silent-sphinx/sealbook-android) |
 | iOS | Planned | - |
-| Desktop | Planned | - |
 
 ## Security
 
