@@ -216,6 +216,16 @@ impl Actor {
                     fail_attachment(command);
                 }
             }
+            Command::CheckPassword { password, reply } => {
+                let Some(session) = &self.session else {
+                    let _ = reply.send(false);
+                    return;
+                };
+                let check = session.store.password_check();
+                tokio::task::spawn_blocking(move || {
+                    let _ = reply.send(check(&password));
+                });
+            }
             Command::Model { reply } => {
                 let _ = reply.send(self.session.as_ref().map(|session| session.model.clone()));
             }

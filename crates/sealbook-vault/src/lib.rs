@@ -220,6 +220,10 @@ pub(crate) enum Command {
         change: KeyChange,
         reply: oneshot::Sender<Result<KeyChanged, VaultError>>,
     },
+    CheckPassword {
+        password: Zeroizing<String>,
+        reply: oneshot::Sender<bool>,
+    },
     Model {
         reply: oneshot::Sender<Option<Arc<VaultModel>>>,
     },
@@ -320,6 +324,16 @@ impl VaultHandle {
     /// Signs in again after [`VaultEvent::SignInNeeded`].
     pub fn reconnect(&self, password: String) -> Reply<Result<(), VaultError>> {
         self.ask(|reply| Command::Reconnect {
+            password: Zeroizing::new(password),
+            reply,
+        })
+    }
+
+    /// Whether `password` is this account's, checked on this device. For
+    /// steps such as an export that should not take one click on a session
+    /// someone else is sitting at. False while locked.
+    pub fn check_password(&self, password: String) -> Reply<bool> {
+        self.ask(|reply| Command::CheckPassword {
             password: Zeroizing::new(password),
             reply,
         })

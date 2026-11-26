@@ -283,6 +283,8 @@ async fn saved_data_shows_after_a_restart_and_a_wrong_password_is_refused() {
         .unwrap()
         .unwrap();
     first.settled().await;
+    assert!(!first.handle.check_password("wrong".into()).await.unwrap());
+    assert!(first.handle.check_password(PASSWORD.into()).await.unwrap());
     let (root, account) = (first.root, first.account.clone());
     first.handle.shutdown();
 

@@ -390,6 +390,20 @@ impl Store {
         Ok((store, device))
     }
 
+    /// A check of a typed password against the one this store is sealed under,
+    /// with no server round trip. It stretches the password, so run it off the
+    /// async runtime's threads.
+    pub fn password_check(&self) -> impl FnOnce(&str) -> bool + Send + 'static {
+        let key = self.password_key.clone();
+        let salt = self.salt;
+        let suite = self.suite.clone();
+        move |password| {
+            local_storage_key(password.as_bytes(), &salt, &suite)
+                .map(Zeroizing::new)
+                .is_ok_and(|typed| *typed == *key)
+        }
+    }
+
     pub fn identity(&self) -> &Identity {
         &self.identity
     }
