@@ -76,9 +76,10 @@ pub(crate) enum NetReport {
     },
     /// Edits are held back while a key change runs.
     Block(bool),
-    /// The password changed: seal every local record under the new one.
+    /// The password or the username changed: seal every local record again.
     Rekey {
         password: Zeroizing<String>,
+        username: Option<String>,
         reply: oneshot::Sender<Result<(), StoreError>>,
     },
 }
@@ -209,6 +210,13 @@ impl Actor {
                 }
             }
             Command::KeyChange { change, reply } => self.key_change(change, reply),
+            Command::Account(request) => {
+                if self.session.is_some() {
+                    let _ = self.net.send(NetCommand::Account(request));
+                } else {
+                    request.fail(VaultError::NotUnlocked);
+                }
+            }
             Command::Attachment(command) => {
                 if self.session.is_some() {
                     let _ = self.attachments.send(command);
@@ -271,6 +279,15 @@ impl Actor {
                 return;
             }
         };
+        let mut account = account;
+        if account.username != store.identity().username {
+            account.username = store.identity().username.clone();
+            if let Err(error) = store::remember_account(&self.config.data_root, account.clone()) {
+                self.emit(VaultEvent::Notice(format!(
+                    "Could not save the account's new name: {error}"
+                )));
+            }
+        }
         self.begin(
             account,
             store,
@@ -541,16 +558,36 @@ impl Actor {
                     session.blocked = on;
                 }
             }
-            NetReport::Rekey { password, reply } => {
-                let result = match self.session.as_mut() {
-                    Some(session) => session
-                        .store
-                        .rekey(&password, &[VAULT_RECORD, OUTBOX_RECORD]),
-                    None => Err(StoreError::Corrupt("no open account".into())),
-                };
+            NetReport::Rekey {
+                password,
+                username,
+                reply,
+            } => {
+                let result = self.rekey(&password, username);
                 let _ = reply.send(result);
             }
         }
+    }
+
+    fn rekey(&mut self, password: &str, username: Option<String>) -> Result<(), StoreError> {
+        let root = &self.config.data_root;
+        let Some(session) = self.session.as_mut() else {
+            return Err(StoreError::Corrupt("no open account".into()));
+        };
+        let names = [VAULT_RECORD, OUTBOX_RECORD];
+        match username {
+            Some(username) => {
+                session.store.rename(password, &username, &names)?;
+                session.account.username = username;
+                store::remember_account(root, session.account.clone())?;
+            }
+            None => session.store.rekey(password, &names)?,
+        }
+        // The attachment cache is sealed under the key that just changed.
+        if let Some(session) = self.session.as_ref() {
+            self.tell_attachments(session);
+        }
+        Ok(())
     }
 
     fn answer(&self, reply: oneshot::Sender<Input>, changes: ChangeSet) {

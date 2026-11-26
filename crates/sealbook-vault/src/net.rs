@@ -4,16 +4,24 @@
 //! server against that copy, sends it in batches and settles what was sent. Every
 //! rule it applies is core's; this is the loop around them and the pacing.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
-use sealbook_client::{ClientError, FlushSend, LocalState, SealbookClient};
-use sealbook_core::{flush_batch_len, flush_failure, flush_plan, FlushFailure, FlushWrite};
+use sealbook_client::{ClientError, ExportedObject, FlushSend, LocalState, SealbookClient};
+use sealbook_core::{
+    flush_batch_len, flush_failure, flush_plan, normalize_username, CoreExportAccount,
+    FlushFailure, FlushWrite,
+};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
+use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use crate::state::{Input, Message, NetReport};
-use crate::{KeyChange, KeyChanged, SyncStatus, VaultConfig, VaultError};
+use crate::{
+    AccountExport, AccountRequest, DeviceRoster, ImportOutcome, KeyChange, KeyChanged, SyncStatus,
+    VaultConfig, VaultError,
+};
 
 /// Lost races a round tolerates before it gives up until the next trigger, as
 /// the web does.
@@ -35,6 +43,7 @@ pub(crate) enum NetCommand {
         change: KeyChange,
         reply: oneshot::Sender<Result<KeyChanged, VaultError>>,
     },
+    Account(AccountRequest),
     /// The session ended: drop the client and its keys.
     Disconnect,
     Stop,
@@ -118,6 +127,10 @@ impl NetWorker {
                             let result = self.key_change(change).await;
                             let _ = reply.send(result);
                             next_round = Some(Instant::now());
+                        }
+                        NetCommand::Account(request) => {
+                            self.account(request).await;
+                            next_round = self.client.is_some().then(Instant::now);
                         }
                     }
                 }
@@ -430,14 +443,130 @@ impl NetWorker {
         outcome
     }
 
-    async fn key_change_blocked(&mut self, change: KeyChange) -> Result<KeyChanged, VaultError> {
-        self.ready = false;
+    async fn account(&mut self, request: AccountRequest) {
+        if self.client.is_none() {
+            return request.fail(VaultError::NotUnlocked);
+        }
+        match request {
+            AccountRequest::Devices { reply } => {
+                let _ = reply.send(self.devices().await);
+            }
+            AccountRequest::Export { reply } => {
+                self.report(NetReport::Block(true));
+                let result = self.export().await;
+                self.report(NetReport::Block(false));
+                let _ = reply.send(result);
+            }
+            AccountRequest::Import {
+                objects,
+                overwrite,
+                reply,
+            } => {
+                self.report(NetReport::Block(true));
+                let result = self.import(objects, overwrite).await;
+                self.report(NetReport::Block(false));
+                let _ = reply.send(result);
+            }
+            AccountRequest::Delete { password, reply } => {
+                let result = self.delete(password).await;
+                let _ = reply.send(result);
+            }
+        }
+    }
+
+    async fn devices(&mut self) -> Result<DeviceRoster, VaultError> {
+        let client = self.client.as_mut().ok_or(VaultError::NotUnlocked)?;
+        let devices = client.list_devices().await?;
+        let current = client.core_state()?.device_id;
+        self.save_device_if_changed();
+        Ok(DeviceRoster {
+            current,
+            devices: devices.into_iter().map(|device| device.device_id).collect(),
+        })
+    }
+
+    /// Sends what is waiting, so what follows sees every edit made here.
+    async fn flush(&mut self) -> Result<(), VaultError> {
         if !matches!(self.round_inner().await, End::Done) || self.pending > 0 {
             return Err(VaultError::NotSynced);
         }
+        Ok(())
+    }
+
+    async fn read_everything(&mut self) -> Result<(), VaultError> {
+        let client = self.client.as_mut().ok_or(VaultError::NotUnlocked)?;
+        let read = client.catch_up(0).await?;
+        let _ = self
+            .ask(|reply| NetReport::CaughtUp { read, reply })
+            .await
+            .ok_or(VaultError::Gone)?;
+        Ok(())
+    }
+
+    async fn export(&mut self) -> Result<AccountExport, VaultError> {
+        self.flush().await?;
+        let client = self.client.as_mut().ok_or(VaultError::NotUnlocked)?;
+        let vault = client.export_objects().await?;
+        let state = client.state.as_ref().ok_or(VaultError::NotUnlocked)?;
+        let account = CoreExportAccount {
+            server: state.server.clone(),
+            username: state.username.clone(),
+            account_id: state.account_id.to_string(),
+            collection_id: state.collection_id.to_string(),
+            device_id: state.device_id.to_string(),
+        };
+        Ok(AccountExport { account, vault })
+    }
+
+    async fn import(
+        &mut self,
+        mut objects: Vec<ExportedObject>,
+        overwrite: bool,
+    ) -> Result<ImportOutcome, VaultError> {
+        self.flush().await?;
+        let total = objects.len();
+        let client = self.client.as_mut().ok_or(VaultError::NotUnlocked)?;
+        if !overwrite {
+            let present: HashSet<Uuid> = client
+                .export_objects()
+                .await?
+                .objects
+                .into_iter()
+                .map(|object| object.id)
+                .collect();
+            objects.retain(|object| !present.contains(&object.id));
+        }
+        let written = client.import_objects(&objects).await;
+        // A failed import may have written earlier batches, so read either way.
+        let read = self.read_everything().await;
+        written?;
+        read?;
+        self.save_device_if_changed();
+        Ok(ImportOutcome {
+            imported: objects.len(),
+            skipped: total - objects.len(),
+        })
+    }
+
+    async fn delete(&mut self, password: Zeroizing<String>) -> Result<(), VaultError> {
+        let client = self.client.as_mut().ok_or(VaultError::NotUnlocked)?;
+        client.login(&password).await?;
+        client.delete_account().await?;
+        // Nothing is left to sync with, and a round would only ask to sign in.
+        self.reset();
+        Ok(())
+    }
+
+    async fn key_change_blocked(&mut self, change: KeyChange) -> Result<KeyChanged, VaultError> {
+        self.flush().await?;
+        self.ready = false;
         let client = self.client.as_mut().ok_or(VaultError::NotUnlocked)?;
         let mut done = KeyChanged::default();
         let mut new_password = None;
+        let mut new_username = None;
+        // A rename the server accepted before something failed still has to be
+        // saved here, so its error waits until after that.
+        let mut failed = None;
         match change {
             KeyChange::Rotate { mut revoke } => {
                 revoke.sort_unstable();
@@ -453,25 +582,40 @@ impl NetWorker {
                 client.change_password(&current, &new).await?;
                 new_password = Some(new);
             }
+            KeyChange::ChangeUsername { new, password } => {
+                let password = Zeroizing::new(password);
+                let wanted = normalize_username(&new);
+                let result = client.change_username(&new, &password).await;
+                if client.core_state()?.username == wanted {
+                    new_username = Some(wanted);
+                    new_password = Some(password);
+                    failed = result.err();
+                } else {
+                    result?;
+                }
+            }
         }
         self.ready = true;
         self.save_device_if_changed();
         if let Some(password) = new_password {
             let (reply, receiver) = oneshot::channel();
-            self.report(NetReport::Rekey { password, reply });
+            self.report(NetReport::Rekey {
+                password,
+                username: new_username,
+                reply,
+            });
             match receiver.await {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => return Err(error.into()),
                 Err(_) => return Err(VaultError::Gone),
             }
         }
+        if let Some(error) = failed {
+            self.ready = false;
+            return Err(error.into());
+        }
         // The vault's key (and, after a rotation, every row) changed: read it all.
-        let client = self.client.as_mut().ok_or(VaultError::NotUnlocked)?;
-        let read = client.catch_up(0).await?;
-        let _ = self
-            .ask(|reply| NetReport::CaughtUp { read, reply })
-            .await
-            .ok_or(VaultError::Gone)?;
+        self.read_everything().await?;
         Ok(done)
     }
 }

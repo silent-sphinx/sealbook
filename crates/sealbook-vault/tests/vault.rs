@@ -638,6 +638,105 @@ async fn a_change_of_password_reseals_the_saved_data() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_change_of_username_reseals_the_saved_data() {
+    let server = Server::start().await;
+    let (_owner, state) = register(&server, "mona").await;
+    let device = Device::adopt(state).await;
+    device.settled().await;
+    device
+        .handle
+        .key_change(sealbook_vault::KeyChange::ChangeUsername {
+            new: "monica".into(),
+            password: PASSWORD.into(),
+        })
+        .await
+        .unwrap()
+        .expect("change username");
+    let root = device.root;
+    device.handle.shutdown();
+
+    let accounts = sealbook_vault::store::read_accounts(root.path());
+    assert_eq!(accounts[0].username, "monica");
+    let events = Events::default();
+    let reopened = spawn_vault(root.path(), &events);
+    reopened
+        .unlock(accounts[0].clone(), PASSWORD.into())
+        .await
+        .unwrap()
+        .expect("opens under the new name");
+    eventually("the new name to sign in and sync", || {
+        events.any(|event| matches!(event, VaultEvent::Sync(SyncStatus::Synced)))
+    })
+    .await;
+    reopened.shutdown();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_account_lists_devices_exports_imports_and_is_deleted() {
+    let server = Server::start().await;
+    let (_owner, state) = register(&server, "nia").await;
+    let this_device = state.device_id;
+    let device = Device::adopt(state).await;
+    let id = new_id();
+    device
+        .handle
+        .edit(move |cx| Ok(vec![cx.editor.contact(&id, &contact("Kept"))?]))
+        .await
+        .unwrap()
+        .unwrap();
+
+    let roster = device.handle.devices().await.unwrap().expect("devices");
+    assert_eq!(roster.current, this_device);
+    assert!(roster.devices.contains(&this_device));
+
+    // The export sends the waiting edit first, so it is in the file.
+    let exported = device
+        .handle
+        .export_account()
+        .await
+        .unwrap()
+        .expect("export");
+    assert_eq!(exported.account.username, "nia");
+    let exported = exported.vault;
+    assert!(exported
+        .objects
+        .iter()
+        .any(|object| object.payload.contains("Kept")));
+
+    let again = device
+        .handle
+        .import_account(exported.objects.clone(), false)
+        .await
+        .unwrap()
+        .expect("import");
+    assert_eq!(again.imported, 0);
+    assert_eq!(again.skipped, exported.objects.len());
+    let replaced = device
+        .handle
+        .import_account(exported.objects.clone(), true)
+        .await
+        .unwrap()
+        .expect("import over");
+    assert_eq!(replaced.imported, exported.objects.len());
+    let model = device.model().await;
+    assert_eq!(names(&model), vec!["Kept"]);
+
+    assert!(device
+        .handle
+        .delete_account("not the password".into())
+        .await
+        .unwrap()
+        .is_err());
+    device
+        .handle
+        .delete_account(PASSWORD.into())
+        .await
+        .unwrap()
+        .expect("delete");
+    device.handle.shutdown();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn an_uploaded_attachment_downloads_from_the_cache_and_from_the_server() {
     let server = Server::start().await;
     let (_owner, state) = register(&server, "lena").await;

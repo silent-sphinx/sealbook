@@ -365,10 +365,9 @@ impl Store {
             .map_err(|e| StoreError::io(format!("read {DEVICE_RECORD}"), e))?;
         let parsed = parse(DEVICE_RECORD, &bytes)?;
         let identity = parsed.identity.clone();
-        if identity.account_id != expected.account_id
-            || identity.server != expected.server
-            || identity.username != expected.username
-        {
+        // Not the username: a rename seals the records before it can update
+        // `accounts.json`, so the two differ if it stops in between.
+        if identity.account_id != expected.account_id || identity.server != expected.server {
             return Err(StoreError::Corrupt(DEVICE_RECORD.to_string()));
         }
         let key = Zeroizing::new(local_storage_key(
@@ -455,6 +454,30 @@ impl Store {
     /// `current` is the one step that commits, so a crash at any point leaves
     /// one whole generation that opens with one password.
     pub fn rekey(&mut self, password: &str, names: &[&str]) -> Result<(), StoreError> {
+        let identity = self.identity.clone();
+        self.reseal(password, identity, names)
+    }
+
+    /// As [`Store::rekey`], also binding the records to a new username.
+    pub fn rename(
+        &mut self,
+        password: &str,
+        username: &str,
+        names: &[&str],
+    ) -> Result<(), StoreError> {
+        let identity = Identity {
+            username: username.to_string(),
+            ..self.identity.clone()
+        };
+        self.reseal(password, identity, names)
+    }
+
+    fn reseal(
+        &mut self,
+        password: &str,
+        identity: Identity,
+        names: &[&str],
+    ) -> Result<(), StoreError> {
         let mut records = Vec::new();
         for name in std::iter::once(&DEVICE_RECORD).chain(names) {
             if let Some(contents) = self.read(name)? {
@@ -470,7 +493,7 @@ impl Store {
         let next = Self {
             dir: self.dir.clone(),
             generation: self.generation + 1,
-            identity: self.identity.clone(),
+            identity: identity.clone(),
             password_key: key.clone(),
             suite: LOCAL_STORAGE_KDF.to_string(),
             salt,
@@ -488,6 +511,7 @@ impl Store {
         )?;
         let old = self.generation_dir();
         self.generation = next.generation;
+        self.identity = identity;
         self.password_key = key;
         self.suite = LOCAL_STORAGE_KDF.to_string();
         self.salt = salt;
@@ -695,6 +719,21 @@ mod tests {
         assert_eq!(device, b"device");
         assert_eq!(store.read(VAULT_RECORD).unwrap().unwrap(), b"vault");
         assert_eq!(store.read(OUTBOX_RECORD).unwrap().unwrap(), b"outbox");
+    }
+
+    #[test]
+    fn renaming_binds_the_records_to_the_new_name_and_opens_under_a_stale_entry() {
+        let root = tempfile::tempdir().unwrap();
+        let identity = identity();
+        let mut store = Store::create(root.path(), identity.clone(), "pw", b"device").unwrap();
+        store.write(VAULT_RECORD, b"vault").unwrap();
+        store.rename("pw", "grace", &[VAULT_RECORD]).unwrap();
+        assert_eq!(store.read(VAULT_RECORD).unwrap().unwrap(), b"vault");
+        drop(store);
+
+        let (store, _) = Store::open(root.path(), &entry(&identity), "pw").unwrap();
+        assert_eq!(store.identity().username, "grace");
+        assert_eq!(store.read(VAULT_RECORD).unwrap().unwrap(), b"vault");
     }
 
     #[test]

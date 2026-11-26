@@ -186,6 +186,62 @@ pub enum KeyChange {
         current: String,
         new: String,
     },
+    /// Returns nothing; the vault's local records are sealed under the new
+    /// name afterwards, and `accounts.json` follows.
+    ChangeUsername {
+        new: String,
+        password: String,
+    },
+}
+
+/// Account work that needs the server but changes no keys.
+pub(crate) enum AccountRequest {
+    Devices {
+        reply: oneshot::Sender<Result<DeviceRoster, VaultError>>,
+    },
+    Export {
+        reply: oneshot::Sender<Result<AccountExport, VaultError>>,
+    },
+    Import {
+        objects: Vec<sealbook_client::ExportedObject>,
+        overwrite: bool,
+        reply: oneshot::Sender<Result<ImportOutcome, VaultError>>,
+    },
+    Delete {
+        password: Zeroizing<String>,
+        reply: oneshot::Sender<Result<(), VaultError>>,
+    },
+}
+
+impl AccountRequest {
+    pub(crate) fn fail(self, error: VaultError) {
+        match self {
+            Self::Devices { reply } => drop(reply.send(Err(error))),
+            Self::Export { reply } => drop(reply.send(Err(error))),
+            Self::Import { reply, .. } => drop(reply.send(Err(error))),
+            Self::Delete { reply, .. } => drop(reply.send(Err(error))),
+        }
+    }
+}
+
+/// The ids on the account's verified roster, and which one is this device.
+#[derive(Clone, Debug)]
+pub struct DeviceRoster {
+    pub current: uuid::Uuid,
+    pub devices: Vec<uuid::Uuid>,
+}
+
+/// The account as an export file names it, and everything it holds.
+pub struct AccountExport {
+    pub account: sealbook_core::CoreExportAccount,
+    pub vault: sealbook_client::ExportedVault,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ImportOutcome {
+    pub imported: usize,
+    /// Objects the account already holds, left alone without `overwrite`.
+    pub skipped: usize,
 }
 
 /// What a key change gives back: the new recovery phrase, when it issued one.
@@ -220,6 +276,7 @@ pub(crate) enum Command {
         change: KeyChange,
         reply: oneshot::Sender<Result<KeyChanged, VaultError>>,
     },
+    Account(AccountRequest),
     CheckPassword {
         password: Zeroizing<String>,
         reply: oneshot::Sender<bool>,
@@ -341,6 +398,44 @@ impl VaultHandle {
 
     pub fn key_change(&self, change: KeyChange) -> Reply<Result<KeyChanged, VaultError>> {
         self.ask(|reply| Command::KeyChange { change, reply })
+    }
+
+    /// The devices that hold this account's key. Their names live in the model.
+    pub fn devices(&self) -> Reply<Result<DeviceRoster, VaultError>> {
+        self.ask(|reply| Command::Account(AccountRequest::Devices { reply }))
+    }
+
+    /// Everything the account holds, read from the server so that content types
+    /// the model does not parse are included. Waiting writes are sent first.
+    pub fn export_account(&self) -> Reply<Result<AccountExport, VaultError>> {
+        self.ask(|reply| Command::Account(AccountRequest::Export { reply }))
+    }
+
+    /// Writes exported objects back under their own ids. Without `overwrite`,
+    /// ids the account already holds are left alone.
+    pub fn import_account(
+        &self,
+        objects: Vec<sealbook_client::ExportedObject>,
+        overwrite: bool,
+    ) -> Reply<Result<ImportOutcome, VaultError>> {
+        self.ask(|reply| {
+            Command::Account(AccountRequest::Import {
+                objects,
+                overwrite,
+                reply,
+            })
+        })
+    }
+
+    /// Deletes the account from the server. The saved copy on this device stays:
+    /// lock and remove it afterwards.
+    pub fn delete_account(&self, password: String) -> Reply<Result<(), VaultError>> {
+        self.ask(|reply| {
+            Command::Account(AccountRequest::Delete {
+                password: Zeroizing::new(password),
+                reply,
+            })
+        })
     }
 
     /// An attachment's bytes, from the encrypted cache or the server, checked
