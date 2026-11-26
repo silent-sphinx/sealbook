@@ -3772,8 +3772,13 @@ mod tests {
 
     #[test]
     fn a_weak_password_is_refused_with_the_reason() {
-        let error = require_strong("password123", "alice").unwrap_err().to_string();
-        assert!(error.starts_with("that password is too easy to guess"), "{error}");
+        let error = require_strong("password123", "alice")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.starts_with("that password is too easy to guess"),
+            "{error}"
+        );
         assert!(require_strong("correct vivid harbour lantern", "alice").is_ok());
     }
 
