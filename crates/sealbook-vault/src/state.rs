@@ -9,8 +9,8 @@ use sealbook_client::LocalState;
 use sealbook_client::{CatchUp, FlushSent};
 use sealbook_core::{
     device_label_ensure, local_vault_read, local_vault_write, outbox_fail, outbox_push,
-    outbox_read, outbox_settle, outbox_settle_sent, outbox_write, CoreDeviceLabelObject,
-    CorePayloadKind, FlushDrop, LocalVault, Outbox, PendingWrite, DEVICE_LABEL_CONTENT_TYPE,
+    outbox_read, outbox_settle_sent, outbox_write, CoreDeviceLabelObject, CorePayloadKind,
+    FlushDrop, LocalVault, Outbox, PendingWrite, DEVICE_LABEL_CONTENT_TYPE,
 };
 use sealbook_protocol::{
     DEFAULT_ADDRESS_BOOK_ID, DEFAULT_ADDRESS_BOOK_NAME, DEFAULT_BOOKMARK_COLLECTION_ID,
@@ -51,6 +51,7 @@ pub(crate) enum NetReport {
     },
     Dropped {
         drops: Vec<FlushDrop>,
+        planned: Outbox,
         reply: oneshot::Sender<Input>,
     },
     Sent {
@@ -484,7 +485,11 @@ impl Actor {
         match report {
             NetReport::Input { reply } => self.answer(reply, ChangeSet::default()),
             NetReport::CaughtUp { read, reply } => self.caught_up(read, reply),
-            NetReport::Dropped { drops, reply } => self.dropped(drops, reply),
+            NetReport::Dropped {
+                drops,
+                planned,
+                reply,
+            } => self.dropped(drops, planned, reply),
             NetReport::Sent {
                 sent,
                 planned,
@@ -636,12 +641,12 @@ impl Actor {
         self.answer(reply, changes);
     }
 
-    fn dropped(&mut self, drops: Vec<FlushDrop>, reply: oneshot::Sender<Input>) {
+    fn dropped(&mut self, drops: Vec<FlushDrop>, planned: Outbox, reply: oneshot::Sender<Input>) {
         let Some(session) = self.session.as_mut() else {
             return;
         };
         let ids: Vec<String> = drops.iter().map(|drop| drop.id.clone()).collect();
-        session.outbox = outbox_settle(&session.outbox, &ids);
+        session.outbox = outbox_settle_sent(&session.outbox, &planned, &session.vault, &ids);
         let _ = save_outbox(&session.store, &session.outbox);
         let changes =
             Arc::make_mut(&mut session.model).update(&session.vault, &session.outbox, &ids, false);

@@ -351,7 +351,9 @@ impl NetWorker {
                 return End::Halt;
             };
             self.pending = input.outbox.writes.len();
-            let mut planned_from = input.outbox.clone();
+            // What every later report is compared with, so it must stay the
+            // outbox the plan was made from even when edits arrive meanwhile.
+            let planned_from = input.outbox.clone();
             let date = jiff::Zoned::now().date().to_string();
             let plan = {
                 let Some(key) = self.client.as_ref().and_then(|c| c.collection_key()) else {
@@ -361,11 +363,18 @@ impl NetWorker {
             };
             if !plan.dropped.is_empty() {
                 let drops = plan.dropped.clone();
-                let Some(input) = self.ask(|reply| NetReport::Dropped { drops, reply }).await
-                else {
+                let planned = planned_from.clone();
+                if self
+                    .ask(|reply| NetReport::Dropped {
+                        drops,
+                        planned,
+                        reply,
+                    })
+                    .await
+                    .is_none()
+                {
                     return End::Halt;
-                };
-                planned_from = input.outbox;
+                }
             }
             let mut writes: Vec<FlushWrite> = plan.writes;
             while !writes.is_empty() {

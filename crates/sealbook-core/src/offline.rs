@@ -185,14 +185,14 @@ pub fn outbox_settle(outbox: &Outbox, ids: &[String]) -> Outbox {
     next
 }
 
-/// Takes the writes for `ids` out of `current` once they have been sent, unless
-/// one was edited again while it was in flight.
+/// Takes the writes for `ids` out of `current` once a flush has sent or dropped
+/// them, unless one was edited again while it was in flight.
 ///
-/// `planned` is the outbox the sent writes were planned from and `vault` the copy
-/// after they were applied. An entry whose payload or delete flag still matches
-/// what was planned is done. One that differs is a newer edit: it stays queued,
-/// rebased on what the server now holds, so the next flush merges it onto the
-/// write just sent rather than overwriting it.
+/// `planned` is the outbox the flush was planned from and `vault` the copy after
+/// what was sent has been applied. An entry whose payload or delete flag still
+/// matches what was planned is done. One that differs is a newer edit: it stays
+/// queued, with a base that makes the next flush neither overwrite the server nor
+/// lose the edit.
 pub fn outbox_settle_sent(
     current: &Outbox,
     planned: &Outbox,
@@ -216,14 +216,34 @@ pub fn outbox_settle_sent(
         if was.payload == write.payload && was.tombstone == write.tombstone {
             done.push(write.id.clone());
         } else {
-            write.base = vault
-                .objects
-                .iter()
-                .find(|object| object.id == write.id && !object.tombstone)
-                .cloned();
+            write.base = rebased(was, vault);
         }
     }
     outbox_settle(&next, &done)
+}
+
+/// The base for an edit made on top of `was` while `was` was in flight.
+fn rebased(was: &PendingWrite, vault: &LocalVault) -> Option<LocalObject> {
+    let held = vault
+        .objects
+        .iter()
+        .find(|object| object.id == was.id && !object.tombstone)?;
+    if !was.tombstone && held.payload == was.payload {
+        return Some(held.clone());
+    }
+    if was.tombstone {
+        return was.base.clone();
+    }
+    // The server holds something the newer edit was not made from: a merge, or
+    // another device's copy. `was` is what the two have in common, and a
+    // revision behind the server's makes the next flush merge them.
+    Some(LocalObject {
+        id: was.id.clone(),
+        content_type: was.content_type.clone(),
+        revision: was.base.as_ref().map_or(0, |base| base.revision),
+        tombstone: false,
+        payload: was.payload.clone(),
+    })
 }
 
 /// Moves the writes for `ids` to the failed list, where they wait for the
@@ -343,6 +363,8 @@ pub mod ffi {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::flush_plan;
+    use sealbook_crypto::CollectionKey;
 
     fn object(id: &str, revision: u64, payload: &str) -> LocalObject {
         LocalObject {
@@ -401,5 +423,97 @@ mod tests {
         let applied = local_vault_apply(&vault, &[object("a", 4, "old")], 4, 0);
         assert_eq!(applied.objects[0].payload, "new");
         assert_eq!(applied.latest_revision, 4);
+    }
+
+    fn note(title: &str, body: &str) -> String {
+        format!(r#"{{"title":"{title}","body":"{body}"}}"#)
+    }
+
+    /// Plans `outbox` against `server`, then settles it as though the batch was
+    /// taken while `during` was typed.
+    fn flush_while_editing(
+        outbox: &Outbox,
+        server: &LocalVault,
+        during: PendingWrite,
+    ) -> (Outbox, LocalVault) {
+        let key = CollectionKey::from_bytes([7; 32]);
+        let plan = flush_plan(outbox, server, "2026-11-27", &key);
+        let revision = server.objects.iter().map(|o| o.revision).max().unwrap_or(0);
+        let rows: Vec<LocalObject> = plan
+            .writes
+            .iter()
+            .zip(revision + 1..)
+            .map(|(write, revision)| object(&write.id, revision, &write.payload))
+            .collect();
+        let vault = local_vault_apply(server, &rows, revision + rows.len() as u64, 0);
+        let ids = [during.id.clone()];
+        let current = outbox_push(outbox, during);
+        (outbox_settle_sent(&current, outbox, &vault, &ids), vault)
+    }
+
+    fn next_payload(outbox: &Outbox, vault: &LocalVault) -> serde_json::Value {
+        let key = CollectionKey::from_bytes([7; 32]);
+        let plan = flush_plan(outbox, vault, "2026-11-27", &key);
+        let write = plan.writes.iter().find(|w| w.id == "a").expect("a write");
+        serde_json::from_str(&write.payload).unwrap()
+    }
+
+    #[test]
+    fn an_edit_made_during_a_merging_flush_keeps_the_other_devices_change() {
+        let base = object("a", 3, &note("Old", "text"));
+        let outbox = outbox_push(
+            &Outbox::default(),
+            write("a", &note("Old", "mine"), Some(base)),
+        );
+        let server = LocalVault {
+            objects: vec![object("a", 4, &note("Theirs", "text"))],
+            ..Default::default()
+        };
+        let during = write("a", &note("Old", "mine, and more"), None);
+        let (outbox, vault) = flush_while_editing(&outbox, &server, during);
+
+        let sent = next_payload(&outbox, &vault);
+        assert_eq!(sent["title"], "Theirs");
+        assert_eq!(sent["body"], "mine, and more");
+    }
+
+    #[test]
+    fn an_edit_made_during_a_plain_flush_is_sent_as_it_is() {
+        let base = object("a", 3, &note("Old", "text"));
+        let outbox = outbox_push(
+            &Outbox::default(),
+            write("a", &note("Old", "mine"), Some(base.clone())),
+        );
+        let server = LocalVault {
+            objects: vec![base],
+            ..Default::default()
+        };
+        // Undoing back to the first text must reach the server too.
+        let during = write("a", &note("Old", "text"), None);
+        let (outbox, vault) = flush_while_editing(&outbox, &server, during);
+
+        assert_eq!(outbox.writes[0].base.as_ref(), vault.objects.first());
+        assert_eq!(next_payload(&outbox, &vault)["body"], "text");
+    }
+
+    #[test]
+    fn a_delete_made_during_a_merging_flush_does_not_delete_the_other_devices_change() {
+        let base = object("a", 3, &note("Old", "text"));
+        let outbox = outbox_push(
+            &Outbox::default(),
+            write("a", &note("Old", "mine"), Some(base)),
+        );
+        let server = LocalVault {
+            objects: vec![object("a", 4, &note("Theirs", "text"))],
+            ..Default::default()
+        };
+        let mut delete = write("a", "", None);
+        delete.tombstone = true;
+        let (outbox, vault) = flush_while_editing(&outbox, &server, delete);
+
+        let key = CollectionKey::from_bytes([7; 32]);
+        let plan = flush_plan(&outbox, &vault, "2026-11-27", &key);
+        assert!(plan.writes.is_empty());
+        assert_eq!(plan.dropped.len(), 1);
     }
 }
