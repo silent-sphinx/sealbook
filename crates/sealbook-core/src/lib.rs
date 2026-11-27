@@ -36,7 +36,7 @@ mod flush;
 mod http;
 mod ics;
 mod manifest;
-mod markdown;
+pub mod markdown;
 mod merge;
 mod messages;
 mod notes;
@@ -64,7 +64,9 @@ pub use trash::{
     trash_restore_write, trash_roots, trash_write, TrashNode, TrashRehome, TrashRoot,
     CONTACT_TRASHED_AT_PROP, TRASHED_AT_KEY, TRASH_RETENTION_DAYS,
 };
-pub use tree::{flagged_with_descendants, may_reparent};
+pub use tree::{
+    ancestor_ids, flagged_with_descendants, may_reparent, resolved_parents, subtree_ids,
+};
 mod vault_search;
 mod vcard;
 

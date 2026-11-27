@@ -3285,6 +3285,7 @@ dependencies = [
  "tsify",
  "unicode-normalization",
  "uniffi",
+ "url",
  "uuid",
  "wasm-bindgen",
  "zeroize",

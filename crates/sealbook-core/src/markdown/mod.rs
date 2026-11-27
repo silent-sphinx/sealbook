@@ -1,10 +1,121 @@
-//! Markdown repair for text that arrives from another program.
+//! The markdown subset a note body is stored in: parsing, writing back, and
+//! repair for text that arrives from another program.
+//!
+//! The parser and writer follow sealbook-web's `markdown.ts` and `noteDoc.ts`,
+//! pinned by the shared fixtures under `fixtures/notes/`. A host that writes a
+//! note must produce what the web would, or each client rewrites the other's text.
 
-#[derive(Clone, Copy, PartialEq)]
-enum Align {
-    Left,
-    Center,
-    Right,
+mod ast;
+mod inline;
+mod parse;
+mod serialize;
+mod table;
+
+pub use ast::{
+    Align, Block, Inline, ListItem, Table, TableCell, TableFill, TableLayout, TABLE_FILLS,
+};
+pub use inline::{parse_inline, safe_href};
+pub use parse::parse;
+pub use serialize::{serialize, serialize_inline};
+
+/// Plain text of an inline tree, for a label that cannot carry markup.
+pub fn inline_text(nodes: &[Inline]) -> String {
+    let mut out = String::new();
+    for node in nodes {
+        match node {
+            Inline::Text { text } | Inline::Code { text } => out.push_str(text),
+            Inline::Break => out.push(' '),
+            Inline::Image { alt, .. } => out.push_str(alt),
+            Inline::Strong { children }
+            | Inline::Em { children }
+            | Inline::Strike { children }
+            | Inline::Link { children, .. } => out.push_str(&inline_text(children)),
+        }
+    }
+    out
+}
+
+/// A body as one line of prose for a list preview: markers dropped, code blocks
+/// skipped, whitespace collapsed.
+pub fn plain_text(blocks: &[Block]) -> String {
+    let mut parts = Vec::new();
+    collect_text(blocks, &mut parts);
+    parts
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn collect_text(blocks: &[Block], out: &mut Vec<String>) {
+    for block in blocks {
+        match block {
+            Block::Heading { children, .. } | Block::Paragraph { children } => {
+                out.push(inline_text(children));
+            }
+            Block::List { items, .. } => {
+                for item in items {
+                    out.push(inline_text(&item.children));
+                    collect_text(&item.blocks, out);
+                }
+            }
+            Block::Quote { blocks } => collect_text(blocks, out),
+            Block::Table(table) => {
+                for cell in table.header.iter().chain(table.rows.iter().flatten()) {
+                    out.push(inline_text(&cell.children));
+                }
+            }
+            Block::Code { .. } | Block::Rule => {}
+        }
+    }
+}
+
+/// Ids of the photos a body shows, in the order they appear. A spelling quoted
+/// in code is not a photo.
+pub fn attachment_ids_in(source: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    block_images(&parse(source), &mut out);
+    out
+}
+
+fn block_images(blocks: &[Block], out: &mut Vec<String>) {
+    for block in blocks {
+        match block {
+            Block::Heading { children, .. } | Block::Paragraph { children } => {
+                inline_images(children, out);
+            }
+            Block::List { items, .. } => {
+                for item in items {
+                    inline_images(&item.children, out);
+                    block_images(&item.blocks, out);
+                }
+            }
+            Block::Quote { blocks } => block_images(blocks, out),
+            Block::Table(table) => {
+                for cell in table.header.iter().chain(table.rows.iter().flatten()) {
+                    inline_images(&cell.children, out);
+                }
+            }
+            Block::Code { .. } | Block::Rule => {}
+        }
+    }
+}
+
+fn inline_images(nodes: &[Inline], out: &mut Vec<String>) {
+    for node in nodes {
+        match node {
+            Inline::Image { attachment_id, .. } => {
+                if !out.contains(attachment_id) {
+                    out.push(attachment_id.clone());
+                }
+            }
+            Inline::Strong { children }
+            | Inline::Em { children }
+            | Inline::Strike { children }
+            | Inline::Link { children, .. } => inline_images(children, out),
+            Inline::Text { .. } | Inline::Code { .. } | Inline::Break => {}
+        }
+    }
 }
 
 /// One row's cells, split on unescaped pipes. A row has to carry at least one, so

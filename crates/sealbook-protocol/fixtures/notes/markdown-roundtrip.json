@@ -1,0 +1,1560 @@
+{
+ "cases": [
+  {
+   "input": "### Monday",
+   "canonical": "### Monday"
+  },
+  {
+   "input": "#tag",
+   "canonical": "#tag"
+  },
+  {
+   "input": "one\ntwo",
+   "canonical": "one two"
+  },
+  {
+   "input": "one\n\ntwo",
+   "canonical": "one\n\ntwo"
+  },
+  {
+   "input": "- milk\n- bread",
+   "canonical": "- milk\n- bread"
+  },
+  {
+   "input": "3. third\n4. fourth",
+   "canonical": "3. third\n4. fourth"
+  },
+  {
+   "input": "- a\n\n- b",
+   "canonical": "- a\n- b"
+  },
+  {
+   "input": "- [ ] todo\n- [x] done",
+   "canonical": "- [ ] todo\n- [x] done"
+  },
+  {
+   "input": "- - -",
+   "canonical": "---"
+  },
+  {
+   "input": "***",
+   "canonical": "---"
+  },
+  {
+   "input": "___",
+   "canonical": "---"
+  },
+  {
+   "input": "```ts\nconst a = **1**;\n```",
+   "canonical": "```ts\nconst a = **1**;\n```"
+  },
+  {
+   "input": "```\nstill here",
+   "canonical": "```\nstill here\n```"
+  },
+  {
+   "input": "> quoted",
+   "canonical": "> quoted"
+  },
+  {
+   "input": "> > > > > deep",
+   "canonical": "> > > \\> deep"
+  },
+  {
+   "input": "# a\r\n\r\n- b\r\n",
+   "canonical": "# a\n\n- b"
+  },
+  {
+   "input": "# a\n\n- b\n",
+   "canonical": "# a\n\n- b"
+  },
+  {
+   "input": "> quoted\n# heading",
+   "canonical": "> quoted\n\n# heading"
+  },
+  {
+   "input": "**b**",
+   "canonical": "**b**"
+  },
+  {
+   "input": "__b__",
+   "canonical": "**b**"
+  },
+  {
+   "input": "*i*",
+   "canonical": "*i*"
+  },
+  {
+   "input": "_i_",
+   "canonical": "*i*"
+  },
+  {
+   "input": "~~s~~",
+   "canonical": "~~s~~"
+  },
+  {
+   "input": "## a **b**",
+   "canonical": "## a **b**"
+  },
+  {
+   "input": "a ** b",
+   "canonical": "a \\*\\* b"
+  },
+  {
+   "input": "`a*b*c`",
+   "canonical": "`a*b*c`"
+  },
+  {
+   "input": "*a `b*c` d*",
+   "canonical": "*a* *`b*c`* *d*"
+  },
+  {
+   "input": "``a ` b``",
+   "canonical": "``a ` b``"
+  },
+  {
+   "input": "\\*not italic\\*",
+   "canonical": "\\*not italic\\*"
+  },
+  {
+   "input": "see https://example.com now",
+   "canonical": "see [https://example.com](https://example.com/) now"
+  },
+  {
+   "input": "xhttps://example.com",
+   "canonical": "xhttps://example.com"
+  },
+  {
+   "input": "see https://example.com/a.",
+   "canonical": "see [https://example.com/a](https://example.com/a)."
+  },
+  {
+   "input": "![alt](https://example.com/a.png)",
+   "canonical": "[alt](https://example.com/a.png)"
+  },
+  {
+   "input": "<img src=x onerror=\"alert(1)\">",
+   "canonical": "<img src=x onerror=\"alert(1)\">"
+  },
+  {
+   "input": "[x](javascript:alert(1))",
+   "canonical": "\\[x](javascript:alert(1))"
+  },
+  {
+   "input": "[x](data:text/html,<script>alert(1)</script>)",
+   "canonical": "\\[x](data:text/html,<script>alert(1)</script>)"
+  },
+  {
+   "input": "[x](vbscript:msgbox)",
+   "canonical": "\\[x](vbscript:msgbox)"
+  },
+  {
+   "input": "[x](blob:https://example.com/abc)",
+   "canonical": "\\[x](blob:https://example.com/abc)"
+  },
+  {
+   "input": "[x](file:///etc/passwd)",
+   "canonical": "\\[x](file:///etc/passwd)"
+  },
+  {
+   "input": "[x](   javascript:alert(1))",
+   "canonical": "\\[x](   javascript:alert(1))"
+  },
+  {
+   "input": "[x](JaVaScRiPt:alert(1))",
+   "canonical": "\\[x](JaVaScRiPt:alert(1))"
+  },
+  {
+   "input": "[a](http://example.com)",
+   "canonical": "[a](http://example.com/)"
+  },
+  {
+   "input": "[a](https://example.com)",
+   "canonical": "[a](https://example.com/)"
+  },
+  {
+   "input": "[a](mailto:someone@example.com)",
+   "canonical": "[a](mailto:someone@example.com)"
+  },
+  {
+   "input": "[a](./notes)",
+   "canonical": "[a](https://sealbook.invalid/notes)"
+  },
+  {
+   "input": "[see https://example.com](https://other.example)",
+   "canonical": "[see https://example.com](https://other.example/)"
+  },
+  {
+   "input": "![Sunset](attachment:abc-123)",
+   "canonical": "![Sunset](attachment:abc-123)"
+  },
+  {
+   "input": "[x](attachment:abc-123)",
+   "canonical": "\\[x](attachment:abc-123)"
+  },
+  {
+   "input": "![a](https://example.com/x.png)",
+   "canonical": "[a](https://example.com/x.png)"
+  },
+  {
+   "input": "| Day | Plan |\n| --- | --- |\n| Sat | Land 12:15 |\n| Sun | Sintra |",
+   "canonical": "| Day | Plan |\n| --- | --- |\n| Sat | Land 12:15 |\n| Sun | Sintra |"
+  },
+  {
+   "input": "Day | Plan\n--- | ---\nSat | Land",
+   "canonical": "| Day | Plan |\n| --- | --- |\n| Sat | Land |"
+  },
+  {
+   "input": "| a | b | c | d |\n| --- | :-- | :-: | --: |\n| 1 | 2 | 3 | 4 |",
+   "canonical": "| a | b | c | d |\n| --- | :-- | :-: | --: |\n| 1 | 2 | 3 | 4 |"
+  },
+  {
+   "input": "| Plan |\n| --- |\n| hold expires **8 August** |",
+   "canonical": "| Plan |\n| --- |\n| hold expires **8 August** |"
+  },
+  {
+   "input": "| a | b |\n| --- | --- |\n| one \\| two | three |",
+   "canonical": "| a | b |\n| --- | --- |\n| one \\| two | three |"
+  },
+  {
+   "input": "| a | b |\n| --- | --- |\n| 1 | 2 |\n<!-- sealbook:table h=1:48 bg=0.0:amber rs=1.0:2 -->",
+   "canonical": "| a | b |\n| --- | --- |\n| 1 | 2 |\n<!-- sealbook:table h=1:48 bg=0.0:amber rs=1.0:2 -->"
+  },
+  {
+   "input": "| a | b |\n| --- | --- |\n| 1 | 2 |",
+   "canonical": "| a | b |\n| --- | --- |\n| 1 | 2 |"
+  },
+  {
+   "input": "| a |\n| --- |\n| 1 |\n<!-- sealbook:table bg=0.0:neon future=yes h=0:24 -->",
+   "canonical": "| a |\n| --- |\n| 1 |\n<!-- sealbook:table h=0:24 -->"
+  },
+  {
+   "input": "| a |\n| --- |\n| 1 |\n\n<!-- sealbook:table h=0:24 -->",
+   "canonical": "| a |\n| --- |\n| 1 |\n\n<!-- sealbook:table h=0:24 -->"
+  },
+  {
+   "input": "| a | b | c |\n| --- | --- | --- |\n| 1 |\n| 1 | 2 | 3 | 4 |",
+   "canonical": "| a | b | c |\n| --- | --- | --- |\n| 1 |  |  |\n| 1 | 2 | 3 |"
+  },
+  {
+   "input": "| a |\n| --- |\n| 1 |\n\nAfter the table.",
+   "canonical": "| a |\n| --- |\n| 1 |\n\nAfter the table."
+  },
+  {
+   "input": "| a |\n| --- |\n| 1 |\n## Next",
+   "canonical": "| a |\n| --- |\n| 1 |\n\n## Next"
+  },
+  {
+   "input": "| a | b |\n| --- |\n| 1 | 2 |",
+   "canonical": "| a | b | | --- | | 1 | 2 |"
+  },
+  {
+   "input": "| a | b |\n| --- | --- | --- |",
+   "canonical": "| a | b | | --- | --- | --- |"
+  },
+  {
+   "input": "| a | b |\n| 1 | 2 |",
+   "canonical": "| a | b | | 1 | 2 |"
+  },
+  {
+   "input": "Some prose\n| a | b |\n| --- | --- |\n| 1 | 2 |",
+   "canonical": "Some prose | a | b | | --- | --- | | 1 | 2 |"
+  },
+  {
+   "input": "- a | b\n- | -",
+   "canonical": "- a | b\n- | -"
+  },
+  {
+   "input": "> | a |\n> | --- |\n> | 1 |",
+   "canonical": "> | a |\n> | --- |\n> | 1 |"
+  },
+  {
+   "input": "---",
+   "canonical": "---"
+  },
+  {
+   "input": "***both***",
+   "canonical": "***both***"
+  },
+  {
+   "input": "___both___",
+   "canonical": "***both***"
+  },
+  {
+   "input": "***loose",
+   "canonical": "\\*\\*\\*loose"
+  },
+  {
+   "input": "**bold**",
+   "canonical": "**bold**"
+  },
+  {
+   "input": "- one\n  - inner\n- two",
+   "canonical": "- one\n  - inner\n- two"
+  },
+  {
+   "input": "- a\n  - b\n    - c",
+   "canonical": "- a\n  - b\n    - c"
+  },
+  {
+   "input": "- bullet\n  1. first\n  2. second",
+   "canonical": "- bullet\n  1. first\n  2. second"
+  },
+  {
+   "input": "- one\n\t- inner",
+   "canonical": "- one\n  - inner"
+  },
+  {
+   "input": "  - only\n  - second",
+   "canonical": "- only\n- second"
+  },
+  {
+   "input": "- one\n      - deep\n      - also deep",
+   "canonical": "- one\n  - deep\n  - also deep"
+  },
+  {
+   "input": "- level\n  - level\n    - level\n      - level\n        - level\n          - level\n            - level\n              - level\n                - level\n                  - level\n                    - level\n                      - level\n                        - level\n                          - level\n                            - level\n                              - level\n                                - level\n                                  - level\n                                    - level\n                                      - level\n                                        - level\n                                          - level\n                                            - level\n                                              - level\n                                                - level\n                                                  - level\n                                                    - level\n                                                      - level\n                                                        - level\n                                                          - level\n                                                            - level\n                                                              - level\n                                                                - level\n                                                                  - level\n                                                                    - level\n                                                                      - level\n                                                                        - level\n                                                                          - level\n                                                                            - level\n                                                                              - level",
+   "canonical": "- level\n  - level\n    - level\n      - level\n        - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level"
+  },
+  {
+   "input": "# Title\n\n- [ ] one\n- [x] two",
+   "canonical": "# Title\n\n- [ ] one\n- [x] two"
+  },
+  {
+   "input": "- [ ] parent\n  - [ ] child",
+   "canonical": "- [ ] parent\n      - [ ] child"
+  },
+  {
+   "input": "> - [ ] quoted",
+   "canonical": "> - [ ] quoted"
+  },
+  {
+   "input": "text\n\n| a | b |\n| --- | --- |\n| 1 | 2 |",
+   "canonical": "text\n\n| a | b |\n| --- | --- |\n| 1 | 2 |"
+  },
+  {
+   "input": "- **bold** and `code` and [link](https://example.com)",
+   "canonical": "- **bold** and `code` and [link](https://example.com/)"
+  },
+  {
+   "input": "[a](https://example.com?x=1#top)",
+   "canonical": "[a](https://example.com/?x=1#top)"
+  },
+  {
+   "input": "[a](https://example.com/p?x=1)",
+   "canonical": "[a](https://example.com/p?x=1)"
+  },
+  {
+   "input": "",
+   "canonical": ""
+  },
+  {
+   "input": "   ",
+   "canonical": ""
+  },
+  {
+   "input": "\n\n",
+   "canonical": ""
+  },
+  {
+   "input": "# Title\n\nSome **bold** prose.",
+   "canonical": "# Title\n\nSome **bold** prose."
+  },
+  {
+   "input": "# a\n\n## b\n\n### c\n\n#### d\n\n##### e\n\n###### f",
+   "canonical": "# a\n\n## b\n\n### c\n\n#### d\n\n##### e\n\n###### f"
+  },
+  {
+   "input": "####### seven",
+   "canonical": "####### seven"
+  },
+  {
+   "input": "#nospace",
+   "canonical": "#nospace"
+  },
+  {
+   "input": "# closing ##",
+   "canonical": "# closing"
+  },
+  {
+   "input": "# not#",
+   "canonical": "# not#"
+  },
+  {
+   "input": "   ## indented",
+   "canonical": "## indented"
+  },
+  {
+   "input": "    # code-ish",
+   "canonical": "\\# code-ish"
+  },
+  {
+   "input": "- one\n- two",
+   "canonical": "- one\n- two"
+  },
+  {
+   "input": "1. one\n2. two",
+   "canonical": "1. one\n2. two"
+  },
+  {
+   "input": "5. five\n6. six",
+   "canonical": "5. five\n6. six"
+  },
+  {
+   "input": "3) three",
+   "canonical": "3. three"
+  },
+  {
+   "input": "- [ ] todo\n- [x] done\n- [X] caps",
+   "canonical": "- [ ] todo\n- [x] done\n- [x] caps"
+  },
+  {
+   "input": "- [ ]",
+   "canonical": "- \\[ ]"
+  },
+  {
+   "input": "- [ ] ",
+   "canonical": "- [ ]"
+  },
+  {
+   "input": "- outer\n  - inner",
+   "canonical": "- outer\n  - inner"
+  },
+  {
+   "input": "- [ ] parent\n      - child",
+   "canonical": "- [ ] parent\n      - child"
+  },
+  {
+   "input": "- [ ] task\n- plain\n- [x] task",
+   "canonical": "- [ ] task\n\n- plain\n\n- [x] task"
+  },
+  {
+   "input": "1. a\n- [ ] b\n1. c",
+   "canonical": "1. a\n\n- [ ] b\n\n1. c"
+  },
+  {
+   "input": "2. a\n3. [x] b\n4. c",
+   "canonical": "2. a\n\n- [x] b\n\n4. c"
+  },
+  {
+   "input": "1. a\n    1. b\n        - c\n2. d",
+   "canonical": "1. a\n   1. b\n      - c\n2. d"
+  },
+  {
+   "input": "- a\n\n- b\n\n\n- c",
+   "canonical": "- a\n- b\n\n- c"
+  },
+  {
+   "input": "- a\n\t- tabbed\n- b",
+   "canonical": "- a\n  - tabbed\n- b"
+  },
+  {
+   "input": "* star\n+ plus",
+   "canonical": "- star\n- plus"
+  },
+  {
+   "input": "- a\n  - b\n\n  - c",
+   "canonical": "- a\n  - b\n  - c"
+  },
+  {
+   "input": "  - indented\n- out",
+   "canonical": "- indented\n- out"
+  },
+  {
+   "input": "- l0\n  - l1\n    - l2\n      - l3\n        - l4\n          - l5\n            - l6\n              - l7\n                - l8",
+   "canonical": "- l0\n  - l1\n    - l2\n      - l3\n        - l4\n          - l5\n          - l6\n          - l7\n          - l8"
+  },
+  {
+   "input": "> - one\n> - two",
+   "canonical": "> - one\n> - two"
+  },
+  {
+   "input": "> a\nlazy",
+   "canonical": "> a lazy"
+  },
+  {
+   "input": "> a\n> # h\n- b",
+   "canonical": "> a\n>\n> # h\n\n- b"
+  },
+  {
+   "input": "> > > > > > deep",
+   "canonical": "> > > \\> > deep"
+  },
+  {
+   "input": ">",
+   "canonical": ">"
+  },
+  {
+   "input": "> a\n>\n> b",
+   "canonical": "> a\n>\n> b"
+  },
+  {
+   "input": "> ```\n> code\n> ```",
+   "canonical": "> ```\n> code\n> ```"
+  },
+  {
+   "input": "```js\nconst x = 1;\n```",
+   "canonical": "```js\nconst x = 1;\n```"
+  },
+  {
+   "input": "```\n```",
+   "canonical": "```\n```"
+  },
+  {
+   "input": "```\nplain text\n```",
+   "canonical": "```\nplain text\n```"
+  },
+  {
+   "input": "````\n```\ninner\n```\n````",
+   "canonical": "````\n```\ninner\n```\n````"
+  },
+  {
+   "input": "~~~py\nx\n~~~",
+   "canonical": "```py\nx\n```"
+  },
+  {
+   "input": "```unterminated\nbody",
+   "canonical": "```unterminated\nbody\n```"
+  },
+  {
+   "input": "```\n\n\n```",
+   "canonical": "```\n\n\n```"
+  },
+  {
+   "input": "```\ntrailing   \n```",
+   "canonical": "```\ntrailing\n```"
+  },
+  {
+   "input": "``` spaced lang \nx\n```",
+   "canonical": "```spaced lang\nx\n```"
+  },
+  {
+   "input": "- ```\n  x\n  ```",
+   "canonical": "- \\`\\`\\`\n\n  x\n\n```\n```"
+  },
+  {
+   "input": "| a | b | c |\n| :-- | :-: | --: |\n| 1 | 2 | 3 |",
+   "canonical": "| a | b | c |\n| :-- | :-: | --: |\n| 1 | 2 | 3 |"
+  },
+  {
+   "input": "| spans ||\n| --- | --- |\n| 1 | 2 |",
+   "canonical": "| spans ||\n| --- | --- |\n| 1 | 2 |"
+  },
+  {
+   "input": "| a | b |\n| --- | --- |\n| up | 2 |\n|  | 4 |\n<!-- sealbook:table rs=1.0:2 -->",
+   "canonical": "| a | b |\n| --- | --- |\n| up | 2 |\n|  | 4 |\n<!-- sealbook:table rs=1.0:2 -->"
+  },
+  {
+   "input": "| a |\n| --- |\n| 1 |\n<!-- sealbook:table h=1:64 -->",
+   "canonical": "| a |\n| --- |\n| 1 |\n<!-- sealbook:table h=1:64 -->"
+  },
+  {
+   "input": "| a | b |\n| --- | --- |\n| 1 | 2 |\n<!-- sealbook:table bg=0.0:amber,1.1:green -->",
+   "canonical": "| a | b |\n| --- | --- |\n| 1 | 2 |\n<!-- sealbook:table bg=0.0:amber,1.1:green -->"
+  },
+  {
+   "input": "| a | b | c |\n| --- | --- | --- |\n| wide || 3 |\n|  |  | 6 |\n<!-- sealbook:table h=0:40 bg=1.0:blue rs=1.0:2 -->",
+   "canonical": "| a | b | c |\n| --- | --- | --- |\n| wide || 3 |\n|  |  | 6 |\n<!-- sealbook:table h=0:40 bg=1.0:blue rs=1.0:2 -->"
+  },
+  {
+   "input": "| a |\n| --- |\n| 1 |\n<!-- sealbook:table bg=0.0:chartreuse -->",
+   "canonical": "| a |\n| --- |\n| 1 |"
+  },
+  {
+   "input": "| a |\n| --- |\n| 1 |\n<!-- sealbook:table h=1:-4 -->",
+   "canonical": "| a |\n| --- |\n| 1 |"
+  },
+  {
+   "input": "| a |\n| --- |\n| 1 |\n<!-- sealbook:table h=9:40 bg=7.7:red rs=0.0:9 -->",
+   "canonical": "| a |\n| --- |\n|  |\n<!-- sealbook:table rs=0.0:9 -->"
+  },
+  {
+   "input": "| a | b |\n|---|---|\n| only |",
+   "canonical": "| a | b |\n| --- | --- |\n| only |  |"
+  },
+  {
+   "input": "| a |\n| - |",
+   "canonical": "| a |\n| --- |"
+  },
+  {
+   "input": "a | b\n--- | ---\n1 | 2 | 3",
+   "canonical": "| a | b |\n| --- | --- |\n| 1 | 2 |"
+  },
+  {
+   "input": "| x \\| y | `a|b` |\n| --- | --- |\n| **bold** | [l](https://e.com) |",
+   "canonical": "| x | y | `a|b` | | --- | --- | | **bold** | [l](https://e.com/) |"
+  },
+  {
+   "input": "| - x | # y | 1. z |\n| --- | --- | --- |\n|  | | > q |",
+   "canonical": "| \\- x | \\# y | 1\\. z |\n| --- | --- | --- |\n|  |  | \\> q |"
+  },
+  {
+   "input": "| a | b |\n| --- | --- |\n| ![p](attachment:1) | line  |",
+   "canonical": "| a | b |\n| --- | --- |\n| ![p](attachment:1) | line |"
+  },
+  {
+   "input": "| a | b |\n| --- | --- |\n| 1 | 2 |\n<!-- sealbook:table rs=0.1:2,1.0:3 bg=1.1:red -->",
+   "canonical": "| a | b |\n| --- | --- |\n| 1 |  |\n<!-- sealbook:table rs=0.1:2,1.0:3 -->"
+  },
+  {
+   "input": "above\n\n---\n\nbelow",
+   "canonical": "above\n\n---\n\nbelow"
+  },
+  {
+   "input": "* * *",
+   "canonical": "---"
+  },
+  {
+   "input": "--",
+   "canonical": "--"
+  },
+  {
+   "input": "text\n---",
+   "canonical": "text\n\n---"
+  },
+  {
+   "input": "call `fn()` now",
+   "canonical": "call `fn()` now"
+  },
+  {
+   "input": "see [docs](https://example.com/a)",
+   "canonical": "see [docs](https://example.com/a)"
+  },
+  {
+   "input": "***both*** and ~~struck~~ and `code`",
+   "canonical": "***both*** and ~~struck~~ and `code`"
+  },
+  {
+   "input": "**bold _both_**",
+   "canonical": "**bold** ***both***"
+  },
+  {
+   "input": "**`x`**",
+   "canonical": "**`x`**"
+  },
+  {
+   "input": "[`code link`](https://e.com)",
+   "canonical": "[`code link`](https://e.com/)"
+  },
+  {
+   "input": "~~**_all_**~~",
+   "canonical": "***~~all~~***"
+  },
+  {
+   "input": "**a** **b**",
+   "canonical": "**a** **b**"
+  },
+  {
+   "input": "**a****b**",
+   "canonical": "**ab**"
+  },
+  {
+   "input": "*a **b** c*",
+   "canonical": "*a b c*"
+  },
+  {
+   "input": "** padded **",
+   "canonical": "**padded**"
+  },
+  {
+   "input": "a ** ** b",
+   "canonical": "a   b"
+  },
+  {
+   "input": "_a_ b_c_d _e",
+   "canonical": "*a* b_c_d \\_e"
+  },
+  {
+   "input": "a_b_c",
+   "canonical": "a_b_c"
+  },
+  {
+   "input": "snake_case_name",
+   "canonical": "snake_case_name"
+  },
+  {
+   "input": "__init__ and __main__",
+   "canonical": "**init** and **main**"
+  },
+  {
+   "input": "an _emphasis_ here",
+   "canonical": "an *emphasis* here"
+  },
+  {
+   "input": "_leading and [not a link",
+   "canonical": "\\_leading and \\[not a link"
+  },
+  {
+   "input": "2 * 3 * 4",
+   "canonical": "2  *3*  4"
+  },
+  {
+   "input": "a*b*c",
+   "canonical": "a*b*c"
+  },
+  {
+   "input": "**unclosed",
+   "canonical": "\\*\\*unclosed"
+  },
+  {
+   "input": "~~unclosed",
+   "canonical": "\\~\\~unclosed"
+  },
+  {
+   "input": "~single~",
+   "canonical": "~single~"
+  },
+  {
+   "input": "~~~~",
+   "canonical": "```\n```"
+  },
+  {
+   "input": "a ``b ` c`` d",
+   "canonical": "a ``b ` c`` d"
+  },
+  {
+   "input": "`` ` ``",
+   "canonical": "`` ` ``"
+  },
+  {
+   "input": "` spaced `",
+   "canonical": "`spaced`"
+  },
+  {
+   "input": "``",
+   "canonical": "\\`\\`"
+  },
+  {
+   "input": "`unclosed",
+   "canonical": "\\`unclosed"
+  },
+  {
+   "input": "a \\* b \\_ c \\[ d \\\\ e \\q f \\| g \\# h \\. i \\! j",
+   "canonical": "a \\* b \\_ c \\[ d \\\\ e \\\\q f | g # h . i ! j"
+  },
+  {
+   "input": "line one\\\nline two",
+   "canonical": "line one\\\nline two"
+  },
+  {
+   "input": "line one  \nline two",
+   "canonical": "line one\\\nline two"
+  },
+  {
+   "input": "soft\nwrap",
+   "canonical": "soft wrap"
+  },
+  {
+   "input": "ends \\",
+   "canonical": "ends \\\\"
+  },
+  {
+   "input": "a\\\n- b",
+   "canonical": "a\\\\\n\n- b"
+  },
+  {
+   "input": "a\\\n# h",
+   "canonical": "a\\\\\n\n# h"
+  },
+  {
+   "input": "a\\\n> q",
+   "canonical": "a\\\\\n\n> q"
+  },
+  {
+   "input": "a\\\n1. i",
+   "canonical": "a\\\\\n\n1. i"
+  },
+  {
+   "input": "\\# not",
+   "canonical": "\\# not"
+  },
+  {
+   "input": "\\- not",
+   "canonical": "\\- not"
+  },
+  {
+   "input": "\\> not",
+   "canonical": "\\> not"
+  },
+  {
+   "input": "1\\. not",
+   "canonical": "1\\. not"
+  },
+  {
+   "input": "\\+ not",
+   "canonical": "\\+ not"
+  },
+  {
+   "input": "#",
+   "canonical": "\\#"
+  },
+  {
+   "input": "-",
+   "canonical": "\\-"
+  },
+  {
+   "input": "+",
+   "canonical": "\\+"
+  },
+  {
+   "input": ">x",
+   "canonical": "> x"
+  },
+  {
+   "input": "1.",
+   "canonical": "1."
+  },
+  {
+   "input": "12) x",
+   "canonical": "12. x"
+  },
+  {
+   "input": "a **\\\n** b",
+   "canonical": "a \\\n b"
+  },
+  {
+   "input": "[a](HTTPS://EXAMPLE.COM:443/a/../b)",
+   "canonical": "[a](https://example.com/b)"
+  },
+  {
+   "input": "[a](https://example.com/a b)",
+   "canonical": "\\[a](https://example.com/a b)"
+  },
+  {
+   "input": "[a](https://bücher.example/ü?q=é#f)",
+   "canonical": "[a](https://xn--bcher-kva.example/%C3%BC?q=%C3%A9#f)"
+  },
+  {
+   "input": "[a](relative/path)",
+   "canonical": "[a](https://sealbook.invalid/relative/path)"
+  },
+  {
+   "input": "[a](/rooted)",
+   "canonical": "[a](https://sealbook.invalid/rooted)"
+  },
+  {
+   "input": "[a](//proto.example)",
+   "canonical": "[a](https://proto.example/)"
+  },
+  {
+   "input": "[a](#frag)",
+   "canonical": "[a](https://sealbook.invalid/#frag)"
+  },
+  {
+   "input": "[a](?q=1)",
+   "canonical": "[a](https://sealbook.invalid/?q=1)"
+  },
+  {
+   "input": "[a](mailto:A@Example.com)",
+   "canonical": "[a](mailto:A@Example.com)"
+  },
+  {
+   "input": "[a](javascript:alert(1))",
+   "canonical": "\\[a](javascript:alert(1))"
+  },
+  {
+   "input": "[a](data:text/html,x)",
+   "canonical": "\\[a](data:text/html,x)"
+  },
+  {
+   "input": "[a]()",
+   "canonical": "\\[a]()"
+  },
+  {
+   "input": "[a](  https://e.com  )",
+   "canonical": "[a](https://e.com/)"
+  },
+  {
+   "input": "[a](http:foo)",
+   "canonical": "[a](http://foo/)"
+  },
+  {
+   "input": "[a](https://user:pw@e.com/%7e|^`{}')",
+   "canonical": "[a](https://user:pw@e.com/%7e|%5E%60%7B%7D')"
+  },
+  {
+   "input": "[a](http://[::1]:80/x)",
+   "canonical": "[a](http://[::1]/x)"
+  },
+  {
+   "input": "[a](http://999.999.999.999/)",
+   "canonical": "\\[a](http://999.999.999.999/)"
+  },
+  {
+   "input": "[**bold** link](https://e.com)",
+   "canonical": "[**bold**](https://e.com/)[ link](https://e.com/)"
+  },
+  {
+   "input": "[nested [brackets]](https://e.com)",
+   "canonical": "[nested \\[brackets]](https://e.com/)"
+  },
+  {
+   "input": "[a](https://e.com/(paren))",
+   "canonical": "[a](https://e.com/(paren))"
+  },
+  {
+   "input": "go to https://example.com/x, now.",
+   "canonical": "go to [https://example.com/x](https://example.com/x), now."
+  },
+  {
+   "input": "(http://e.com)",
+   "canonical": "([http://e.com](http://e.com/))"
+  },
+  {
+   "input": "xhttps://e.com",
+   "canonical": "xhttps://e.com"
+  },
+  {
+   "input": "HTTP://E.COM/Path",
+   "canonical": "[HTTP://E.COM/Path](http://e.com/Path)"
+  },
+  {
+   "input": "https://",
+   "canonical": "https://"
+  },
+  {
+   "input": "https://e.com/a_b_c*d*",
+   "canonical": "[https://e.com/a_b_c\\*d\\*](https://e.com/a_b_c*d*)"
+  },
+  {
+   "input": "*https://e.com*",
+   "canonical": "[*https://e.com*](https://e.com/)"
+  },
+  {
+   "input": "![photo](attachment:abc-123)",
+   "canonical": "![photo](attachment:abc-123)"
+  },
+  {
+   "input": "Here is a ![photo](attachment:abc-123) inline.",
+   "canonical": "Here is a ![photo](attachment:abc-123) inline."
+  },
+  {
+   "input": "![remote](https://e.com/x.png)",
+   "canonical": "[remote](https://e.com/x.png)"
+  },
+  {
+   "input": "![](attachment:x)",
+   "canonical": "![](attachment:x)"
+  },
+  {
+   "input": "![a](attachment: spaced )",
+   "canonical": "![a](attachment:spaced)"
+  },
+  {
+   "input": "![a](attachment:b c)",
+   "canonical": "\\[a](attachment:b c)"
+  },
+  {
+   "input": "**![in bold](attachment:q)**",
+   "canonical": "![in bold](attachment:q)"
+  },
+  {
+   "input": "[![img link](attachment:q)](https://e.com)",
+   "canonical": "[!\\[img link](attachment:q)](https://e.com/)"
+  },
+  {
+   "input": "# ![h](attachment:h)",
+   "canonical": "# ![h](attachment:h)"
+  },
+  {
+   "input": "!",
+   "canonical": "!"
+  },
+  {
+   "input": "![",
+   "canonical": "\\["
+  },
+  {
+   "input": "!!",
+   "canonical": "!!"
+  },
+  {
+   "input": "héllo — 日本語 _ünï_ 🎉 **🎉**",
+   "canonical": "héllo — 日本語 *ünï* 🎉 **🎉**"
+  },
+  {
+   "input": "日_本_語",
+   "canonical": "日_本_語"
+  },
+  {
+   "input": "tab\there",
+   "canonical": "tab\there"
+  },
+  {
+   "input": "trailing spaces   \n\nnext",
+   "canonical": "trailing spaces\n\nnext"
+  },
+  {
+   "input": " leading space",
+   "canonical": "leading space"
+  },
+  {
+   "input": "a\r\nb\r\rc",
+   "canonical": "a b\n\nc"
+  },
+  {
+   "input": "para\n| not | table |",
+   "canonical": "para | not | table |"
+  },
+  {
+   "input": "<!-- sealbook:table h=1:2 -->",
+   "canonical": "<!-- sealbook:table h=1:2 -->"
+  },
+  {
+   "input": "<script>alert(1)</script>",
+   "canonical": "<script>alert(1)</script>"
+  },
+  {
+   "input": "a &amp; b",
+   "canonical": "a &amp; b"
+  },
+  {
+   "input": "one two",
+   "canonical": "one two"
+  },
+  {
+   "input": "- a\n- b",
+   "canonical": "- a\n- b"
+  },
+  {
+   "input": "```\nstill here\n```",
+   "canonical": "```\nstill here\n```"
+  },
+  {
+   "input": "> > > \\> deep",
+   "canonical": "> > > \\> deep"
+  },
+  {
+   "input": "# a\n\n- b",
+   "canonical": "# a\n\n- b"
+  },
+  {
+   "input": "> quoted\n\n# heading",
+   "canonical": "> quoted\n\n# heading"
+  },
+  {
+   "input": "a \\*\\* b",
+   "canonical": "a \\*\\* b"
+  },
+  {
+   "input": "*a* *`b*c`* *d*",
+   "canonical": "*a* *`b*c`* *d*"
+  },
+  {
+   "input": "see [https://example.com](https://example.com/) now",
+   "canonical": "see [https://example.com](https://example.com/) now"
+  },
+  {
+   "input": "see [https://example.com/a](https://example.com/a).",
+   "canonical": "see [https://example.com/a](https://example.com/a)."
+  },
+  {
+   "input": "[alt](https://example.com/a.png)",
+   "canonical": "[alt](https://example.com/a.png)"
+  },
+  {
+   "input": "\\[x](javascript:alert(1))",
+   "canonical": "\\[x](javascript:alert(1))"
+  },
+  {
+   "input": "\\[x](data:text/html,<script>alert(1)</script>)",
+   "canonical": "\\[x](data:text/html,<script>alert(1)</script>)"
+  },
+  {
+   "input": "\\[x](vbscript:msgbox)",
+   "canonical": "\\[x](vbscript:msgbox)"
+  },
+  {
+   "input": "\\[x](blob:https://example.com/abc)",
+   "canonical": "\\[x](blob:[https://example.com/abc](https://example.com/abc))"
+  },
+  {
+   "input": "\\[x](file:///etc/passwd)",
+   "canonical": "\\[x](file:///etc/passwd)"
+  },
+  {
+   "input": "\\[x](   javascript:alert(1))",
+   "canonical": "\\[x](   javascript:alert(1))"
+  },
+  {
+   "input": "\\[x](JaVaScRiPt:alert(1))",
+   "canonical": "\\[x](JaVaScRiPt:alert(1))"
+  },
+  {
+   "input": "[a](http://example.com/)",
+   "canonical": "[a](http://example.com/)"
+  },
+  {
+   "input": "[a](https://example.com/)",
+   "canonical": "[a](https://example.com/)"
+  },
+  {
+   "input": "[a](https://sealbook.invalid/notes)",
+   "canonical": "[a](https://sealbook.invalid/notes)"
+  },
+  {
+   "input": "[see https://example.com](https://other.example/)",
+   "canonical": "[see https://example.com](https://other.example/)"
+  },
+  {
+   "input": "\\[x](attachment:abc-123)",
+   "canonical": "\\[x](attachment:abc-123)"
+  },
+  {
+   "input": "[a](https://example.com/x.png)",
+   "canonical": "[a](https://example.com/x.png)"
+  },
+  {
+   "input": "| Day | Plan |\n| --- | --- |\n| Sat | Land |",
+   "canonical": "| Day | Plan |\n| --- | --- |\n| Sat | Land |"
+  },
+  {
+   "input": "| a |\n| --- |\n| 1 |\n<!-- sealbook:table h=0:24 -->",
+   "canonical": "| a |\n| --- |\n| 1 |\n<!-- sealbook:table h=0:24 -->"
+  },
+  {
+   "input": "| a | b | c |\n| --- | --- | --- |\n| 1 |  |  |\n| 1 | 2 | 3 |",
+   "canonical": "| a | b | c |\n| --- | --- | --- |\n| 1 |  |  |\n| 1 | 2 | 3 |"
+  },
+  {
+   "input": "| a |\n| --- |\n| 1 |\n\n## Next",
+   "canonical": "| a |\n| --- |\n| 1 |\n\n## Next"
+  },
+  {
+   "input": "| a | b | | --- | | 1 | 2 |",
+   "canonical": "| a | b | | --- | | 1 | 2 |"
+  },
+  {
+   "input": "| a | b | | --- | --- | --- |",
+   "canonical": "| a | b | | --- | --- | --- |"
+  },
+  {
+   "input": "| a | b | | 1 | 2 |",
+   "canonical": "| a | b | | 1 | 2 |"
+  },
+  {
+   "input": "Some prose | a | b | | --- | --- | | 1 | 2 |",
+   "canonical": "Some prose | a | b | | --- | --- | | 1 | 2 |"
+  },
+  {
+   "input": "\\*\\*\\*loose",
+   "canonical": "\\*\\*\\*loose"
+  },
+  {
+   "input": "- one\n  - inner",
+   "canonical": "- one\n  - inner"
+  },
+  {
+   "input": "- only\n- second",
+   "canonical": "- only\n- second"
+  },
+  {
+   "input": "- one\n  - deep\n  - also deep",
+   "canonical": "- one\n  - deep\n  - also deep"
+  },
+  {
+   "input": "- level\n  - level\n    - level\n      - level\n        - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level",
+   "canonical": "- level\n  - level\n    - level\n      - level\n        - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level\n          - level"
+  },
+  {
+   "input": "- [ ] parent\n      - [ ] child",
+   "canonical": "- [ ] parent\n      - [ ] child"
+  },
+  {
+   "input": "- **bold** and `code` and [link](https://example.com/)",
+   "canonical": "- **bold** and `code` and [link](https://example.com/)"
+  },
+  {
+   "input": "[a](https://example.com/?x=1#top)",
+   "canonical": "[a](https://example.com/?x=1#top)"
+  },
+  {
+   "input": "# closing",
+   "canonical": "# closing"
+  },
+  {
+   "input": "## indented",
+   "canonical": "## indented"
+  },
+  {
+   "input": "\\# code-ish",
+   "canonical": "\\# code-ish"
+  },
+  {
+   "input": "3. three",
+   "canonical": "3. three"
+  },
+  {
+   "input": "- [ ] todo\n- [x] done\n- [x] caps",
+   "canonical": "- [ ] todo\n- [x] done\n- [x] caps"
+  },
+  {
+   "input": "- \\[ ]",
+   "canonical": "- \\[ ]"
+  },
+  {
+   "input": "- [ ] task\n\n- plain\n\n- [x] task",
+   "canonical": "- [ ] task\n\n- plain\n\n- [x] task"
+  },
+  {
+   "input": "1. a\n\n- [ ] b\n\n1. c",
+   "canonical": "1. a\n\n- [ ] b\n\n1. c"
+  },
+  {
+   "input": "2. a\n\n- [x] b\n\n4. c",
+   "canonical": "2. a\n\n- [x] b\n\n4. c"
+  },
+  {
+   "input": "1. a\n   1. b\n      - c\n2. d",
+   "canonical": "1. a\n   1. b\n      - c\n2. d"
+  },
+  {
+   "input": "- a\n- b\n\n- c",
+   "canonical": "- a\n- b\n- c"
+  },
+  {
+   "input": "- a\n  - tabbed\n- b",
+   "canonical": "- a\n  - tabbed\n- b"
+  },
+  {
+   "input": "- star\n- plus",
+   "canonical": "- star\n- plus"
+  },
+  {
+   "input": "- a\n  - b\n  - c",
+   "canonical": "- a\n  - b\n  - c"
+  },
+  {
+   "input": "- indented\n- out",
+   "canonical": "- indented\n- out"
+  },
+  {
+   "input": "- l0\n  - l1\n    - l2\n      - l3\n        - l4\n          - l5\n          - l6\n          - l7\n          - l8",
+   "canonical": "- l0\n  - l1\n    - l2\n      - l3\n        - l4\n          - l5\n          - l6\n          - l7\n          - l8"
+  },
+  {
+   "input": "> a lazy",
+   "canonical": "> a lazy"
+  },
+  {
+   "input": "> a\n>\n> # h\n\n- b",
+   "canonical": "> a\n>\n> # h\n\n- b"
+  },
+  {
+   "input": "> > > \\> > deep",
+   "canonical": "> > > \\> > deep"
+  },
+  {
+   "input": "```py\nx\n```",
+   "canonical": "```py\nx\n```"
+  },
+  {
+   "input": "```unterminated\nbody\n```",
+   "canonical": "```unterminated\nbody\n```"
+  },
+  {
+   "input": "```\ntrailing\n```",
+   "canonical": "```\ntrailing\n```"
+  },
+  {
+   "input": "```spaced lang\nx\n```",
+   "canonical": "```spaced lang\nx\n```"
+  },
+  {
+   "input": "- \\`\\`\\`\n\n  x\n\n```\n```",
+   "canonical": "- \\`\\`\\`\n\n  x\n\n```\n```"
+  },
+  {
+   "input": "| a |\n| --- |\n| 1 |",
+   "canonical": "| a |\n| --- |\n| 1 |"
+  },
+  {
+   "input": "| a |\n| --- |\n|  |\n<!-- sealbook:table rs=0.0:9 -->",
+   "canonical": "| a |\n| --- |\n|  |\n<!-- sealbook:table rs=0.0:9 -->"
+  },
+  {
+   "input": "| a | b |\n| --- | --- |\n| only |  |",
+   "canonical": "| a | b |\n| --- | --- |\n| only |  |"
+  },
+  {
+   "input": "| a |\n| --- |",
+   "canonical": "| a |\n| --- |"
+  },
+  {
+   "input": "| x | y | `a|b` | | --- | --- | | **bold** | [l](https://e.com/) |",
+   "canonical": "| x | y | `a|b` | | --- | --- | | **bold** | [l](https://e.com/) |"
+  },
+  {
+   "input": "| \\- x | \\# y | 1\\. z |\n| --- | --- | --- |\n|  |  | \\> q |",
+   "canonical": "| \\- x | \\# y | 1\\. z |\n| --- | --- | --- |\n|  |  | \\> q |"
+  },
+  {
+   "input": "| a | b |\n| --- | --- |\n| ![p](attachment:1) | line |",
+   "canonical": "| a | b |\n| --- | --- |\n| ![p](attachment:1) | line |"
+  },
+  {
+   "input": "| a | b |\n| --- | --- |\n| 1 |  |\n<!-- sealbook:table rs=0.1:2,1.0:3 -->",
+   "canonical": "| a | b |\n| --- | --- |\n| 1 |  |\n<!-- sealbook:table rs=0.1:2,1.0:3 -->"
+  },
+  {
+   "input": "text\n\n---",
+   "canonical": "text\n\n---"
+  },
+  {
+   "input": "**bold** ***both***",
+   "canonical": "**bold** ***both***"
+  },
+  {
+   "input": "[`code link`](https://e.com/)",
+   "canonical": "[`code link`](https://e.com/)"
+  },
+  {
+   "input": "***~~all~~***",
+   "canonical": "***~~all~~***"
+  },
+  {
+   "input": "**ab**",
+   "canonical": "**ab**"
+  },
+  {
+   "input": "*a b c*",
+   "canonical": "*a b c*"
+  },
+  {
+   "input": "**padded**",
+   "canonical": "**padded**"
+  },
+  {
+   "input": "a   b",
+   "canonical": "a   b"
+  },
+  {
+   "input": "*a* b_c_d \\_e",
+   "canonical": "*a* b_c_d \\_e"
+  },
+  {
+   "input": "**init** and **main**",
+   "canonical": "**init** and **main**"
+  },
+  {
+   "input": "an *emphasis* here",
+   "canonical": "an *emphasis* here"
+  },
+  {
+   "input": "\\_leading and \\[not a link",
+   "canonical": "\\_leading and \\[not a link"
+  },
+  {
+   "input": "2  *3*  4",
+   "canonical": "2  *3*  4"
+  },
+  {
+   "input": "\\*\\*unclosed",
+   "canonical": "\\*\\*unclosed"
+  },
+  {
+   "input": "\\~\\~unclosed",
+   "canonical": "\\~\\~unclosed"
+  },
+  {
+   "input": "`spaced`",
+   "canonical": "`spaced`"
+  },
+  {
+   "input": "\\`\\`",
+   "canonical": "\\`\\`"
+  },
+  {
+   "input": "\\`unclosed",
+   "canonical": "\\`unclosed"
+  },
+  {
+   "input": "a \\* b \\_ c \\[ d \\\\ e \\\\q f | g # h . i ! j",
+   "canonical": "a \\* b \\_ c \\[ d \\\\ e \\\\q f | g # h . i ! j"
+  },
+  {
+   "input": "soft wrap",
+   "canonical": "soft wrap"
+  },
+  {
+   "input": "ends \\\\",
+   "canonical": "ends \\\\"
+  },
+  {
+   "input": "a\\\\\n\n- b",
+   "canonical": "a\\\\\n\n- b"
+  },
+  {
+   "input": "a\\\\\n\n# h",
+   "canonical": "a\\\\\n\n# h"
+  },
+  {
+   "input": "a\\\\\n\n> q",
+   "canonical": "a\\\\\n\n> q"
+  },
+  {
+   "input": "a\\\\\n\n1. i",
+   "canonical": "a\\\\\n\n1. i"
+  },
+  {
+   "input": "\\#",
+   "canonical": "\\#"
+  },
+  {
+   "input": "\\-",
+   "canonical": "\\-"
+  },
+  {
+   "input": "\\+",
+   "canonical": "\\+"
+  },
+  {
+   "input": "> x",
+   "canonical": "> x"
+  },
+  {
+   "input": "12. x",
+   "canonical": "12. x"
+  },
+  {
+   "input": "a \\\n b",
+   "canonical": "a \\\n b"
+  },
+  {
+   "input": "[a](https://example.com/b)",
+   "canonical": "[a](https://example.com/b)"
+  },
+  {
+   "input": "\\[a](https://example.com/a b)",
+   "canonical": "\\[a]([https://example.com/a](https://example.com/a) b)"
+  },
+  {
+   "input": "[a](https://xn--bcher-kva.example/%C3%BC?q=%C3%A9#f)",
+   "canonical": "[a](https://xn--bcher-kva.example/%C3%BC?q=%C3%A9#f)"
+  },
+  {
+   "input": "[a](https://sealbook.invalid/relative/path)",
+   "canonical": "[a](https://sealbook.invalid/relative/path)"
+  },
+  {
+   "input": "[a](https://sealbook.invalid/rooted)",
+   "canonical": "[a](https://sealbook.invalid/rooted)"
+  },
+  {
+   "input": "[a](https://proto.example/)",
+   "canonical": "[a](https://proto.example/)"
+  },
+  {
+   "input": "[a](https://sealbook.invalid/#frag)",
+   "canonical": "[a](https://sealbook.invalid/#frag)"
+  },
+  {
+   "input": "[a](https://sealbook.invalid/?q=1)",
+   "canonical": "[a](https://sealbook.invalid/?q=1)"
+  },
+  {
+   "input": "\\[a](javascript:alert(1))",
+   "canonical": "\\[a](javascript:alert(1))"
+  },
+  {
+   "input": "\\[a](data:text/html,x)",
+   "canonical": "\\[a](data:text/html,x)"
+  },
+  {
+   "input": "\\[a]()",
+   "canonical": "\\[a]()"
+  },
+  {
+   "input": "[a](https://e.com/)",
+   "canonical": "[a](https://e.com/)"
+  },
+  {
+   "input": "[a](http://foo/)",
+   "canonical": "[a](http://foo/)"
+  },
+  {
+   "input": "[a](https://user:pw@e.com/%7e|%5E%60%7B%7D')",
+   "canonical": "[a](https://user:pw@e.com/%7e|%5E%60%7B%7D')"
+  },
+  {
+   "input": "[a](http://[::1]/x)",
+   "canonical": "[a](http://[::1]/x)"
+  },
+  {
+   "input": "\\[a](http://999.999.999.999/)",
+   "canonical": "\\[a](http://999.999.999.999/)"
+  },
+  {
+   "input": "[**bold**](https://e.com/)[ link](https://e.com/)",
+   "canonical": "[**bold**](https://e.com/)[ link](https://e.com/)"
+  },
+  {
+   "input": "[nested \\[brackets]](https://e.com/)",
+   "canonical": "\\[nested \\[brackets]]([https://e.com/](https://e.com/))"
+  },
+  {
+   "input": "go to [https://example.com/x](https://example.com/x), now.",
+   "canonical": "go to [https://example.com/x](https://example.com/x), now."
+  },
+  {
+   "input": "([http://e.com](http://e.com/))",
+   "canonical": "([http://e.com](http://e.com/))"
+  },
+  {
+   "input": "[HTTP://E.COM/Path](http://e.com/Path)",
+   "canonical": "[HTTP://E.COM/Path](http://e.com/Path)"
+  },
+  {
+   "input": "[https://e.com/a_b_c\\*d\\*](https://e.com/a_b_c*d*)",
+   "canonical": "[https://e.com/a_b_c\\*d\\*](https://e.com/a_b_c*d*)"
+  },
+  {
+   "input": "[*https://e.com*](https://e.com/)",
+   "canonical": "[*https://e.com*](https://e.com/)"
+  },
+  {
+   "input": "[remote](https://e.com/x.png)",
+   "canonical": "[remote](https://e.com/x.png)"
+  },
+  {
+   "input": "![a](attachment:spaced)",
+   "canonical": "![a](attachment:spaced)"
+  },
+  {
+   "input": "\\[a](attachment:b c)",
+   "canonical": "\\[a](attachment:b c)"
+  },
+  {
+   "input": "![in bold](attachment:q)",
+   "canonical": "![in bold](attachment:q)"
+  },
+  {
+   "input": "[!\\[img link](attachment:q)](https://e.com/)",
+   "canonical": "\\[!\\\\\\[img link](attachment:q)]([https://e.com/](https://e.com/))"
+  },
+  {
+   "input": "\\[",
+   "canonical": "\\["
+  },
+  {
+   "input": "héllo — 日本語 *ünï* 🎉 **🎉**",
+   "canonical": "héllo — 日本語 *ünï* 🎉 **🎉**"
+  },
+  {
+   "input": "trailing spaces\n\nnext",
+   "canonical": "trailing spaces\n\nnext"
+  },
+  {
+   "input": "leading space",
+   "canonical": "leading space"
+  },
+  {
+   "input": "a b\n\nc",
+   "canonical": "a b\n\nc"
+  },
+  {
+   "input": "para | not | table |",
+   "canonical": "para | not | table |"
+  }
+ ]
+}

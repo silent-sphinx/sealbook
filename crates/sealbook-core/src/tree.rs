@@ -1,4 +1,4 @@
-//! The parent-pointer tree tasks and task lists nest by.
+//! The parent-pointer tree that tasks, lists, notes and notebooks nest by.
 //!
 //! Nothing validates a stored `parentId`: two devices editing offline can each
 //! make the other's item the parent, and a deleted parent leaves a pointer to an
@@ -73,14 +73,49 @@ pub(crate) fn can_reparent(items: &[TreeRef], id: &str, parent_id: Option<&str>)
 /// [`can_reparent`] for hosts that hold items as `(id, parent id)` pairs, so
 /// notes and bookmark collections follow the same rule tasks do.
 pub fn may_reparent(items: &[(String, Option<String>)], id: &str, parent_id: Option<&str>) -> bool {
-    let refs: Vec<TreeRef> = items
+    can_reparent(&refs(items), id, parent_id)
+}
+
+fn refs(items: &[(String, Option<String>)]) -> Vec<TreeRef<'_>> {
+    items
         .iter()
         .map(|(id, parent)| TreeRef {
             id,
             parent_id: parent.as_deref(),
         })
-        .collect();
-    can_reparent(&refs, id, parent_id)
+        .collect()
+}
+
+/// The parent each item actually sits under, for hosts that draw the tree. Pass
+/// only the items in scope: a parent outside it reads as no parent, so narrowing
+/// the scope never hides an item.
+pub fn resolved_parents(items: &[(String, Option<String>)]) -> HashMap<String, Option<String>> {
+    let refs = refs(items);
+    let map = by_id(&refs);
+    refs.iter()
+        .map(|item| {
+            let parent = resolve_parent(item.id, &map).map(str::to_string);
+            (item.id.to_string(), parent)
+        })
+        .collect()
+}
+
+/// `id` and everything nested under it, `id` first.
+pub fn subtree_ids(items: &[(String, Option<String>)], id: &str) -> Vec<String> {
+    subtree(&refs(items), id)
+}
+
+/// The ancestors of `id`, nearest first.
+pub fn ancestor_ids(items: &[(String, Option<String>)], id: &str) -> Vec<String> {
+    let refs = refs(items);
+    let map = by_id(&refs);
+    let mut out = Vec::new();
+    let mut cursor = resolve_parent(id, &map);
+    while let Some(current) = cursor {
+        out.push(current.to_string());
+        cursor = resolve_parent(current, &map);
+    }
+    out
 }
 
 /// The ids of items that are flagged, and of everything nested under a flagged
@@ -133,6 +168,28 @@ mod tests {
         assert!(!can_reparent(&items, "a", Some("c")));
         assert!(!can_reparent(&items, "a", Some("a")));
         assert!(!can_reparent(&items, "a", Some("gone")));
+    }
+
+    fn pairs(items: &[(&str, Option<&str>)]) -> Vec<(String, Option<String>)> {
+        items
+            .iter()
+            .map(|(id, parent)| (id.to_string(), parent.map(str::to_string)))
+            .collect()
+    }
+
+    #[test]
+    fn ancestors_run_nearest_first() {
+        let items = pairs(&[("a", None), ("b", Some("a")), ("c", Some("b"))]);
+        assert_eq!(ancestor_ids(&items, "c"), vec!["b", "a"]);
+        assert!(ancestor_ids(&items, "a").is_empty());
+    }
+
+    #[test]
+    fn a_missing_parent_or_a_cycle_resolves_to_the_top_level() {
+        let items = pairs(&[("x", Some("y")), ("y", Some("x")), ("z", Some("gone"))]);
+        let parents = resolved_parents(&items);
+        assert!(parents.values().all(Option::is_none));
+        assert!(ancestor_ids(&items, "x").is_empty());
     }
 
     fn flagged(items: &[(&str, Option<&str>, bool)]) -> Vec<String> {
