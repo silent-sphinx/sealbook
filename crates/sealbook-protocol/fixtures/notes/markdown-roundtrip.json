@@ -345,6 +345,18 @@
    "canonical": "[a](https://example.com/p?x=1)"
   },
   {
+   "input": "| a | b | c |\n| --- | --- | --- |\n| 1 | 2 | 3 |\n<!-- sealbook:table w=0:600,1:200,2:200 -->",
+   "canonical": "| a | b | c |\n| --- | --- | --- |\n| 1 | 2 | 3 |\n<!-- sealbook:table w=0:600,1:200,2:200 -->"
+  },
+  {
+   "input": "| a || c |\n| --- | --- | --- |\n| 1 | 2 | 3 |\n|  | 4 | 5 |\n<!-- sealbook:table h=1:48 bg=0.2:blue rs=1.0:2 w=2:300 -->",
+   "canonical": "| a || c |\n| --- | --- | --- |\n| 1 | 2 | 3 |\n|  | 4 | 5 |\n<!-- sealbook:table h=1:48 bg=0.2:blue rs=1.0:2 w=2:300 -->"
+  },
+  {
+   "input": "| a | b |\n| --- | --- |\n| 1 | 2 |\n<!-- sealbook:table w=0:0,1:1001,1:x,5:250,1:1000 -->",
+   "canonical": "| a | b |\n| --- | --- |\n| 1 | 2 |\n<!-- sealbook:table w=1:1000 -->"
+  },
+  {
    "input": "",
    "canonical": ""
   },
@@ -1167,6 +1179,10 @@
   {
    "input": "[a](https://example.com/?x=1#top)",
    "canonical": "[a](https://example.com/?x=1#top)"
+  },
+  {
+   "input": "| a | b |\n| --- | --- |\n| 1 | 2 |\n<!-- sealbook:table w=1:1000 -->",
+   "canonical": "| a | b |\n| --- | --- |\n| 1 | 2 |\n<!-- sealbook:table w=1:1000 -->"
   },
   {
    "input": "# closing",

@@ -440,6 +440,13 @@ fn serialize_table(table: &Table, indent: &str) -> String {
         .filter(|(row, _)| (**row as usize) < rows.len())
         .map(|(row, height)| (*row, *height))
         .collect();
+    layout.widths = table
+        .layout
+        .widths
+        .iter()
+        .filter(|(column, _)| **column < columns)
+        .map(|(column, share)| (*column, *share))
+        .collect();
     for entry in &placed {
         // A fill is read where the source spells the cell, then written where
         // the cell lands.

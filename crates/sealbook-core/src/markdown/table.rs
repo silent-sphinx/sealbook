@@ -1,5 +1,5 @@
 //! Pipe tables and the layout comment that may follow one,
-//! `<!-- sealbook:table h=0:44 bg=1.2:amber rs=1.0:2 -->`.
+//! `<!-- sealbook:table h=0:44 bg=1.2:amber rs=1.0:2 w=0:600,1:400 -->`.
 
 use super::ast::{Table, TableCell, TableFill, TableLayout};
 use super::inline::parse_inline;
@@ -7,6 +7,7 @@ use super::{delimiter_alignments, split_row, starts_block};
 
 const MAX_ROW_HEIGHT: u32 = 2000;
 const MAX_ROWSPAN: u32 = 1000;
+const MAX_COLUMN_SHARE: u32 = 1000;
 
 /// A header row, a delimiter row describing exactly those columns, then rows
 /// until a blank line or another block. Like GFM, this does not interrupt a
@@ -129,6 +130,13 @@ fn read_layout(line: &str) -> Option<TableLayout> {
                         }
                     }
                 }
+                "w" => {
+                    if let (Some(column), Some(share)) = (number(index), number(value)) {
+                        if (1..=MAX_COLUMN_SHARE).contains(&share) {
+                            layout.widths.insert(column, share);
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -171,6 +179,13 @@ pub(super) fn write_layout(layout: &TableLayout) -> Option<String> {
             .iter()
             .map(|((r, c), span)| format!("{r}.{c}:{span}"));
         groups.push(format!("rs={}", list(rowspans)));
+    }
+    if !layout.widths.is_empty() {
+        let widths = layout
+            .widths
+            .iter()
+            .map(|(column, w)| format!("{column}:{w}"));
+        groups.push(format!("w={}", list(widths)));
     }
     (!groups.is_empty()).then(|| format!("<!-- sealbook:table {} -->", groups.join(" ")))
 }

@@ -104,6 +104,10 @@ pub struct TableLayout {
     /// Rows a cell covers, only ever above 1.
     #[serde(serialize_with = "by_position")]
     pub rowspans: BTreeMap<(u32, u32), u32>,
+    /// Each grid column's share of the table's width, relative to the others,
+    /// as pixels would not suit every screen. A column without one takes the
+    /// average of those that have one.
+    pub widths: BTreeMap<u32, u32>,
 }
 
 fn by_position<S: Serializer, V: Serialize>(
