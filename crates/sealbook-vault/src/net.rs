@@ -476,6 +476,10 @@ impl NetWorker {
                 self.report(NetReport::Block(false));
                 let _ = reply.send(result);
             }
+            AccountRequest::SweepTrash { reply } => {
+                let result = self.sweep_trash().await;
+                let _ = reply.send(result);
+            }
             AccountRequest::Delete { password, reply } => {
                 let result = self.delete(password).await;
                 let _ = reply.send(result);
@@ -510,6 +514,26 @@ impl NetWorker {
             .await
             .ok_or(VaultError::Gone)?;
         Ok(())
+    }
+
+    async fn sweep_trash(&mut self) -> Result<usize, VaultError> {
+        if self.halted || self.rotation_owed {
+            return Err(VaultError::NotSynced);
+        }
+        self.flush().await?;
+        let client = self.client.as_mut().ok_or(VaultError::NotUnlocked)?;
+        let read = client.catch_up(0).await?;
+        let unopened = read.unreadable;
+        self.ask(|reply| NetReport::CaughtUp { read, reply })
+            .await
+            .ok_or(VaultError::Gone)?;
+        self.save_device_if_changed();
+        if unopened > 0 {
+            return Err(VaultError::Unopened(unopened));
+        }
+        let (reply, receiver) = oneshot::channel();
+        self.report(NetReport::SweepTrash { reply });
+        receiver.await.map_err(|_| VaultError::Gone)?
     }
 
     async fn export(&mut self) -> Result<AccountExport, VaultError> {

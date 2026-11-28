@@ -109,6 +109,8 @@ pub enum VaultError {
     AlreadyUnlocked,
     #[error("the vault is busy with a key change; try again in a moment")]
     EditsBlocked,
+    #[error("{0} item(s) cannot be opened on this device, so the trash was left alone")]
+    Unopened(u64),
     #[error("you are offline and nothing is saved on this device yet")]
     OfflineAndEmpty,
     #[error("the server could not be reached; some changes are still waiting to be sent")]
@@ -211,6 +213,9 @@ pub(crate) enum AccountRequest {
         password: Zeroizing<String>,
         reply: oneshot::Sender<Result<(), VaultError>>,
     },
+    SweepTrash {
+        reply: oneshot::Sender<Result<usize, VaultError>>,
+    },
 }
 
 impl AccountRequest {
@@ -220,6 +225,7 @@ impl AccountRequest {
             Self::Export { reply } => drop(reply.send(Err(error))),
             Self::Import { reply, .. } => drop(reply.send(Err(error))),
             Self::Delete { reply, .. } => drop(reply.send(Err(error))),
+            Self::SweepTrash { reply } => drop(reply.send(Err(error))),
         }
     }
 }
@@ -425,6 +431,17 @@ impl VaultHandle {
                 reply,
             })
         })
+    }
+
+    /// Deletes for good whatever has been in the trash past the retention
+    /// period, and answers with how many objects that is once the deletes are
+    /// queued. Waiting writes are sent and the whole vault is read from the
+    /// server first, so nothing goes on the word of a stale copy: offline is
+    /// [`VaultError::NotSynced`], and a vault with an item this device cannot
+    /// open is [`VaultError::Unopened`], since that item may sit inside
+    /// something about to go.
+    pub fn sweep_trash(&self) -> Reply<Result<usize, VaultError>> {
+        self.ask(|reply| Command::Account(AccountRequest::SweepTrash { reply }))
     }
 
     /// Deletes the account from the server. The saved copy on this device stays:

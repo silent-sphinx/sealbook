@@ -4,10 +4,12 @@
 //! item, what a purge takes with it); this reads them off the model and returns
 //! the writes the outbox queues.
 
+use std::collections::HashSet;
+
 use sealbook_core::{
     trash_expired, trash_hidden, trash_node, trash_purge_plan, trash_restore_plan,
-    trash_restore_write, trash_roots, trash_write, CoreError, CorePayloadKind, PendingWrite,
-    TrashNode, TrashRoot,
+    trash_restore_write, trash_roots, trash_write, CoreContactDraft, CoreError, CorePayloadKind,
+    PendingWrite, TrashNode, TrashRoot,
 };
 
 use crate::edits::Editor;
@@ -75,6 +77,58 @@ pub fn purge(editor: &Editor<'_>, model: &VaultModel, ids: &[String]) -> Vec<Pen
             Some(editor.delete(&id, &entry.content_type))
         })
         .collect()
+}
+
+/// The deletes for everything in the trash past the retention period, and the
+/// edits that unlink the live contacts from any contact going with it.
+///
+/// `model` must be a complete, current read: an item this device is missing
+/// could be inside something about to go. [`crate::VaultHandle::sweep_trash`]
+/// makes that read first.
+pub(crate) fn expired_writes(
+    editor: &Editor<'_>,
+    model: &VaultModel,
+    now_secs: i64,
+) -> Result<Vec<PendingWrite>, CoreError> {
+    let due = expired(model, now_secs);
+    if due.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut writes = purge(editor, model, &due);
+    let gone: HashSet<&str> = writes.iter().map(|write| write.id.as_str()).collect();
+    let hidden = hidden(model);
+    let mut unlinks = Vec::new();
+    for card in model.contacts() {
+        // A card from a newer build cannot be rewritten, and must not hold up the rest.
+        if !card.readable || gone.contains(card.id.as_str()) || hidden.contains(&card.id) {
+            continue;
+        }
+        if let Some(draft) = without_links_to(card.draft(), &gone) {
+            unlinks.push(editor.contact(&card.id, &draft)?);
+        }
+    }
+    writes.extend(unlinks);
+    Ok(writes)
+}
+
+/// `draft` without its links to any of `gone`, or `None` when it has none.
+fn without_links_to(mut draft: CoreContactDraft, gone: &HashSet<&str>) -> Option<CoreContactDraft> {
+    let profile = draft.profile.as_mut()?;
+    let mut changed = false;
+    for links in [
+        &mut profile.family,
+        &mut profile.friends,
+        &mut profile.colleagues,
+    ] {
+        let before = links.len();
+        links.retain(|link| {
+            link.contact_id
+                .as_deref()
+                .is_none_or(|id| !gone.contains(id))
+        });
+        changed |= links.len() != before;
+    }
+    changed.then_some(draft)
 }
 
 fn trash_target<'a>(model: &'a VaultModel, id: &str) -> Option<&'a crate::model::Entry> {

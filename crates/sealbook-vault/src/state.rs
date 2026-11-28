@@ -3,6 +3,7 @@
 //! on the network, so an edit is queued, saved and shown before the server hears
 //! of it.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use sealbook_client::LocalState;
@@ -28,6 +29,7 @@ use crate::net::{NetCommand, NetWorker};
 use crate::store::{
     self, AccountEntry, Identity, Store, StoreError, DEVICE_RECORD, OUTBOX_RECORD, VAULT_RECORD,
 };
+use crate::trash;
 use crate::{
     Command, EditContext, EventSink, KeyChange, KeyChanged, SyncStatus, VaultConfig, VaultError,
     VaultEvent,
@@ -74,6 +76,10 @@ pub(crate) enum NetReport {
     SignInNeeded,
     RotationOwed {
         upgrade: bool,
+    },
+    /// The model was just read whole: queue the deletes for expired trash.
+    SweepTrash {
+        reply: oneshot::Sender<Result<usize, VaultError>>,
     },
     /// Edits are held back while a key change runs.
     Block(bool),
@@ -469,6 +475,21 @@ impl Actor {
         Ok(changes)
     }
 
+    /// Chosen here rather than by the NetWorker, so an item restored on this
+    /// device while the vault was being read is seen and kept.
+    fn sweep_trash(&mut self) -> Result<usize, VaultError> {
+        let purged = Arc::new(AtomicUsize::new(0));
+        let count = Arc::clone(&purged);
+        let now_secs = jiff::Timestamp::now().as_second();
+        self.edit(Box::new(move |ctx| {
+            let writes = trash::expired_writes(&ctx.editor, ctx.model, now_secs)?;
+            let deletes = writes.iter().filter(|write| write.tombstone).count();
+            count.store(deletes, Ordering::Relaxed);
+            Ok(writes)
+        }))?;
+        Ok(purged.load(Ordering::Relaxed))
+    }
+
     fn key_change(
         &mut self,
         change: KeyChange,
@@ -557,6 +578,9 @@ impl Actor {
                     }
                 }
                 self.emit(VaultEvent::RotationOwed { upgrade });
+            }
+            NetReport::SweepTrash { reply } => {
+                let _ = reply.send(self.sweep_trash());
             }
             NetReport::Block(on) => {
                 if let Some(session) = self.session.as_mut() {

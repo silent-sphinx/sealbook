@@ -7,9 +7,13 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use sealbook_client::{LocalState, PairJoinPoll, SealbookClient};
-use sealbook_core::{CoreContactDraft, CoreDeviceKind, CoreNoteDraft};
+use sealbook_core::{
+    trash_restore_write, CoreContactDraft, CoreContactProfile, CoreDeviceKind, CoreNoteDraft,
+    CorePayloadKind, CoreProfilePerson, CoreTaskDraft, CoreTaskListDraft,
+};
 use sealbook_protocol::DEFAULT_NOTEBOOK_ID;
 use sealbook_vault::edits::new_id;
+use sealbook_vault::trash;
 use sealbook_vault::{
     AccountEntry, SyncStatus, Timing, VaultConfig, VaultError, VaultEvent, VaultHandle, VaultModel,
 };
@@ -136,13 +140,17 @@ struct Device {
 }
 
 fn spawn_vault(root: &Path, events: &Events) -> VaultHandle {
+    spawn_timed_vault(root, events, quick())
+}
+
+fn spawn_timed_vault(root: &Path, events: &Events, timing: Timing) -> VaultHandle {
     VaultHandle::spawn(
         VaultConfig {
             data_root: root.to_path_buf(),
             pinned_certificate: sealbook_vault::ServerTrust::default(),
             device_kind: CoreDeviceKind::Unknown,
             device_platform: "test".into(),
-            timing: quick(),
+            timing,
         },
         events.sink(),
     )
@@ -150,9 +158,13 @@ fn spawn_vault(root: &Path, events: &Events) -> VaultHandle {
 
 impl Device {
     async fn adopt(state: LocalState) -> Self {
+        Self::adopt_timed(state, quick()).await
+    }
+
+    async fn adopt_timed(state: LocalState, timing: Timing) -> Self {
         let root = tempfile::tempdir().unwrap();
         let events = Events::default();
-        let handle = spawn_vault(root.path(), &events);
+        let handle = spawn_timed_vault(root.path(), &events, timing);
         let account = handle
             .adopt(state, PASSWORD.into())
             .await
@@ -771,4 +783,174 @@ async fn an_uploaded_attachment_downloads_from_the_cache_and_from_the_server() {
         data
     );
     assert!(cache_dir.exists(), "and the download is cached again");
+}
+
+/// A stamp far past the retention period.
+const LONG_AGO: &str = "2020-01-01T00:00:00Z";
+
+/// Adds a card and puts it in the trash, stamped `LONG_AGO`.
+async fn add_expired_contact(device: &Device, name: &'static str) -> String {
+    let id = new_id();
+    let add = id.clone();
+    device
+        .handle
+        .edit(move |cx| Ok(vec![cx.editor.contact(&add, &contact(name))?]))
+        .await
+        .unwrap()
+        .unwrap();
+    device.settled().await;
+    let bin = id.clone();
+    device
+        .handle
+        .edit(move |cx| {
+            Ok(trash::trash(&cx.editor, cx.model, &bin, LONG_AGO)?
+                .into_iter()
+                .collect())
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    device.settled().await;
+    id
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_sweep_deletes_what_has_expired_and_unlinks_deleted_contacts() {
+    let server = Server::start().await;
+    let (mut other, state) = register(&server, "sweeper").await;
+    let device = Device::adopt(state).await;
+    device.settled().await;
+
+    let gone = add_expired_contact(&device, "Gone").await;
+    let (list, task, friend, recent) = (new_id(), new_id(), new_id(), new_id());
+    {
+        let (list, task, friend, recent, gone) = (
+            list.clone(),
+            task.clone(),
+            friend.clone(),
+            recent.clone(),
+            gone.clone(),
+        );
+        device
+            .handle
+            .edit(move |cx| {
+                let mut linked = contact("Friend");
+                linked.profile = Some(CoreContactProfile {
+                    family: vec![CoreProfilePerson {
+                        name: "Gone".into(),
+                        contact_id: Some(gone),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                });
+                Ok(vec![
+                    cx.editor.task_list(
+                        &list,
+                        &CoreTaskListDraft {
+                            name: "Old".into(),
+                            ..Default::default()
+                        },
+                    )?,
+                    cx.editor.task(
+                        &task,
+                        &CoreTaskDraft {
+                            title: "Inside".into(),
+                            task_list_id: list.clone(),
+                            ..Default::default()
+                        },
+                    )?,
+                    cx.editor.contact(&friend, &linked)?,
+                    cx.editor.contact(&recent, &contact("Recent"))?,
+                ])
+            })
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    device.settled().await;
+    {
+        let (list, recent) = (list.clone(), recent.clone());
+        device
+            .handle
+            .edit(move |cx| {
+                let mut writes = Vec::new();
+                writes.extend(trash::trash(&cx.editor, cx.model, &list, LONG_AGO)?);
+                writes.extend(trash::trash(&cx.editor, cx.model, &recent, cx.now)?);
+                Ok(writes)
+            })
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    device.settled().await;
+
+    // The list, the task inside it and the one card.
+    assert_eq!(device.handle.sweep_trash().await.unwrap().unwrap(), 3);
+    device.settled().await;
+
+    let model = device.model().await;
+    for id in [&gone, &list, &task] {
+        assert!(model.get(id).is_none(), "{id} should be deleted");
+    }
+    assert!(model.get(&recent).is_some(), "not yet expired");
+    let card = model.contacts().find(|c| c.id == friend).unwrap();
+    assert!(card.profile.iter().all(|profile| profile.family.is_empty()));
+
+    let stored: Vec<String> = other
+        .export_objects()
+        .await
+        .unwrap()
+        .objects
+        .into_iter()
+        .map(|object| object.id.to_string())
+        .collect();
+    for id in [&gone, &list, &task] {
+        assert!(!stored.contains(id), "{id} should be gone from the server");
+    }
+    assert!(stored.contains(&recent));
+    assert_eq!(device.handle.sweep_trash().await.unwrap().unwrap(), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_sweep_keeps_an_item_restored_elsewhere_since_the_last_sync() {
+    let server = Server::start().await;
+    let (mut other, state) = register(&server, "stale").await;
+    // No idle polling, so this device's copy stays behind the server's.
+    let timing = Timing {
+        idle_poll: Duration::from_secs(3600),
+        ..quick()
+    };
+    let device = Device::adopt_timed(state, timing).await;
+    device.settled().await;
+    let id = add_expired_contact(&device, "Back again").await;
+
+    let mut object = other
+        .export_objects()
+        .await
+        .unwrap()
+        .objects
+        .into_iter()
+        .find(|object| object.id.to_string() == id)
+        .unwrap();
+    object.payload = trash_restore_write(CorePayloadKind::Contact, &object.payload, None).unwrap();
+    other.import_objects(&[object]).await.unwrap();
+    assert!(trash::hidden(&*device.model().await).contains(&id));
+
+    assert_eq!(device.handle.sweep_trash().await.unwrap().unwrap(), 0);
+    let model = device.model().await;
+    assert!(model.get(&id).is_some());
+    assert!(!trash::hidden(&model).contains(&id));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_sweep_deletes_nothing_offline() {
+    let mut server = Server::start().await;
+    let (_, state) = register(&server, "offline-sweep").await;
+    let device = Device::adopt(state).await;
+    device.settled().await;
+    let id = add_expired_contact(&device, "Waiting").await;
+
+    server.stop();
+    assert!(device.handle.sweep_trash().await.unwrap().is_err());
+    assert!(device.model().await.get(&id).is_some());
 }
